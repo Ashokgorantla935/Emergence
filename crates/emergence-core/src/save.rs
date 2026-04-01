@@ -135,8 +135,8 @@ pub struct SaveFile {
     pub being_count: u32,
     pub positions: Vec<[f32; 2]>,
     pub velocities: Vec<[f32; 2]>,
-    pub needs: Vec<[f32; 6]>,
-    pub needs_prev: Vec<[f32; 6]>,
+    pub needs: Vec<[f32; 16]>,
+    pub needs_prev: Vec<[f32; 16]>,
     pub emotions: Vec<[f32; 6]>,   // exactly 6 channels (Sawyer constraint 6)
     pub personalities: Vec<[f32; 5]>,
     pub ages: Vec<u32>,
@@ -148,7 +148,7 @@ pub struct SaveFile {
     pub pending_action: Vec<u8>,
     pub pending_context: Vec<u16>,
     pub pending_tick: Vec<u32>,
-    pub pending_needs: Vec<[f32; 6]>,
+    pub pending_needs: Vec<[f32; 16]>,
     pub tool_quality: Vec<f32>,         // renamed from combat_modifier
     pub signal_style: Vec<u8>,          // cultural fingerprint
     pub states: Vec<u8>,

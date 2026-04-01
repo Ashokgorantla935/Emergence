@@ -4,7 +4,7 @@
 
 use emergence_core::being::data::{
     BeingState, Beings, CreatureType, LifePhase,
-    NEED_HUNGER, NEED_SAFETY,
+    MAX_NEEDS, NEED_HUNGER, NEED_SAFETY,
 };
 use wgpu::util::DeviceExt;
 
@@ -265,7 +265,7 @@ fn dominant_emotion(emotions: &[f32; 6]) -> (usize, f32) {
 /// 3. Cloth color alone when no significant emotion.
 fn state_color_and_size(
     being_idx: usize,
-    needs: &[f32; 6],
+    needs: &[f32; MAX_NEEDS],
     emotions: &[f32; 6],
     state: BeingState,
     creature_type: u8,

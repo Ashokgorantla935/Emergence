@@ -18,13 +18,57 @@ pub enum LifePhase {
     Elder,
 }
 
-// Need indices
+/// Maximum theoretical needs (padded for future species)
+pub const MAX_NEEDS: usize = 16;
+
+// Core needs (indices 0-5, all species)
 pub const NEED_HUNGER: usize = 0;
 pub const NEED_WARMTH: usize = 1;
 pub const NEED_SAFETY: usize = 2;
 pub const NEED_BELONGING: usize = 3;
 pub const NEED_PURPOSE: usize = 4;
 pub const NEED_REST: usize = 5;
+
+// Human-only needs (indices 6-7)
+pub const NEED_FOOD_SECURITY: usize = 6;
+pub const NEED_WEALTH: usize = 7;
+
+// Future species needs (reserved, not yet active)
+// pub const NEED_MAGIC: usize = 8;      // Elves
+// pub const NEED_BLOODLUST: usize = 9;  // Orcs
+// pub const NEED_FAITH: usize = 10;     // Priests
+
+/// Bitmask of active needs per species.
+/// Bit i set means need[i] is evaluated for this species.
+pub fn active_needs_mask(creature_type: u8) -> u16 {
+    match CreatureType::from_u8(creature_type) {
+        CreatureType::Human => 0b11111111,  // indices 0-7 active
+        // Fauna: only hunger, safety, rest (indices 0, 2, 5)
+        CreatureType::Wolf | CreatureType::Bear | CreatureType::Hawk => 0b00100101,
+        CreatureType::Deer | CreatureType::Rabbit => 0b00100101,
+        CreatureType::Fish => 0b00100001,  // hunger + rest only
+        CreatureType::Snake => 0b00100001,
+    }
+}
+
+/// Count of active needs for a species (for reward normalization).
+pub fn active_needs_count(creature_type: u8) -> usize {
+    active_needs_mask(creature_type).count_ones() as usize
+}
+
+/// Find the lowest ACTIVE need for a species.
+pub fn lowest_active_need(needs: &[f32; MAX_NEEDS], creature_type: u8) -> (usize, f32) {
+    let mask = active_needs_mask(creature_type);
+    let mut min_idx = 0;
+    let mut min_val = f32::MAX;
+    for i in 0..MAX_NEEDS {
+        if mask & (1 << i) != 0 && needs[i] < min_val {
+            min_val = needs[i];
+            min_idx = i;
+        }
+    }
+    (min_idx, min_val)
+}
 
 // Emotion indices — exactly 6, invariant (Sawyer constraint 6).
 // Save structs and viewer MUST use [f32; 6], never [f32; 8].
@@ -120,8 +164,8 @@ pub fn init_fauna_params(creature_type: u8) -> [f32; 6] {
 pub struct BeingsHot {
     pub positions: Vec<[f32; 2]>,
     pub velocities: Vec<[f32; 2]>,
-    pub needs: Vec<[f32; 6]>,
-    pub needs_prev: Vec<[f32; 6]>,
+    pub needs: Vec<[f32; MAX_NEEDS]>,
+    pub needs_prev: Vec<[f32; MAX_NEEDS]>,
     pub emotions: Vec<[f32; 6]>,
     pub ages: Vec<u32>,
     pub lifespans: Vec<u32>,
@@ -132,7 +176,7 @@ pub struct BeingsHot {
     pub pending_action: Vec<u8>,
     pub pending_context: Vec<u16>,
     pub pending_tick: Vec<u32>,
-    pub pending_needs: Vec<[f32; 6]>,
+    pub pending_needs: Vec<[f32; MAX_NEEDS]>,
     pub tool_quality: Vec<f32>,   // renamed from combat_modifier; 0=bare hands, 1=excellent tool
     pub signal_style: Vec<u8>,    // cultural fingerprint: personality_hash % 8
     pub personalities: Vec<[f32; 5]>,
@@ -238,8 +282,8 @@ impl Beings {
         let idx = self.hot.count;
         self.hot.positions.push(position);
         self.hot.velocities.push([0.0, 0.0]);
-        self.hot.needs.push([1.0; 6]); // fully satisfied
-        self.hot.needs_prev.push([1.0; 6]);
+        self.hot.needs.push([1.0; MAX_NEEDS]); // fully satisfied
+        self.hot.needs_prev.push([1.0; MAX_NEEDS]);
         self.hot.emotions.push([0.0; 6]);
         self.hot.ages.push(0);
         self.hot.lifespans.push(lifespan);
@@ -250,7 +294,7 @@ impl Beings {
         self.hot.pending_action.push(255); // no pending action
         self.hot.pending_context.push(0);
         self.hot.pending_tick.push(0);
-        self.hot.pending_needs.push([1.0; 6]);
+        self.hot.pending_needs.push([1.0; MAX_NEEDS]);
         self.hot.tool_quality.push(0.0);
         // Derive signal_style from personality hash (deterministic, computed once at spawn)
         let style = personality_to_style(&personality);

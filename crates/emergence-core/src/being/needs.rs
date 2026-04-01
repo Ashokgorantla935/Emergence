@@ -45,15 +45,23 @@ pub fn decay_needs(beings: &mut Beings, climate: &Climate) {
         beings.hot.needs[i][NEED_HUNGER] = (beings.hot.needs[i][NEED_HUNGER] - hunger_decay).max(0.0);
 
         if is_human {
-            // Human needs: full set
+            // Human needs: full set (core needs 0-5 + human-only 6-7)
             beings.hot.needs[i][NEED_WARMTH] = (beings.hot.needs[i][NEED_WARMTH] - warmth_decay).max(0.0);
             // Safety: no passive decay (event-driven)
             beings.hot.needs[i][NEED_BELONGING] = (beings.hot.needs[i][NEED_BELONGING] - 0.0005).max(0.0);
             beings.hot.needs[i][NEED_PURPOSE] = (beings.hot.needs[i][NEED_PURPOSE] - 0.0002).max(0.0);
+            // Human-only needs: decay slowly (settlement mechanics will drive them later)
+            beings.hot.needs[i][NEED_FOOD_SECURITY] = (beings.hot.needs[i][NEED_FOOD_SECURITY] - 0.0001).max(0.0);
+            beings.hot.needs[i][NEED_WEALTH] = (beings.hot.needs[i][NEED_WEALTH] - 0.00005).max(0.0);
+            // Indices 8-15: inactive for all species, stay at 1.0 (no decay)
         } else {
             // Fauna: pin social/purpose needs to max — they don't apply to animals.
             beings.hot.needs[i][NEED_BELONGING] = 1.0;
             beings.hot.needs[i][NEED_PURPOSE] = 1.0;
+            // Pin all human-only and future needs to 1.0 for fauna (inactive via bitmask)
+            for j in NEED_FOOD_SECURITY..MAX_NEEDS {
+                beings.hot.needs[i][j] = 1.0;
+            }
             // Bears manage warmth; other fauna don't.
             if ct != CreatureType::Bear as u8 {
                 beings.hot.needs[i][NEED_WARMTH] = 1.0;

@@ -82,11 +82,12 @@ pub fn update_emotions_from_needs(beings: &mut Beings) {
         beings.hot.emotions[i][EMO_CURIOSITY] =
             (beings.hot.emotions[i][EMO_CURIOSITY] + curiosity_pressure).min(1.0);
 
-        // --- CONTENTMENT: rises when ALL needs are well-satisfied ---
+        // --- CONTENTMENT: rises when ALL active needs are well-satisfied ---
         let contentment_pressure = {
-            let min_need = needs.iter().copied().fold(f32::MAX, f32::min);
-            if min_need > 0.5 {
-                (min_need - 0.5) * 0.014
+            let ct = beings.hot.creature_type[i];
+            let (_, min_active) = super::data::lowest_active_need(needs, ct);
+            if min_active > 0.5 {
+                (min_active - 0.5) * 0.014
             } else {
                 0.0
             }

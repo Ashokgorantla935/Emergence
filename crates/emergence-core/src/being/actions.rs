@@ -1180,7 +1180,7 @@ fn logistic(x: f32, k: f32, x0: f32) -> f32 {
 ///
 /// Input needs are in [0,1] where 1.0 = fully satisfied, 0.0 = critical.
 /// We pass `1.0 - need` as x to get urgency (high urgency when need is low).
-fn logistic_need_score(action: Action, needs: &[f32; 6]) -> f32 {
+fn logistic_need_score(action: Action, needs: &[f32; MAX_NEEDS]) -> f32 {
     // Convenience: urgency = how depleted each need is (0 = full, 1 = empty)
     let hunger_urgency   = 1.0 - needs[NEED_HUNGER];
     let warmth_urgency   = 1.0 - needs[NEED_WARMTH];
@@ -1708,7 +1708,11 @@ mod tests {
         beings.spawn(spawn_pos, personality, 100000, [u32::MAX, u32::MAX]);
 
         // Set hunger very low, all others high
-        beings.hot.needs[0] = [0.2, 1.0, 1.0, 1.0, 1.0, 1.0];
+        beings.hot.needs[0] = {
+            let mut n = [1.0f32; MAX_NEEDS];
+            n[NEED_HUNGER] = 0.2;
+            n
+        };
 
         // Deposit food trail signal nearby
         signals.deposit(SignalChannel::FoodTrail, spawn_pos[0] as u32 + 3, spawn_pos[1] as u32, 3.0);

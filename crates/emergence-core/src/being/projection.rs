@@ -1,11 +1,13 @@
 use super::actions::Action;
+use super::data::MAX_NEEDS;
 use super::memory::CausalMemoryRing;
 
 /// Internal projection: simulate 50 ticks of need decay under an assumed action.
 /// Returns a bonus [0.0, 0.3] based on projected improvement.
+/// Only core needs (indices 0-5) are projected; extended needs are untouched.
 pub fn projection_bonus(
     action: Action,
-    needs: &[f32; 6],
+    needs: &[f32; MAX_NEEDS],
     memories: &CausalMemoryRing,
     context_hash: u16,
 ) -> f32 {

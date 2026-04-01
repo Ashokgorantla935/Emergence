@@ -224,6 +224,7 @@ pub fn tick(world: &mut World) {
                     action.action as u8,
                     &needs_before,
                     &needs_after,
+                    world.beings.hot.creature_type[i],
                 );
             }
 
@@ -276,9 +277,10 @@ pub fn tick(world: &mut World) {
                     &new_brain_input,
                 );
 
-                // Reward: improvement in minimum need
-                let min_before = needs_before.iter().copied().fold(f32::MAX, f32::min);
-                let min_after = needs_after.iter().copied().fold(f32::MAX, f32::min);
+                // Reward: improvement in lowest ACTIVE need for this species
+                let ct = world.beings.hot.creature_type[i];
+                let (_, min_before) = crate::being::data::lowest_active_need(&needs_before, ct);
+                let (_, min_after) = crate::being::data::lowest_active_need(&needs_after, ct);
                 let base_reward = min_after - min_before;
 
                 // Criminal penalty: if Crime signal is at this being's position and they just
@@ -804,10 +806,10 @@ fn process_births(world: &mut World) {
     }
 }
 
-fn find_lowest_need_idx(needs: &[f32; 6]) -> u8 {
+fn find_lowest_need_idx(needs: &[f32; crate::being::data::MAX_NEEDS]) -> u8 {
     let mut idx = 0;
     let mut min_val = f32::MAX;
-    for i in 0..6 {
+    for i in 0..crate::being::data::MAX_NEEDS {
         if needs[i] < min_val {
             min_val = needs[i];
             idx = i;

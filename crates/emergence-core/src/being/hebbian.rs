@@ -3,7 +3,7 @@
 ///
 /// Rule: Δparam[i] = η * activity[i] * reward
 ///   where activity[i] = 1.0 if param[i] influenced the chosen action, else 0.0
-///   reward = max(0, min_need_new - min_need_old)  (only positive outcomes reinforce)
+///   reward = max(0, min_active_need_new - min_active_need_old)  (only positive outcomes reinforce)
 ///   η = 0.005 (learning rate)
 ///
 /// Homeostatic normalization: after update, L2-normalize params to prevent runaway.
@@ -11,14 +11,15 @@
 pub fn hebbian_update(
     fauna_params: &mut [f32; 6],
     chosen_action: u8,
-    needs_before: &[f32; 6],
-    needs_after: &[f32; 6],
+    needs_before: &[f32; super::data::MAX_NEEDS],
+    needs_after: &[f32; super::data::MAX_NEEDS],
+    creature_type: u8,
 ) {
     const ETA: f32 = 0.005;
 
-    // Reward = improvement in worst-off need (only positive → reinforce)
-    let min_before = needs_before.iter().copied().fold(f32::MAX, f32::min);
-    let min_after  = needs_after.iter().copied().fold(f32::MAX, f32::min);
+    // Reward = improvement in worst-off active need (only positive → reinforce)
+    let (_, min_before) = super::data::lowest_active_need(needs_before, creature_type);
+    let (_, min_after)  = super::data::lowest_active_need(needs_after, creature_type);
     let reward = (min_after - min_before).max(0.0);
 
     if reward < 1e-6 {
@@ -67,22 +68,28 @@ pub fn hebbian_update(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::data::MAX_NEEDS;
+
+    // Wolf creature_type = 1; uses mask 0b00100101 (hunger=0, safety=2, rest=5)
+    const WOLF: u8 = 1;
 
     #[test]
     fn test_hebbian_no_update_on_no_reward() {
         let mut params = [1.0f32; 6];
         let original = params;
-        let needs = [0.5f32; 6];
-        hebbian_update(&mut params, 3, &needs, &needs); // same needs → no reward
+        let needs = [0.5f32; MAX_NEEDS];
+        hebbian_update(&mut params, 3, &needs, &needs, WOLF); // same needs → no reward
         assert_eq!(params, original);
     }
 
     #[test]
     fn test_hebbian_flee_strengthens_flee_param() {
         let mut params = [1.0f32; 6];
-        let needs_before = [0.3f32; 6];
-        let needs_after = [0.4f32; 6]; // improvement
-        hebbian_update(&mut params, 3, &needs_before, &needs_after);
+        let mut needs_before = [0.5f32; MAX_NEEDS];
+        let mut needs_after  = [0.5f32; MAX_NEEDS];
+        needs_before[0] = 0.3; // hunger active for wolf
+        needs_after[0]  = 0.4; // hunger improves → positive reward
+        hebbian_update(&mut params, 3, &needs_before, &needs_after, WOLF);
         // flee_weight (index 2) should be larger than all others after normalization
         assert!(params[2] > params[0], "flee_weight should be dominant over sep");
         assert!(params[2] > params[5], "flee_weight should be dominant over wander");
@@ -95,11 +102,13 @@ mod tests {
     #[test]
     fn test_hebbian_params_stay_in_bounds() {
         let mut params = [4.9f32; 6];
-        let needs_before = [0.1f32; 6];
-        let needs_after = [0.9f32; 6]; // large reward
+        let mut needs_before = [0.5f32; MAX_NEEDS];
+        let mut needs_after  = [0.5f32; MAX_NEEDS];
+        needs_before[0] = 0.1; // hunger active for wolf, low
+        needs_after[0]  = 0.9; // large improvement → large reward
         // Run many updates
         for _ in 0..100 {
-            hebbian_update(&mut params, 10, &needs_before, &needs_after);
+            hebbian_update(&mut params, 10, &needs_before, &needs_after, WOLF);
         }
         for &p in params.iter() {
             assert!(p >= 0.05 && p <= 5.0, "param out of bounds: {}", p);

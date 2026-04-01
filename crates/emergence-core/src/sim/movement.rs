@@ -748,16 +748,40 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
     let is_water = world.terrain.is_water(ncx.min(world.terrain.width - 1), ncy.min(world.terrain.height - 1));
     let is_fish = world.beings.hot.creature_type[being_index] == CreatureType::Fish as u8;
 
+    const MAX_VEL: f32 = 0.5; // hard per-axis cap — prevents MLP brain explosions
+
     // Fish move in water; all others avoid water
     if is_fish {
         if is_water {
+            let old_pos = world.beings.hot.positions[being_index];
             world.beings.hot.positions[being_index] = [new_x, new_y];
-            world.beings.hot.velocities[being_index] = [nx * clamped_dist, ny * clamped_dist];
+            let vx = (nx * clamped_dist).clamp(-MAX_VEL, MAX_VEL);
+            let vy = (ny * clamped_dist).clamp(-MAX_VEL, MAX_VEL);
+            // Teleport guard
+            let dx = new_x - old_pos[0];
+            let dy = new_y - old_pos[1];
+            if dx.abs() > MAX_VEL || dy.abs() > MAX_VEL {
+                world.beings.hot.positions[being_index] = old_pos;
+                world.beings.hot.velocities[being_index] = [0.0, 0.0];
+            } else {
+                world.beings.hot.velocities[being_index] = [vx, vy];
+            }
         }
         // Fish stay in water — don't move to land
     } else if !is_water {
+        let old_pos = world.beings.hot.positions[being_index];
         world.beings.hot.positions[being_index] = [new_x, new_y];
-        world.beings.hot.velocities[being_index] = [nx * clamped_dist, ny * clamped_dist];
+        let vx = (nx * clamped_dist).clamp(-MAX_VEL, MAX_VEL);
+        let vy = (ny * clamped_dist).clamp(-MAX_VEL, MAX_VEL);
+        // Teleport guard
+        let dx = new_x - old_pos[0];
+        let dy = new_y - old_pos[1];
+        if dx.abs() > MAX_VEL || dy.abs() > MAX_VEL {
+            world.beings.hot.positions[being_index] = old_pos;
+            world.beings.hot.velocities[being_index] = [0.0, 0.0];
+        } else {
+            world.beings.hot.velocities[being_index] = [vx, vy];
+        }
     }
 }
 

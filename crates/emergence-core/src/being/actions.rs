@@ -235,12 +235,14 @@ pub fn score_actions(
     // Fauna continue through the heuristic path below.
     let creature_type = beings.hot.creature_type[being_index];
     if creature_type == CreatureType::Human as u8 {
-        // Assemble 14-float input: [needs[0..6], signal_values[0..7], light]
+        // Assemble 14-float input: [needs[0..6], signal_values[0..7], elevation]
+        // elevation replaces light: beings must sense terrain to avoid walking into water.
+        let elev = terrain.elevation_at(cx.min(terrain.width - 1), cy.min(terrain.height - 1));
         let mut brain_input: [f32; 14] = [
             needs[0], needs[1], needs[2], needs[3], needs[4], needs[5],
             local.values[0], local.values[1], local.values[2],
             local.values[3], local.values[4], local.values[5], local.values[6],
-            climate.light_level(),
+            elev,
         ];
 
         // Apply meme bias: active memes shift perceived sensory input
@@ -254,7 +256,7 @@ pub fn score_actions(
         // Guard behavior: bold humans detect Crime signal and prioritize hunting the criminal.
         // Read Crime separately (channel 7, not in LocalSignals cache which only holds 7 channels).
         let crime_at_pos = signals.read(SignalChannel::Crime, cx, cy);
-        if crime_at_pos > 0.1 && beings.hot.personalities[being_index][TRAIT_BOLD] > 0.3 {
+        if crime_at_pos > 2.0 && beings.hot.personalities[being_index][TRAIT_BOLD] > 0.8 {
             q_values[Action::Hunt as usize] += 20.0;
         }
 
@@ -266,7 +268,7 @@ pub fn score_actions(
         let hunger = beings.hot.needs[being_index][NEED_HUNGER];
         let safety = beings.hot.needs[being_index][NEED_SAFETY];
 
-        let mut hunt_justified = crime_at_pos > 0.1; // guard-behavior already boosted q_values above
+        let mut hunt_justified = crime_at_pos > 2.0 && beings.hot.personalities[being_index][TRAIT_BOLD] > 0.8; // only bold guards near crime source
 
         // Precondition 1: Desperation — starving and a nearby human is carrying food
         if !hunt_justified && hunger < 0.25 {
@@ -378,8 +380,8 @@ pub fn score_actions(
                 }
             }
             Action::Hunt => {
-                // If Crime signal detected, chase the crime gradient (guard behavior)
-                if crime_at_pos > 0.1 {
+                // If Crime signal detected, chase the crime gradient (guard behavior — bold guards only, near source)
+                if crime_at_pos > 2.0 && beings.hot.personalities[being_index][TRAIT_BOLD] > 0.8 {
                     let (gdx, gdy) = signals.gradient(SignalChannel::Crime, pos[0], pos[1], radius * 2.0);
                     if gdx.abs() > 0.01 || gdy.abs() > 0.01 {
                         target_pos = Some([pos[0] + gdx * radius, pos[1] + gdy * radius]);

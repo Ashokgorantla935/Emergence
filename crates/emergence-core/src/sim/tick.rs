@@ -664,8 +664,9 @@ fn apply_weather_effects(world: &mut World) {
                         let dx = pos[0] - center_x;
                         let dy = pos[1] - center_y;
                         let len = (dx * dx + dy * dy).sqrt().max(1.0);
-                        world.beings.hot.velocities[i][0] += dx / len * 0.1;
-                        world.beings.hot.velocities[i][1] += dy / len * 0.1;
+                        const MAX_VEL: f32 = 0.5;
+                        world.beings.hot.velocities[i][0] = (world.beings.hot.velocities[i][0] + dx / len * 0.1).clamp(-MAX_VEL, MAX_VEL);
+                        world.beings.hot.velocities[i][1] = (world.beings.hot.velocities[i][1] + dy / len * 0.1).clamp(-MAX_VEL, MAX_VEL);
                     }
                     trigger_emotion(&mut world.beings, i, EMO_FEAR, 0.3);
                 }

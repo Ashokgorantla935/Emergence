@@ -55,35 +55,42 @@ impl Inspector {
         idx: usize,
         _tick: u32,
     ) {
-        let state = beings.states[idx];
         let age = beings.ages[idx];
         let lifespan = beings.lifespans[idx];
-        let phase = beings.life_phase(idx);
 
-        // Header: name, age, creature type
+        // Header: name prominently
         let ct = beings::creature_type_name(beings.creature_type[idx]);
-        ui.heading(format!("Being #{idx} [{ct}]"));
+        let name = if idx < beings.names.len() && !beings.names[idx].is_empty() {
+            beings.names[idx].clone()
+        } else {
+            emergence_core::being::names::generate_name(&mut fastrand::Rng::with_seed(idx as u64))
+        };
+        ui.heading(&name);
+
+        // Age in human-readable form
         const TICKS_PER_YEAR: f32 = 28800.0;
-        let age_years = age as f32 / TICKS_PER_YEAR;
-        let lifespan_years = lifespan as f32 / TICKS_PER_YEAR;
-        ui.label(format!(
-            "{:?} | Age: {:.1}y / {:.1}y | {:?}",
-            phase, age_years, lifespan_years, state
-        ));
+        let age_years = (age as f32 / TICKS_PER_YEAR) as u32;
+        let lifespan_years = (lifespan as f32 / TICKS_PER_YEAR) as u32;
+        let age_label = match age_years {
+            0 => "Newborn".to_string(),
+            1 => "1 year old".to_string(),
+            n => format!("{n} years old"),
+        };
+        ui.label(format!("{ct} — {age_label} (lives ~{lifespan_years}y)"));
 
-        // Current action
-        let action_str = action_name(beings.pending_action[idx]);
-        ui.colored_label(egui::Color32::from_rgb(100, 200, 255), format!("Action: {action_str}"));
+        // Current action as plain English
+        let action_str = action_readable(beings.pending_action[idx]);
+        ui.colored_label(egui::Color32::from_rgb(100, 200, 255), action_str);
 
-        // Dominant emotion badge — visible at a glance without opening emotion bars
+        // Dominant emotion as single text label
         let emo_names_short = ["Fear", "Joy", "Curiosity", "Anger", "Grief", "Content"];
         let emo_colors_badge = [
-            egui::Color32::from_rgb(140, 60, 210),  // Fear — purple
-            egui::Color32::from_rgb(255, 220, 30),  // Joy — yellow
-            egui::Color32::from_rgb(255, 140, 20),  // Curiosity — orange
-            egui::Color32::from_rgb(220, 40, 40),   // Anger — red
-            egui::Color32::from_rgb(60, 90, 220),   // Grief — blue
-            egui::Color32::from_rgb(50, 200, 70),   // Contentment — green
+            egui::Color32::from_rgb(140, 60, 210),  // Fear
+            egui::Color32::from_rgb(255, 220, 30),  // Joy
+            egui::Color32::from_rgb(255, 140, 20),  // Curiosity
+            egui::Color32::from_rgb(220, 40, 40),   // Anger
+            egui::Color32::from_rgb(60, 90, 220),   // Grief
+            egui::Color32::from_rgb(50, 200, 70),   // Contentment
         ];
         let emos = &beings.emotions[idx];
         let (dom_emo_idx, dom_emo_val) = {
@@ -95,127 +102,100 @@ impl Inspector {
         if dom_emo_val > 0.05 {
             ui.colored_label(
                 emo_colors_badge[dom_emo_idx],
-                format!("Feeling: {} ({:.0}%)", emo_names_short[dom_emo_idx], dom_emo_val * 100.0),
+                format!("Feeling {}", emo_names_short[dom_emo_idx].to_lowercase()),
             );
         } else {
-            ui.label("Feeling: Neutral");
+            ui.label("Feeling neutral");
         }
-        if self.follow {
-            if ui.button("Unfollow").clicked() {
+
+        ui.horizontal(|ui| {
+            if self.follow {
+                if ui.button("Unfollow").clicked() {
+                    self.follow = false;
+                }
+            } else {
+                if ui.button("Follow").clicked() {
+                    self.follow = true;
+                }
+            }
+            if ui.button("Deselect").clicked() {
+                self.selected_being = None;
                 self.follow = false;
+                return;
             }
-        } else {
-            if ui.button("Follow").clicked() {
-                self.follow = true;
-            }
-        }
-        if ui.button("Deselect").clicked() {
-            self.selected_being = None;
-            self.follow = false;
-            return;
-        }
+        });
 
         ui.separator();
 
-        // Personality traits
-        ui.label("Personality");
-        let trait_names = ["Bold", "Social", "Curious", "Generous", "Diurnal"];
-        for (i, name) in trait_names.iter().enumerate() {
-            let val = beings.personalities[idx][i];
-            ui.horizontal(|ui| {
-                ui.label(format!("{name}:"));
-                let bar = egui::ProgressBar::new((val + 1.0) / 2.0)
-                    .text(format!("{val:.2}"));
-                ui.add(bar);
-            });
-        }
-
-        ui.separator();
-
-        // Needs
+        // Needs as simple labels (no raw decimals)
         ui.label("Needs");
         let need_names = ["Hunger", "Warmth", "Safety", "Belonging", "Purpose", "Rest"];
-        for (i, name) in need_names.iter().enumerate() {
+        for (i, &name) in need_names.iter().enumerate() {
             let val = beings.needs[idx][i];
-            let prev = beings.needs_prev[idx][i];
-            let delta = val - prev;
-            let arrow = if delta > 0.001 {
-                " ^"
-            } else if delta < -0.001 {
-                " v"
-            } else {
-                ""
-            };
-            ui.horizontal(|ui| {
-                let color = if val < 0.3 {
-                    egui::Color32::RED
-                } else if val < 0.6 {
-                    egui::Color32::YELLOW
-                } else {
-                    egui::Color32::GREEN
-                };
-                ui.colored_label(color, format!("{name}: {val:.2}{arrow}"));
-                ui.add(egui::ProgressBar::new(val));
-            });
+            let (label, color) = need_label(name, val);
+            ui.colored_label(color, label);
         }
 
         ui.separator();
 
-        // Emotions — all 6 bars, always visible
-        ui.label("Emotions");
-        let emo_names = ["Fear", "Joy", "Curiosity", "Anger", "Grief", "Content"];
-        let emo_colors = [
-            egui::Color32::from_rgb(140, 60, 210),  // Fear — purple
-            egui::Color32::from_rgb(255, 220, 30),  // Joy — yellow
-            egui::Color32::from_rgb(255, 140, 20),  // Curiosity — orange
-            egui::Color32::from_rgb(220, 40, 40),   // Anger — red
-            egui::Color32::from_rgb(60, 90, 220),   // Grief — blue
-            egui::Color32::from_rgb(50, 200, 70),   // Contentment — green
-        ];
-        for (i, name) in emo_names.iter().enumerate() {
-            let val = beings.emotions[idx][i];
-            let is_dominant = i == dom_emo_idx && dom_emo_val > 0.1;
-            let label = if is_dominant {
-                format!("{name}: {val:.2} *")
-            } else {
-                format!("{name}: {val:.2}")
-            };
-            ui.horizontal(|ui| {
-                ui.colored_label(emo_colors[i], label);
-                ui.add(egui::ProgressBar::new(val));
-            });
-        }
-
-        ui.separator();
-
-        // Carrying
-        let carry = beings.carry[idx];
-        let cap = beings.carry_capacity(idx);
-        ui.label(format!("Carry: {:.2} / {cap:.1}", carry[0]));
-
-        ui.separator();
-
-        // Family section
+        // Family — human-readable
         ui.label("Family");
         let parents = beings.parent_ids[idx];
         let has_parents = parents[0] != u32::MAX || parents[1] != u32::MAX;
         if has_parents {
-            ui.horizontal(|ui| {
-                if parents[0] != u32::MAX {
-                    if ui.link(format!("Parent A: #{}", parents[0])).clicked() {
-                        self.selected_being = Some(parents[0] as usize);
-                    }
+            let pa_name = if parents[0] != u32::MAX {
+                let pid = parents[0] as usize;
+                if pid < beings.names.len() && !beings.names[pid].is_empty() {
+                    beings.names[pid].clone()
+                } else {
+                    format!("#{}", parents[0])
                 }
-                if parents[1] != u32::MAX {
-                    if ui.link(format!("Parent B: #{}", parents[1])).clicked() {
-                        self.selected_being = Some(parents[1] as usize);
-                    }
+            } else {
+                String::new()
+            };
+            let pb_name = if parents[1] != u32::MAX {
+                let pid = parents[1] as usize;
+                if pid < beings.names.len() && !beings.names[pid].is_empty() {
+                    beings.names[pid].clone()
+                } else {
+                    format!("#{}", parents[1])
                 }
-            });
+            } else {
+                String::new()
+            };
+
+            match (parents[0] != u32::MAX, parents[1] != u32::MAX) {
+                (true, true) => {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Child of {} and", pa_name));
+                        if ui.link(&pb_name).clicked() {
+                            self.selected_being = Some(parents[1] as usize);
+                        }
+                    });
+                }
+                (true, false) => {
+                    ui.horizontal(|ui| {
+                        ui.label("Child of");
+                        if ui.link(&pa_name).clicked() {
+                            self.selected_being = Some(parents[0] as usize);
+                        }
+                    });
+                }
+                (false, true) => {
+                    ui.horizontal(|ui| {
+                        ui.label("Child of");
+                        if ui.link(&pb_name).clicked() {
+                            self.selected_being = Some(parents[1] as usize);
+                        }
+                    });
+                }
+                _ => {}
+            }
         } else {
             ui.label("No known parents");
         }
-        // Children: scan event log for Reproduced events where this being is a parent
+
+        // Children count
         let child_ids: Vec<u32> = events
             .events
             .iter()
@@ -226,92 +206,19 @@ impl Inspector {
             .map(|e| e.target_id)
             .take(10)
             .collect();
-        ui.label(format!("Children: {}", child_ids.len()));
-        ui.horizontal_wrapped(|ui| {
-            for cid in child_ids.iter().take(5) {
-                if ui.link(format!("#{cid}")).clicked() {
-                    self.selected_being = Some(*cid as usize);
-                }
-            }
-        });
 
-        ui.separator();
-
-        // Relationships (top 10 by warmth)
-        ui.label("Relationships");
-        let rels = &beings.relationships[idx];
-        let mut sorted: Vec<usize> = (0..rels.count as usize).collect();
-        sorted.sort_by(|&a, &b| {
-            rels.slots[b].warmth.partial_cmp(&rels.slots[a].warmth).unwrap()
-        });
-        for &si in sorted.iter().take(10) {
-            let imp = &rels.slots[si];
-            let color = if imp.warmth > 0.3 {
-                egui::Color32::GREEN
-            } else if imp.warmth < -0.3 {
-                egui::Color32::RED
-            } else {
-                egui::Color32::GRAY
-            };
-            if ui.colored_label(
-                color,
-                format!(
-                    "#{}: W:{:.1} T:{:.1} D:{:.1}",
-                    imp.target_id, imp.warmth, imp.trust, imp.debt
-                ),
-            ).clicked() {
-                self.selected_being = Some(imp.target_id as usize);
-            }
+        if !child_ids.is_empty() {
+            ui.label(format!("Has {} children", child_ids.len()));
         }
 
         ui.separator();
 
-        // Causal memory (last 10 entries)
-        ui.label("Causal Memory");
-        let mem = &beings.causal_memories[idx];
-        let count = mem.len as usize;
-        for i in 0..count.min(10) {
-            let entry_idx = (mem.head as usize + 32 - count + i) % 32;
-            let entry = &mem.entries[entry_idx];
-            let act = action_name(entry.action);
-            let delta_color = if entry.outcome_delta >= 0.0 {
-                egui::Color32::GREEN
-            } else {
-                egui::Color32::RED
-            };
-            ui.horizontal(|ui| {
-                ui.label(format!("{act}"));
-                ui.colored_label(
-                    delta_color,
-                    format!("{:+.2} (conf {:.1})", entry.outcome_delta, entry.confidence),
-                );
-            });
-        }
-
-        ui.separator();
-
-        // Decision trace (last 10)
-        ui.label("Decision Trace");
-        let traces = beings.traces[idx].as_ref().map(|t| t.recent(10)).unwrap_or_default();
-        for trace in traces {
-            let action_name = action_name(trace.chosen_action);
-            let score: f32 = trace.chosen_score.to_f32();
-            ui.label(format!(
-                "T{}: {} ({:.2})",
-                trace.tick, action_name, score
-            ));
-        }
-
-        ui.separator();
-
-        // Life history from events
-        ui.label("Life Events");
+        // Life history from events (readable, last 8)
+        ui.label("Life Story");
         let being_events = events.events_for_being(idx as u32);
-        for evt in being_events.iter().rev().take(10) {
-            ui.label(format!(
-                "T{}: {:?} -> #{}",
-                evt.tick, evt.event_type, evt.target_id
-            ));
+        for evt in being_events.iter().rev().take(8) {
+            let desc = life_event_readable(evt, beings);
+            ui.label(desc);
         }
     }
 
@@ -341,22 +248,108 @@ impl Inspector {
     }
 }
 
-fn action_name(action: u8) -> &'static str {
+fn action_readable(action: u8) -> &'static str {
     match action {
-        0 => "Wander",
-        1 => "SeekFood",
-        2 => "SeekShelter",
-        3 => "Flee",
-        4 => "Approach",
-        5 => "Bond",
-        6 => "Share",
-        7 => "TakeFood",
-        8 => "Explore",
-        9 => "Sleep",
-        10 => "Cluster",
-        11 => "Mourn",
-        12 => "Avoid",
-        13 => "PickUp",
+        0 => "Wandering",
+        1 => "Seeking food",
+        2 => "Seeking shelter",
+        3 => "Fleeing danger",
+        4 => "Approaching someone",
+        5 => "Forming a bond",
+        6 => "Sharing food",
+        7 => "Taking food",
+        8 => "Exploring",
+        9 => "Sleeping",
+        10 => "Gathering with others",
+        11 => "Mourning",
+        12 => "Avoiding someone",
+        13 => "Picking something up",
         _ => "Unknown",
+    }
+}
+
+fn need_label(need: &str, val: f32) -> (String, egui::Color32) {
+    match need {
+        "Hunger" => {
+            if val > 0.7 {
+                ("Well fed".to_string(), egui::Color32::GREEN)
+            } else if val >= 0.4 {
+                ("Getting hungry".to_string(), egui::Color32::YELLOW)
+            } else {
+                ("STARVING".to_string(), egui::Color32::RED)
+            }
+        }
+        "Warmth" => {
+            if val > 0.7 {
+                ("Warm".to_string(), egui::Color32::GREEN)
+            } else if val >= 0.4 {
+                ("Cold".to_string(), egui::Color32::YELLOW)
+            } else {
+                ("FREEZING".to_string(), egui::Color32::RED)
+            }
+        }
+        "Safety" => {
+            if val > 0.7 {
+                ("Safe".to_string(), egui::Color32::GREEN)
+            } else if val >= 0.4 {
+                ("Uneasy".to_string(), egui::Color32::YELLOW)
+            } else {
+                ("IN DANGER".to_string(), egui::Color32::RED)
+            }
+        }
+        "Belonging" => {
+            if val > 0.7 {
+                ("Connected".to_string(), egui::Color32::GREEN)
+            } else if val >= 0.4 {
+                ("Lonely".to_string(), egui::Color32::YELLOW)
+            } else {
+                ("ISOLATED".to_string(), egui::Color32::RED)
+            }
+        }
+        "Purpose" => {
+            if val > 0.7 {
+                ("Purposeful".to_string(), egui::Color32::GREEN)
+            } else if val >= 0.4 {
+                ("Drifting".to_string(), egui::Color32::YELLOW)
+            } else {
+                ("LOST".to_string(), egui::Color32::RED)
+            }
+        }
+        "Rest" => {
+            if val > 0.7 {
+                ("Rested".to_string(), egui::Color32::GREEN)
+            } else if val >= 0.4 {
+                ("Tired".to_string(), egui::Color32::YELLOW)
+            } else {
+                ("EXHAUSTED".to_string(), egui::Color32::RED)
+            }
+        }
+        _ => (format!("{need}: {val:.2}"), egui::Color32::GRAY),
+    }
+}
+
+fn life_event_readable(evt: &emergence_core::sim::world_state::Event, beings: &Beings) -> String {
+    use emergence_core::sim::world_state::EventType;
+    let target_name = if evt.target_id != u32::MAX && (evt.target_id as usize) < beings.names.len()
+        && !beings.names[evt.target_id as usize].is_empty()
+    {
+        beings.names[evt.target_id as usize].clone()
+    } else if evt.target_id != u32::MAX {
+        format!("#{}", evt.target_id)
+    } else {
+        String::new()
+    };
+
+    match evt.event_type {
+        EventType::Born => "Was born".to_string(),
+        EventType::Died => "Died".to_string(),
+        EventType::Bonded => format!("Bonded with {}", target_name),
+        EventType::SharedFood => format!("Shared food with {}", target_name),
+        EventType::StoleFood => format!("Stole from {}", target_name),
+        EventType::Reproduced => format!("Had a child with {}", target_name),
+        EventType::Killed => format!("Killed {}", target_name),
+        EventType::SettlementFormed => "Founded a settlement".to_string(),
+        EventType::LeaderElected => "Became a leader".to_string(),
+        _ => format!("{:?}", evt.event_type),
     }
 }

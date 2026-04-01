@@ -57,6 +57,9 @@ pub struct AudioContext {
     pub war_nearby:   bool,
     /// Biome under the camera center
     pub biome: BiomeAmbience,
+    /// Camera zoom level: 0.0 = fully zoomed out (far), 1.0 = fully zoomed in (close).
+    /// Drives ambient volume: far = 0.05, close = 0.20.
+    pub zoom_normalized: f32,
 }
 
 impl Default for AudioContext {
@@ -69,6 +72,7 @@ impl Default for AudioContext {
             weather_active:  false,
             war_nearby:      false,
             biome:           BiomeAmbience::Grassland,
+            zoom_normalized: 0.5,
         }
     }
 }
@@ -272,6 +276,12 @@ struct AmbientLayer {
     prev_weight: f32,
 }
 
+/// Lerp ambient volume between far and close based on zoom.
+/// zoom = 0.0 → 0.05, zoom = 1.0 → 0.20
+fn zoom_ambient_volume(zoom: f32) -> f32 {
+    0.05 + zoom.clamp(0.0, 1.0) * 0.15
+}
+
 impl AmbientLayer {
     fn new(label: &'static str) -> Self {
         AmbientLayer { label, weight: 0.0, prev_weight: 0.0 }
@@ -297,6 +307,8 @@ struct AudioThreadState {
     ambient_interval_secs: f32,
     /// Last known biome for layer mixing
     current_biome: BiomeAmbience,
+    /// Last known zoom for ambient volume scaling
+    current_zoom: f32,
     /// Simple LCG seed for pitch jitter
     rng_seed: u64,
 }
@@ -319,6 +331,7 @@ impl AudioThreadState {
             ambient_timer: std::time::Instant::now(),
             ambient_interval_secs: 4.0,
             current_biome: BiomeAmbience::Grassland,
+            current_zoom: 0.5,
             rng_seed: 0x517cc1b727220a95,
         }
     }
@@ -354,8 +367,9 @@ impl AudioThreadState {
         let settlement_w = if ctx.near_settlement { 0.6 } else { 0.0 };
         let weather_w    = if ctx.weather_active { 0.9 } else { 0.0 };
 
-        // Track biome for play_ambient_tick
+        // Track biome and zoom for play_ambient_tick
         self.current_biome = ctx.biome;
+        self.current_zoom  = ctx.zoom_normalized;
 
         for (i, w) in [nature_w, night_w, settlement_w, weather_w].iter().enumerate() {
             if (self.layers[i].weight - w).abs() > 0.01 {
@@ -380,20 +394,31 @@ impl AudioThreadState {
         let amb_vol = self.volumes.ambient() * master;
         if amb_vol < 0.01 { return; }
 
+        // Zoom-linked base: quieter when far out, louder when close in
+        let zoom_vol = zoom_ambient_volume(self.current_zoom);
+        let base_vol = amb_vol * zoom_vol;
+
         // Determine dominant layer
         let nature_w  = self.layers[0].weight;
         let night_w   = self.layers[1].weight;
         let weather_w = self.layers[3].weight;
 
-        let base_vol = amb_vol * 0.3; // quiet ambient background
+        // Persistent low wind underlayer — always present at minimal volume
+        // 80–100 Hz filtered noise to fill silence without being annoying
+        let wind_vol = base_vol * 0.03;
+        let wind = synth_noise_burst(3.0, wind_vol);
+        // Low-pass approximation: blend drone at same freq to soften noise
+        let mut wind_layer = synth_ambient_drone(90.0, 3.0, wind_vol * 0.5);
+        for (a, b) in wind_layer.iter_mut().zip(wind.iter()) { *a += b; }
+        sink.append(to_rodio_source(wind_layer, 1.0));
 
         if weather_w > 0.5 {
-            // Rain/storm: broadband noise
-            let samples = synth_noise_burst(2.0, base_vol * weather_w);
+            // Rain/storm: broadband noise on top of wind
+            let samples = synth_noise_burst(2.0, base_vol * weather_w * 0.6);
             sink.append(to_rodio_source(samples, 1.0));
         } else if night_w > 0.5 {
-            // Night: higher freq crickets-like tone
-            let samples = synth_sine_envelope(800.0, 820.0, 1.5, base_vol * night_w, 0.1, 0.3);
+            // Night: soft high-freq crickets-like tone (quieter than before)
+            let samples = synth_sine_envelope(800.0, 820.0, 1.5, base_vol * night_w * 0.4, 0.1, 0.3);
             sink.append(to_rodio_source(samples, 1.0));
         } else {
             // Biome-specific ambient character
@@ -401,28 +426,28 @@ impl AudioThreadState {
                 BiomeAmbience::Forest => {
                     // Rich nature: layered drone + higher-freq bird-like shimmer
                     if nature_w > 0.3 {
-                        let mut s = synth_ambient_drone(55.0, 3.0, base_vol * nature_w * 0.8);
-                        let shimmer = synth_sine_envelope(1200.0, 1400.0, 0.4, base_vol * 0.15, 0.1, 0.4);
+                        let mut s = synth_ambient_drone(55.0, 3.0, base_vol * nature_w * 0.5);
+                        let shimmer = synth_sine_envelope(1200.0, 1400.0, 0.4, base_vol * 0.08, 0.1, 0.4);
                         for (a, b) in s.iter_mut().zip(shimmer.iter()) { *a += b; }
                         sink.append(to_rodio_source(s, 1.0));
                     }
                 }
                 BiomeAmbience::Water => {
                     // Low wave-like rumble: slow LFO on drone
-                    let mut s = synth_ambient_drone(40.0, 3.5, base_vol * 0.5);
-                    let noise = synth_noise_burst(3.5, base_vol * 0.15);
+                    let mut s = synth_ambient_drone(40.0, 3.5, base_vol * 0.3);
+                    let noise = synth_noise_burst(3.5, base_vol * 0.08);
                     for (a, b) in s.iter_mut().zip(noise.iter()) { *a += b; }
                     sink.append(to_rodio_source(s, 1.0));
                 }
                 BiomeAmbience::Desert => {
                     // Wind: filtered noise, no drone
-                    let samples = synth_noise_burst(2.5, base_vol * 0.35);
+                    let samples = synth_noise_burst(2.5, base_vol * 0.18);
                     sink.append(to_rodio_source(samples, 1.0));
                 }
                 BiomeAmbience::Mountain => {
                     // High wind + distant echo-like tone
-                    let mut s = synth_noise_burst(2.0, base_vol * 0.4);
-                    let echo = synth_sine_envelope(300.0, 250.0, 1.0, base_vol * 0.1, 0.2, 0.6);
+                    let mut s = synth_noise_burst(2.0, base_vol * 0.2);
+                    let echo = synth_sine_envelope(300.0, 250.0, 1.0, base_vol * 0.06, 0.2, 0.6);
                     // Offset echo by 0.5s
                     let gap = (SAMPLE_RATE as f32 * 0.5) as usize;
                     let total = s.len().max(gap + echo.len());
@@ -433,11 +458,9 @@ impl AudioThreadState {
                     sink.append(to_rodio_source(s, 1.0));
                 }
                 BiomeAmbience::Grassland => {
-                    // Default: soft low drone
-                    if nature_w > 0.3 {
-                        let samples = synth_ambient_drone(55.0, 3.0, base_vol * nature_w);
-                        sink.append(to_rodio_source(samples, 1.0));
-                    }
+                    // Soft low drone — always plays (no nature_w gate)
+                    let samples = synth_ambient_drone(55.0, 3.0, base_vol * 0.2);
+                    sink.append(to_rodio_source(samples, 1.0));
                 }
             }
         }
@@ -486,56 +509,56 @@ impl AudioThreadState {
 
         let samples = match sound {
             GodPowerSound::Lightning => {
-                // Sharp crack: noise burst
-                synth_noise_burst(0.12, vol * 0.9)
+                // Sharp crack: short noise burst, reduced from 0.9
+                synth_noise_burst(0.1, vol * 0.35)
             }
             GodPowerSound::Meteor => {
                 // Deep falling rumble: descending tone + noise
-                let mut s = synth_sine_envelope(200.0, 60.0, 0.8, vol * 0.8, 0.05, 0.3);
-                let noise = synth_noise_burst(0.8, vol * 0.4);
+                let mut s = synth_sine_envelope(200.0, 60.0, 0.7, vol * 0.30, 0.05, 0.3);
+                let noise = synth_noise_burst(0.7, vol * 0.15);
                 for (a, b) in s.iter_mut().zip(noise.iter()) { *a += b; }
                 s
             }
             GodPowerSound::Earthquake => {
                 // Low rumble
-                let mut s = synth_ambient_drone(30.0, 1.0, vol * 0.7);
-                let noise = synth_noise_burst(1.0, vol * 0.3);
+                let mut s = synth_ambient_drone(30.0, 0.8, vol * 0.25);
+                let noise = synth_noise_burst(0.8, vol * 0.12);
                 for (a, b) in s.iter_mut().zip(noise.iter()) { *a += b; }
                 s
             }
             GodPowerSound::Tornado => {
                 // Rising whoosh noise
-                synth_noise_burst(0.5, vol * 0.6)
+                synth_noise_burst(0.4, vol * 0.22)
             }
             GodPowerSound::Volcano => {
                 // Deep boom
-                synth_sine_envelope(80.0, 40.0, 1.2, vol * 0.9, 0.02, 0.6)
+                synth_sine_envelope(80.0, 40.0, 1.0, vol * 0.32, 0.02, 0.6)
             }
             GodPowerSound::RainStart => {
-                synth_noise_burst(1.0, vol * 0.4)
+                synth_noise_burst(0.8, vol * 0.18)
             }
             GodPowerSound::RainStop => {
                 // Short descending tone
-                synth_sine_envelope(300.0, 200.0, 0.4, vol * 0.3, 0.1, 0.5)
+                synth_sine_envelope(300.0, 200.0, 0.3, vol * 0.15, 0.1, 0.5)
             }
             GodPowerSound::BlessingJoy => {
-                // Bright rising chord-like tones
-                let mut s = synth_sine_envelope(440.0, 880.0, 0.4, vol * 0.5, 0.1, 0.4);
-                let s2 = synth_sine_envelope(660.0, 1320.0, 0.4, vol * 0.3, 0.1, 0.4);
+                // Bright rising chord-like tones — A4 neutral per spec
+                let mut s = synth_sine_envelope(440.0, 880.0, 0.4, vol * 0.18, 0.1, 0.4);
+                let s2 = synth_sine_envelope(660.0, 1320.0, 0.4, vol * 0.12, 0.1, 0.4);
                 for (a, b) in s.iter_mut().zip(s2.iter()) { *a += b; }
                 s
             }
             GodPowerSound::CurseAnger => {
                 // Dissonant descending tone
-                synth_sine_envelope(440.0, 110.0, 0.5, vol * 0.6, 0.05, 0.4)
+                synth_sine_envelope(440.0, 110.0, 0.5, vol * 0.20, 0.05, 0.4)
             }
             GodPowerSound::PlaceBeing => {
-                // Soft chime (birth-like)
-                synth_sine_envelope(440.0, 880.0, 0.2, vol * 0.4, 0.05, 0.5)
+                // Soft C5 chime — matches birth sound freq
+                synth_sine_envelope(523.0, 1046.0, 0.1, vol * 0.15, 0.05, 0.6)
             }
             GodPowerSound::RemoveBeing => {
-                // Short descending note
-                synth_sine_envelope(440.0, 220.0, 0.2, vol * 0.4, 0.02, 0.6)
+                // Short descending A3 note
+                synth_sine_envelope(220.0, 110.0, 0.1, vol * 0.15, 0.02, 0.7)
             }
         };
 
@@ -554,28 +577,26 @@ impl AudioThreadState {
 
         let samples = match sound {
             WorldEventSound::Birth => {
-                // Rising tone: 440→880 Hz, 200ms — jitter shifts base freq
-                synth_sine_envelope(440.0 * jitter, 880.0 * jitter, 0.2, vol * 0.35, 0.1, 0.5)
+                // Gentle C5 chime: 523 Hz, 100ms, soft attack — jitter shifts ±10%
+                synth_sine_envelope(523.0 * jitter, 523.0 * jitter, 0.1, vol * 0.15, 0.05, 0.6)
             }
             WorldEventSound::Death => {
-                // Falling tone: 440→220 Hz, 300ms
-                synth_sine_envelope(440.0 * jitter, 220.0 * jitter, 0.3, vol * 0.3, 0.05, 0.6)
+                // Low A3 tone, descending slightly, 100ms, quiet
+                synth_sine_envelope(220.0 * jitter, 180.0 * jitter, 0.1, vol * 0.15, 0.02, 0.7)
             }
             WorldEventSound::Combat => {
-                // Short white noise burst: 100ms (noise has no pitch — skip jitter)
-                synth_noise_burst(0.1, vol * 0.45)
+                // Short white noise burst: 80ms, reduced volume
+                synth_noise_burst(0.08, vol * 0.15)
             }
             WorldEventSound::KingdomRise => {
-                // Triumphant rising sweep + ascending arpeggio motif (C4 E4 G4 C5)
-                let mut s = synth_sine_envelope(261.0, 523.0, 0.6, vol * 0.5, 0.1, 0.4);
-                let s2 = synth_sine_envelope(330.0, 660.0, 0.6, vol * 0.3, 0.15, 0.4);
-                for (a, b) in s.iter_mut().zip(s2.iter()) { *a += b; }
+                // Neutral A4 sweep + brief ascending arpeggio (C4 E4 G4 C5), low vol
+                let mut s = synth_sine_envelope(440.0, 880.0, 0.4, vol * 0.15, 0.1, 0.4);
                 // Brief ascending arpeggio: C4, E4, G4, C5
                 let note_freqs = [261.63_f32, 329.63, 392.0, 523.25];
                 let gap_len = (SAMPLE_RATE as f32 * 0.02) as usize;
                 let mut motif: Vec<f32> = Vec::new();
                 for &freq in &note_freqs {
-                    let note_s = synth_sine_envelope(freq, freq, 0.12, vol * 0.35, 0.05, 0.4);
+                    let note_s = synth_sine_envelope(freq, freq, 0.1, vol * 0.12, 0.05, 0.4);
                     motif.extend(note_s);
                     motif.extend(vec![0.0f32; gap_len]);
                 }
@@ -583,8 +604,8 @@ impl AudioThreadState {
                 s
             }
             WorldEventSound::KingdomFall => {
-                // Dark descending tone
-                synth_sine_envelope(220.0 * jitter, 55.0 * jitter, 0.8, vol * 0.5, 0.05, 0.5)
+                // Quiet descending tone
+                synth_sine_envelope(220.0 * jitter, 110.0 * jitter, 0.5, vol * 0.15, 0.05, 0.5)
             }
         };
 

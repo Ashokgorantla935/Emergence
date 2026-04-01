@@ -107,69 +107,41 @@ impl Dashboard {
     }
 
     pub fn ui(&self, egui_ctx: &egui::Context, climate: &Climate, current_tick: u32) {
+        let _ = current_tick;
         egui::TopBottomPanel::bottom("dashboard")
-            .default_height(140.0)
+            .default_height(44.0)
             .show(egui_ctx, |ui| {
-                // Row 1: key stats
                 ui.horizontal(|ui| {
+                    // Population — large and prominent
                     ui.label(
-                        egui::RichText::new(format!("Pop: {}", self.population)).strong(),
+                        egui::RichText::new(format!("{}", self.population))
+                            .strong()
+                            .size(22.0),
                     );
+                    ui.label(egui::RichText::new("people").size(12.0).color(egui::Color32::GRAY));
                     ui.separator();
-                    ui.label(format!("Born: {} | Died: {}", self.born_this_year, self.died_this_year));
-                    ui.separator();
-                    // Average happiness (avg of joy + contentment needs)
+
+                    // Happiness — bar only, no decimal
                     let happiness = (self.avg_needs[1] + self.avg_needs[3] + self.avg_needs[4]) / 3.0;
-                    ui.label("Happiness:");
+                    ui.label("Happiness");
                     ui.add(egui::ProgressBar::new(happiness).desired_width(80.0));
                     ui.separator();
-                    ui.label(format!("Season: {:?}", climate.season()));
+
+                    // Season and Time
+                    ui.label(format!("{:?}", climate.season()));
                     ui.separator();
-                    ui.label(format!("Time: {:?}", climate.day_phase()));
-                    ui.separator();
+                    ui.label(format!("{:?}", climate.day_phase()));
+
+                    // Weather if active
                     if let Some(ref w) = climate.active_weather {
-                        ui.label(format!("Weather: {:?} ({}t)", w.kind, w.remaining_ticks));
                         ui.separator();
+                        ui.label(format!("{:?}", w.kind));
                     }
-                    ui.label(format!("Tick: {} | {:.0} t/s", current_tick, self.tick_rate));
-                    ui.separator();
+
+                    // Perf warning only when critical
                     if self.population > 15000 && self.tick_rate < 45.0 {
+                        ui.separator();
                         ui.colored_label(egui::Color32::RED, "PERF WARNING");
-                    }
-                });
-
-                ui.separator();
-
-                // Row 2: needs + sparklines
-                ui.horizontal(|ui| {
-                    // Average needs bars
-                    let need_names = ["Hunger", "Warmth", "Safety", "Belong", "Purpose", "Rest"];
-                    for (i, name) in need_names.iter().enumerate() {
-                        ui.vertical(|ui| {
-                            ui.label(*name);
-                            ui.add(egui::ProgressBar::new(self.avg_needs[i]).desired_width(60.0));
-                        });
-                    }
-
-                    ui.separator();
-
-                    // Birth/death sparklines (last 300 ticks as a mini plot)
-                    ui.vertical(|ui| {
-                        ui.label("Births");
-                        self.render_sparkline(ui, &self.birth_history, egui::Color32::GREEN, 80.0, 20.0);
-                    });
-                    ui.vertical(|ui| {
-                        ui.label("Deaths");
-                        self.render_sparkline(ui, &self.death_history, egui::Color32::RED, 80.0, 20.0);
-                    });
-                });
-
-                // Row 3: emotion distribution
-                ui.horizontal(|ui| {
-                    let emo_names = ["Fear", "Joy", "Curio", "Anger", "Grief", "Cntnt"];
-                    for (i, name) in emo_names.iter().enumerate() {
-                        let pct = (self.emotion_distribution[i] * 100.0) as u32;
-                        ui.label(format!("{name}:{pct}%"));
                     }
                 });
             });

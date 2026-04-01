@@ -42,9 +42,11 @@ struct InstanceInput {
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    @location(0) uv:    vec2<f32>,
-    @location(1) tint:  vec3<f32>,
-    @location(2) alpha: f32,
+    @location(0) uv:         vec2<f32>,
+    @location(1) tint:       vec3<f32>,
+    @location(2) alpha:      f32,
+    @location(3) atlas_uv:   vec2<f32>,   // cell top-left for outline clamping
+    @location(4) atlas_size: vec2<f32>,   // cell size for outline clamping
 };
 
 @vertex
@@ -65,20 +67,41 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     let world       = world_pos + vertex.vertex_pos * final_size;
     var clip        = camera.view_proj * vec4<f32>(world, 0.0, 1.0);
     // Y-sort depth bias: objects further south (higher world Y) render behind northern ones.
-    // Map world_pos.y into a small z offset [0, 0.9] within NDC depth range.
-    // Clamp world Y to a max of 512 to handle any world size gracefully.
     let depth_bias  = clamp(inst.world_pos.y / 512.0, 0.0, 1.0) * 0.9;
-    clip.z          = depth_bias * clip.w; // perspective-correct z write
+    clip.z          = depth_bias * clip.w;
     out.clip_position = clip;
-    out.uv    = inst.atlas_uv + (vertex.vertex_pos + 0.5) * inst.atlas_size;
-    out.tint  = inst.tint;
-    out.alpha = inst.alpha;
+    out.uv        = inst.atlas_uv + (vertex.vertex_pos + 0.5) * inst.atlas_size;
+    out.tint      = inst.tint;
+    out.alpha     = inst.alpha;
+    out.atlas_uv  = inst.atlas_uv;
+    out.atlas_size = inst.atlas_size;
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let c = textureSample(sprite_atlas, atlas_sampler, in.uv);
-    if c.a < 0.1 { discard; }
+
+    // Pixel size in atlas UV space (atlas is 512x512)
+    let px = 1.0 / 512.0;
+
+    if c.a < 0.1 {
+        // 1px black outline: sample 4 adjacent texels, clamped to this atlas cell.
+        let cell_min = in.atlas_uv;
+        let cell_max = in.atlas_uv + in.atlas_size;
+        let uv_n = clamp(in.uv + vec2<f32>( 0.0, -px), cell_min, cell_max);
+        let uv_s = clamp(in.uv + vec2<f32>( 0.0,  px), cell_min, cell_max);
+        let uv_e = clamp(in.uv + vec2<f32>( px,  0.0), cell_min, cell_max);
+        let uv_w = clamp(in.uv + vec2<f32>(-px,  0.0), cell_min, cell_max);
+        let n = textureSample(sprite_atlas, atlas_sampler, uv_n).a;
+        let s = textureSample(sprite_atlas, atlas_sampler, uv_s).a;
+        let e = textureSample(sprite_atlas, atlas_sampler, uv_e).a;
+        let w = textureSample(sprite_atlas, atlas_sampler, uv_w).a;
+        if (n > 0.5 || s > 0.5 || e > 0.5 || w > 0.5) {
+            return vec4<f32>(0.05, 0.03, 0.02, 0.9);
+        }
+        discard;
+    }
+
     return vec4<f32>(c.rgb * in.tint, c.a * in.alpha);
 }

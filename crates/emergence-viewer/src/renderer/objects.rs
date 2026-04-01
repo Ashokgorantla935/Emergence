@@ -69,6 +69,8 @@ pub struct ObjectRenderer {
     dirty: bool,
     /// Cached instances (rebuilt on resource threshold crossings)
     cached_count: u32,
+    /// Last known pixels_per_unit (for LOD filtering)
+    pixels_per_unit: f32,
 }
 
 impl ObjectRenderer {
@@ -108,6 +110,7 @@ impl ObjectRenderer {
             frame_tick: 0,
             dirty: true,
             cached_count: 0,
+            pixels_per_unit: 32.0,
         }
     }
 
@@ -144,30 +147,30 @@ impl ObjectRenderer {
                 let food = resources.food[idx];
                 let depleted = food / cap < 0.3;
 
-                let (atlas_uv, tint) = match resources.food_type[idx] {
+                let (atlas_uv, tint, size) = match resources.food_type[idx] {
                     FoodType::Berries => {
                         if depleted {
-                            (UV_BERRY_DEPLETED, [0.5f32, 0.5, 0.5])
+                            (UV_BERRY_DEPLETED, [0.7f32, 0.7, 0.7], 1.5)
                         } else {
-                            (UV_BERRY_FULL, [0.2f32, 0.8, 0.2])
+                            (UV_BERRY_FULL, [1.0f32, 1.0, 1.0], 1.5)
                         }
                     }
                     FoodType::Grain => {
                         if depleted {
-                            (UV_WHEAT_DEPLETED, [0.55f32, 0.4, 0.2])
+                            (UV_WHEAT_DEPLETED, [0.7f32, 0.7, 0.7], 1.8)
                         } else {
-                            (UV_WHEAT_FULL, [0.9f32, 0.8, 0.2])
+                            (UV_WHEAT_FULL, [1.0f32, 1.0, 1.0], 1.8)
                         }
                     }
                     FoodType::Fish => {
                         if depleted {
-                            (UV_FISH_DEPLETED, [0.3f32, 0.5, 0.7])
+                            (UV_FISH_DEPLETED, [0.7f32, 0.7, 0.7], 1.5)
                         } else {
-                            (UV_FISH_FULL, [0.2f32, 0.6, 1.0])
+                            (UV_FISH_FULL, [1.0f32, 1.0, 1.0], 1.5)
                         }
                     }
                     FoodType::Stone => {
-                        (UV_STONE, [0.6f32, 0.55, 0.5])
+                        (UV_STONE, [1.0f32, 1.0, 1.0], 1.6)
                     }
                     FoodType::None => continue,
                 };
@@ -177,7 +180,7 @@ impl ObjectRenderer {
                     atlas_uv,
                     atlas_size: [ATLAS_CELL, ATLAS_CELL],
                     tint,
-                    size:       0.9,
+                    size,
                     alpha:      1.0,
                     _pad:       0.0,
                 });
@@ -261,54 +264,60 @@ impl ObjectRenderer {
                     let jitter_y = ((hash >> (10 + seed * 3)) % 5) as f32 * 0.05 - 0.10;
 
                     // Biome + seed -> sprite type, tint, size.
+                    // Tints are near-identity (1.0) — real atlas sprites have colors baked in.
+                    // Sizes match WorldBox spec: trees 4.0-5.0, bushes 2.0-3.0, rocks 1.5-2.0.
                     let (atlas_uv, tint, size) = match biome {
                         Biome::Forest => {
                             tree_count += 1;
                             match hash % 4 {
-                                0 => (UV_DECOR_TREE, [0.07f32, 0.35, 0.10], 1.5), // dark conifer
-                                1 => (UV_DECOR_TREE, [0.14f32, 0.55, 0.18], 1.2), // bright oak
-                                2 => (UV_DECOR_BUSH, [0.10f32, 0.42, 0.14], 0.80), // understory bush
-                                _ => (UV_DECOR_BUSH, [0.18f32, 0.60, 0.22], 0.65), // undergrowth
+                                0 => (UV_DECOR_TREE, [1.0f32, 1.0, 1.0], 4.5), // conifer
+                                1 => (UV_DECOR_TREE, [1.0f32, 1.0, 1.0], 4.0), // oak
+                                2 => (UV_DECOR_BUSH, [1.0f32, 1.0, 1.0], 2.5), // understory bush
+                                _ => (UV_DECOR_BUSH, [1.0f32, 1.0, 1.0], 2.0), // undergrowth
                             }
                         }
                         Biome::Grassland => {
                             bush_count += 1;
                             match hash % 5 {
-                                0 => (UV_DECOR_BUSH, [0.90f32, 0.80, 0.20], 0.55), // flower yellow
-                                1 => (UV_DECOR_BUSH, [0.85f32, 0.30, 0.60], 0.50), // flower pink
-                                2 => (UV_DECOR_BUSH, [0.25f32, 0.70, 0.25], 0.65), // grass tuft
-                                3 => (UV_DECOR_BUSH, [0.30f32, 0.75, 0.30], 0.60), // grass tuft 2
-                                _ => (UV_DECOR_TREE, [0.18f32, 0.55, 0.20], 1.10), // lone tree
+                                0 => (UV_DECOR_BUSH, [1.0f32, 1.0, 1.0], 2.0), // flower
+                                1 => (UV_DECOR_BUSH, [1.0f32, 1.0, 1.0], 2.0), // flower
+                                2 => (UV_DECOR_BUSH, [1.0f32, 1.0, 1.0], 2.2), // grass tuft
+                                3 => (UV_DECOR_BUSH, [1.0f32, 1.0, 1.0], 2.0), // grass tuft 2
+                                _ => (UV_DECOR_TREE, [1.0f32, 1.0, 1.0], 4.5), // lone tree
                             }
                         }
                         Biome::Mountain => {
                             rock_count += 1;
-                            // Snow patches at elevated cells (use y as proxy for elevation)
                             let elevation_hint = (y as f32 / h as f32) * 0.5 + (hash % 100) as f32 * 0.005;
                             if elevation_hint > 0.6 && hash % 3 == 0 {
-                                (UV_DECOR_ROCK, [0.90f32, 0.92, 0.95], 0.70) // snow patch
+                                (UV_DECOR_ROCK, [1.0f32, 1.0, 1.0], 1.8) // snow patch
                             } else if hash % 2 == 0 {
-                                (UV_DECOR_ROCK, [0.58f32, 0.54, 0.52], 0.90) // large rock
+                                (UV_DECOR_ROCK, [1.0f32, 1.0, 1.0], 2.0) // large rock
                             } else {
-                                (UV_DECOR_ROCK, [0.44f32, 0.41, 0.38], 0.60) // small rock
+                                (UV_DECOR_ROCK, [1.0f32, 1.0, 1.0], 1.5) // small rock
                             }
                         }
                         Biome::Wetland => {
                             if hash % 3 == 0 {
-                                (UV_DECOR_REED, [0.30f32, 0.50, 0.25], 0.90) // cattail
+                                (UV_DECOR_REED, [1.0f32, 1.0, 1.0], 2.5) // cattail
                             } else {
-                                (UV_DECOR_REED, [0.38f32, 0.62, 0.32], 0.70) // reed
+                                (UV_DECOR_REED, [1.0f32, 1.0, 1.0], 2.0) // reed
                             }
                         }
                         Biome::Desert => {
                             if hash % 4 == 0 {
-                                (UV_DECOR_CACTUS, [0.38f32, 0.55, 0.22], 0.85) // cactus
+                                (UV_DECOR_CACTUS, [1.0f32, 1.0, 1.0], 3.0) // cactus
                             } else {
-                                (UV_DECOR_CACTUS, [0.52f32, 0.40, 0.22], 0.50) // dead scrub
+                                (UV_DECOR_CACTUS, [1.0f32, 1.0, 1.0], 2.0) // dead scrub
                             }
                         }
                         Biome::Water => continue,
                     };
+
+                    // LOD: skip small objects when zoomed far out (pixels_per_unit < 5)
+                    if self.pixels_per_unit < 5.0 && size < 2.0 {
+                        continue;
+                    }
 
                     instances.push(ObjectInstance {
                         position:   [x as f32 + 0.5 + jitter_x, y as f32 + 0.5 + jitter_y],
@@ -337,11 +346,11 @@ impl ObjectRenderer {
                 }
                 use emergence_core::world::terrain::StructureType;
                 let (atlas_uv, tint, size) = match StructureType::from_u8(s) {
-                    StructureType::Campfire     => (campfire_frame_uv[frame], [1.0f32, 0.6, 0.1], 1.0),
-                    StructureType::LeanTo       => (UV_LEAN_TO,   [0.8f32, 0.65, 0.4], 1.2),
-                    StructureType::Hut          => (UV_HUT,       [0.7f32, 0.55, 0.35], 1.5),
-                    StructureType::Wall         => (UV_WALL,      [0.6f32, 0.55, 0.5], 1.0),
-                    StructureType::ResourceCache=> (UV_FOOD_CACHE,[0.9f32, 0.75, 0.3], 1.0),
+                    StructureType::Campfire     => (campfire_frame_uv[frame], [1.0f32, 1.0, 1.0], 1.8),
+                    StructureType::LeanTo       => (UV_LEAN_TO,   [1.0f32, 1.0, 1.0], 3.5),
+                    StructureType::Hut          => (UV_HUT,       [1.0f32, 1.0, 1.0], 5.0),
+                    StructureType::Wall         => (UV_WALL,      [1.0f32, 1.0, 1.0], 5.0),
+                    StructureType::ResourceCache=> (UV_FOOD_CACHE,[1.0f32, 1.0, 1.0], 3.0),
                     StructureType::None         => continue,
                 };
 
@@ -393,14 +402,19 @@ impl ObjectRenderer {
     /// Per-frame update — animates campfire, marks dirty on resource threshold crossings.
     pub fn update(
         &mut self,
-        queue:     &wgpu::Queue,
-        terrain:   &Terrain,
-        resources: &ResourceLayer,
+        queue:          &wgpu::Queue,
+        terrain:        &Terrain,
+        resources:      &ResourceLayer,
+        pixels_per_unit: f32,
     ) {
         self.frame_tick = self.frame_tick.wrapping_add(1);
 
+        // Update LOD zoom level — triggers rebuild if zoom band changed significantly.
+        let ppu_changed = (self.pixels_per_unit - pixels_per_unit).abs() > 1.0;
+        self.pixels_per_unit = pixels_per_unit;
+
         // Rebuild every 4 ticks to animate campfire flicker (FIX 8: was % 8)
-        let needs_rebuild = self.dirty || (self.frame_tick % 4 == 0);
+        let needs_rebuild = self.dirty || ppu_changed || (self.frame_tick % 4 == 0);
 
         if needs_rebuild {
             self.rebuild(queue, terrain, resources);

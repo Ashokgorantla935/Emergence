@@ -122,11 +122,12 @@ impl StatsHistory {
 
 pub struct StatisticsPanel {
     pub visible: bool,
+    pub debug_mode: bool,
 }
 
 impl StatisticsPanel {
     pub fn new() -> Self {
-        StatisticsPanel { visible: false }
+        StatisticsPanel { visible: false, debug_mode: false }
     }
 
     pub fn toggle(&mut self) {
@@ -147,10 +148,41 @@ impl StatisticsPanel {
                         if ui.small_button("X").clicked() {
                             self.visible = false;
                         }
+                        ui.checkbox(&mut self.debug_mode, "Debug");
                     });
                 });
                 ui.separator();
 
+                if !self.debug_mode {
+                    // Player-friendly summary
+                    let samples = history.ordered();
+                    let latest = samples.iter().filter(|s| s.tick > 0).last();
+                    if let Some(s) = latest {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(format!("Population: {}", s.population)).strong());
+                            ui.separator();
+                            ui.label(format!("Settlements: {}", s.settlement_count));
+                            ui.separator();
+                            let dominant_emo = {
+                                let mut best_idx = 0usize;
+                                let mut best_count = 0u32;
+                                for e in 0..6 {
+                                    if s.emotion_counts[e] > best_count {
+                                        best_count = s.emotion_counts[e];
+                                        best_idx = e;
+                                    }
+                                }
+                                ["Fear", "Joy", "Curiosity", "Anger", "Grief", "Content"][best_idx]
+                            };
+                            ui.label(format!("Mood: {}", dominant_emo));
+                        });
+                    } else {
+                        ui.label("Gathering data...");
+                    }
+                    return;
+                }
+
+                // Debug view: full sparklines
                 let samples = history.ordered();
                 let count = samples.len();
                 if count == 0 {
@@ -158,45 +190,31 @@ impl StatisticsPanel {
                     return;
                 }
 
-                // 6 sparklines side by side
                 let available = ui.available_size();
                 let graph_w = (available.x / 6.0).max(80.0);
                 let graph_h = available.y - 4.0;
 
                 ui.horizontal(|ui| {
-                    // 1. Population (white)
                     sparkline(
                         ui, "Population", graph_w, graph_h,
                         Color32::WHITE,
                         &samples.iter().map(|s| s.population as f32).collect::<Vec<_>>(),
                         None,
                     );
-
-                    // 2. Birth/Death Rate (green births, red deaths — stacked)
-                    birth_death_sparkline(
-                        ui, graph_w, graph_h, &samples,
-                    );
-
-                    // 3. Avg Lifespan placeholder (yellow) — use avg_warmth as proxy until lifespan tracked
+                    birth_death_sparkline(ui, graph_w, graph_h, &samples);
                     sparkline(
                         ui, "Avg Warmth", graph_w, graph_h,
                         Color32::YELLOW,
                         &samples.iter().map(|s| s.avg_warmth).collect::<Vec<_>>(),
                         Some(1.0),
                     );
-
-                    // 4. Emotion distribution (stacked colored)
                     emotion_sparkline(ui, graph_w, graph_h, &samples);
-
-                    // 5. Avg Hunger (orange)
                     sparkline(
                         ui, "Avg Hunger", graph_w, graph_h,
                         Color32::from_rgb(255, 140, 0),
                         &samples.iter().map(|s| s.avg_hunger).collect::<Vec<_>>(),
                         Some(1.0),
                     );
-
-                    // 6. Settlement count (blue)
                     sparkline(
                         ui, "Settlements", graph_w, graph_h,
                         Color32::from_rgb(80, 160, 255),

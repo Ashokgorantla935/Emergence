@@ -111,7 +111,7 @@ impl NewsFeed {
             return;
         }
 
-        let height = if self.show_full_history { 400.0 } else { 200.0 };
+        let height = if self.show_full_history { 400.0 } else { 160.0 };
 
         egui::Window::new("World Events")
             .id(egui::Id::new("news_feed"))
@@ -135,14 +135,13 @@ impl NewsFeed {
                 });
                 ui.separator();
 
-                let display_count = if self.show_full_history { self.items.len() } else { 20 };
+                let display_count = if self.show_full_history { self.items.len() } else { 8 };
                 let items: Vec<_> = self.items.iter().rev().take(display_count).collect();
 
                 egui::ScrollArea::vertical()
                     .auto_shrink([false; 2])
-                    .stick_to_bottom(true)
                     .show(ui, |ui| {
-                        for item in items.iter().rev() {
+                        for item in items.iter() {
                             let color = item.importance.color();
                             let resp = ui.colored_label(color, &item.text);
                             if resp.clicked() {

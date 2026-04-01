@@ -1077,6 +1077,9 @@ impl ApplicationHandler for App {
                     emergence_core::world::terrain::Biome::Wetland   => BiomeAmbience::Water,
                     emergence_core::world::terrain::Biome::Grassland => BiomeAmbience::Grassland,
                 };
+                // Normalize zoom: camera.zoom 10=close, 512+=far
+                // Invert so zoom_normalized 1.0=close (loud), 0.0=far (quiet)
+                let zoom_normalized = 1.0 - ((self.camera.zoom - 10.0) / 500.0).clamp(0.0, 1.0);
                 AudioContext {
                     camera_pos: self.camera.position,
                     time_of_day: w.climate.light_level(),
@@ -1085,6 +1088,7 @@ impl ApplicationHandler for App {
                     weather_active,
                     war_nearby,
                     biome,
+                    zoom_normalized,
                 }
             } else {
                 AudioContext::default()
@@ -1143,7 +1147,7 @@ impl ApplicationHandler for App {
 
             // Object renderer update (resources + structures)
             if let Some(ref mut obj) = self.object_renderer {
-                obj.update(&rs.queue, &world.terrain, &world.resources);
+                obj.update(&rs.queue, &world.terrain, &world.resources, pixels_per_unit);
             }
 
             // Particle system update

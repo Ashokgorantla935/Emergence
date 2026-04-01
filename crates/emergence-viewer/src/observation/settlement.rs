@@ -48,12 +48,12 @@ impl SettlementDetector {
         const CELL_SIZE: f32 = 4.0;
         let mut grid: Vec<Vec<usize>> = vec![Vec::new(); GRID * GRID];
 
-        for i in 0..beings.count {
-            if beings.states[i] == BeingState::Dead {
+        for i in 0..beings.hot.count {
+            if beings.hot.states[i] == BeingState::Dead {
                 continue;
             }
-            let cx = ((beings.positions[i][0] / CELL_SIZE) as usize).min(GRID - 1);
-            let cy = ((beings.positions[i][1] / CELL_SIZE) as usize).min(GRID - 1);
+            let cx = ((beings.hot.positions[i][0] / CELL_SIZE) as usize).min(GRID - 1);
+            let cy = ((beings.hot.positions[i][1] / CELL_SIZE) as usize).min(GRID - 1);
             grid[cy * GRID + cx].push(i);
         }
 
@@ -129,8 +129,8 @@ impl SettlementDetector {
             let mut cx = 0.0f32;
             let mut cy = 0.0f32;
             for &i in &member_indices {
-                cx += beings.positions[i][0];
-                cy += beings.positions[i][1];
+                cx += beings.hot.positions[i][0];
+                cy += beings.hot.positions[i][1];
             }
             cx /= count;
             cy /= count;
@@ -139,7 +139,7 @@ impl SettlementDetector {
             // Simplified: use avg joy emotion as proxy for warmth
             let avg_joy = member_indices
                 .iter()
-                .map(|&i| beings.emotions[i][1])
+                .map(|&i| beings.hot.emotions[i][1])
                 .sum::<f32>()
                 / count;
 
@@ -147,7 +147,7 @@ impl SettlementDetector {
             let mut emo_sum = [0.0f32; 6];
             for &i in &member_indices {
                 for e in 0..6 {
-                    emo_sum[e] += beings.emotions[i][e];
+                    emo_sum[e] += beings.hot.emotions[i][e];
                 }
             }
             let dominant_emotion = emo_sum

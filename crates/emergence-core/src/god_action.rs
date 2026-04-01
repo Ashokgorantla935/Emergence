@@ -397,7 +397,7 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         GodAction::SpawnBeing { pos, personality, lifespan } => {
             if !world.terrain.is_water_f(pos[0], pos[1]) {
                 let idx = world.beings.spawn(pos, personality, lifespan, [u32::MAX, u32::MAX]);
-                world.beings.names[idx] = generate_name(&mut world.rng);
+                world.beings.cold.names[idx] = generate_name(&mut world.rng);
             }
         }
 
@@ -414,7 +414,7 @@ fn apply_god_action(world: &mut World, action: GodAction) {
             if !world.terrain.is_water_f(pos[0], pos[1]) {
                 let lifespan = 86000 + world.rng.u32(0..58001);
                 let idx = world.beings.spawn(pos, personality, lifespan, [u32::MAX, u32::MAX]);
-                world.beings.names[idx] = generate_name(&mut world.rng);
+                world.beings.cold.names[idx] = generate_name(&mut world.rng);
             }
         }
 
@@ -428,7 +428,8 @@ fn apply_god_action(world: &mut World, action: GodAction) {
                     let personality = fauna_personality(kind, &mut world.rng);
                     let lifespan = 20000 + world.rng.u32(0..10000);
                     let idx = world.beings.spawn([jx, jy], personality, lifespan, [u32::MAX, u32::MAX]);
-                    world.beings.creature_type[idx] = kind as u8;
+                    world.beings.hot.creature_type[idx] = kind as u8;
+                    world.beings.hot.fauna_params[idx] = crate::being::data::init_fauna_params(kind as u8);
                 }
                 let _ = i;
             }
@@ -641,19 +642,19 @@ fn apply_god_action(world: &mut World, action: GodAction) {
 
         // ── Destruction ───────────────────────────────────────────────────────
         GodAction::KillBeing { index } => {
-            if index < world.beings.count {
-                world.beings.states[index] = BeingState::Dead;
-                world.beings.alive_count = world.beings.alive_count.saturating_sub(1);
+            if index < world.beings.hot.count {
+                world.beings.hot.states[index] = BeingState::Dead;
+                world.beings.hot.alive_count = world.beings.hot.alive_count.saturating_sub(1);
             }
         }
 
         GodAction::KillRegion { region } => {
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let pos = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let pos = world.beings.hot.positions[i];
                     if region.contains_pos(pos) {
-                        world.beings.states[i] = BeingState::Dead;
-                        world.beings.alive_count = world.beings.alive_count.saturating_sub(1);
+                        world.beings.hot.states[i] = BeingState::Dead;
+                        world.beings.hot.alive_count = world.beings.hot.alive_count.saturating_sub(1);
                     }
                 }
             }
@@ -662,14 +663,14 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         GodAction::Lightning { pos } => {
             // Kill any being within radius 2
             let kill_r2 = 4.0f32;
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let p = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let p = world.beings.hot.positions[i];
                     let dx = p[0] - pos[0];
                     let dy = p[1] - pos[1];
                     if dx * dx + dy * dy <= kill_r2 {
-                        world.beings.states[i] = BeingState::Dead;
-                        world.beings.alive_count = world.beings.alive_count.saturating_sub(1);
+                        world.beings.hot.states[i] = BeingState::Dead;
+                        world.beings.hot.alive_count = world.beings.hot.alive_count.saturating_sub(1);
                     }
                 }
             }
@@ -685,14 +686,14 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         GodAction::MeteorStrike { pos } => {
             // Kill beings in radius 5, crater terrain
             let kill_r2 = 25.0f32;
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let p = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let p = world.beings.hot.positions[i];
                     let dx = p[0] - pos[0];
                     let dy = p[1] - pos[1];
                     if dx * dx + dy * dy <= kill_r2 {
-                        world.beings.states[i] = BeingState::Dead;
-                        world.beings.alive_count = world.beings.alive_count.saturating_sub(1);
+                        world.beings.hot.states[i] = BeingState::Dead;
+                        world.beings.hot.alive_count = world.beings.hot.alive_count.saturating_sub(1);
                     }
                 }
             }
@@ -740,9 +741,9 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         GodAction::Tornado { pos, duration: _ } => {
             // Scatter beings within radius 8
             let r2 = 64.0f32;
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let p = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let p = world.beings.hot.positions[i];
                     let dx = p[0] - pos[0];
                     let dy = p[1] - pos[1];
                     if dx * dx + dy * dy <= r2 {
@@ -751,25 +752,25 @@ fn apply_god_action(world: &mut World, action: GodAction) {
                         let dist = 5.0 + world.rng.f32() * 10.0;
                         let nx = (p[0] + angle.cos() * dist).clamp(0.0, world.config.size.0 as f32 - 1.0);
                         let ny = (p[1] + angle.sin() * dist).clamp(0.0, world.config.size.1 as f32 - 1.0);
-                        world.beings.positions[i] = [nx, ny];
+                        world.beings.hot.positions[i] = [nx, ny];
                         // Fear + damage
-                        world.beings.emotions[i][EMO_FEAR] = (world.beings.emotions[i][EMO_FEAR] + 0.7).min(1.0);
-                        world.beings.needs[i][NEED_SAFETY] = (world.beings.needs[i][NEED_SAFETY] - 0.4).max(0.0);
+                        world.beings.hot.emotions[i][EMO_FEAR] = (world.beings.hot.emotions[i][EMO_FEAR] + 0.7).min(1.0);
+                        world.beings.hot.needs[i][NEED_SAFETY] = (world.beings.hot.needs[i][NEED_SAFETY] - 0.4).max(0.0);
                     }
                 }
             }
         }
 
         GodAction::Earthquake { region, intensity, duration: _ } => {
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let pos = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let pos = world.beings.hot.positions[i];
                     if region.contains_pos(pos) {
-                        world.beings.emotions[i][EMO_FEAR] = (world.beings.emotions[i][EMO_FEAR] + intensity * 0.8).min(1.0);
-                        world.beings.needs[i][NEED_SAFETY] = (world.beings.needs[i][NEED_SAFETY] - intensity * 0.5).max(0.0);
+                        world.beings.hot.emotions[i][EMO_FEAR] = (world.beings.hot.emotions[i][EMO_FEAR] + intensity * 0.8).min(1.0);
+                        world.beings.hot.needs[i][NEED_SAFETY] = (world.beings.hot.needs[i][NEED_SAFETY] - intensity * 0.5).max(0.0);
                         if world.rng.f32() < intensity * 0.15 {
-                            world.beings.states[i] = BeingState::Dead;
-                            world.beings.alive_count = world.beings.alive_count.saturating_sub(1);
+                            world.beings.hot.states[i] = BeingState::Dead;
+                            world.beings.hot.alive_count = world.beings.hot.alive_count.saturating_sub(1);
                         }
                     }
                 }
@@ -787,13 +788,13 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         }
 
         GodAction::PlagueCast { region, duration: _ } => {
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let pos = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let pos = world.beings.hot.positions[i];
                     if region.contains_pos(pos) {
-                        world.beings.needs[i][NEED_WARMTH] = (world.beings.needs[i][NEED_WARMTH] - 0.3).max(0.0);
-                        world.beings.needs[i][NEED_REST] = (world.beings.needs[i][NEED_REST] - 0.4).max(0.0);
-                        world.beings.emotions[i][EMO_GRIEF] = (world.beings.emotions[i][EMO_GRIEF] + 0.3).min(1.0);
+                        world.beings.hot.needs[i][NEED_WARMTH] = (world.beings.hot.needs[i][NEED_WARMTH] - 0.3).max(0.0);
+                        world.beings.hot.needs[i][NEED_REST] = (world.beings.hot.needs[i][NEED_REST] - 0.4).max(0.0);
+                        world.beings.hot.emotions[i][EMO_GRIEF] = (world.beings.hot.emotions[i][EMO_GRIEF] + 0.3).min(1.0);
                     }
                 }
             }
@@ -807,7 +808,8 @@ fn apply_god_action(world: &mut World, action: GodAction) {
                 if !world.terrain.is_water_f(jx, jy) {
                     let lifespan = 50000 + world.rng.u32(0..20000);
                     let idx = world.beings.spawn([jx, jy], predator_personality, lifespan, [u32::MAX, u32::MAX]);
-                    world.beings.creature_type[idx] = CreatureType::Wolf as u8;
+                    world.beings.hot.creature_type[idx] = CreatureType::Wolf as u8;
+                    world.beings.hot.fauna_params[idx] = crate::being::data::init_fauna_params(CreatureType::Wolf as u8);
                 }
                 let _ = i;
             }
@@ -842,30 +844,30 @@ fn apply_god_action(world: &mut World, action: GodAction) {
 
         // ── Blessing ──────────────────────────────────────────────────────────
         GodAction::Bless { index, magnitude } => {
-            if index < world.beings.count && world.beings.states[index] != BeingState::Dead {
-                for need in world.beings.needs[index].iter_mut() {
+            if index < world.beings.hot.count && world.beings.hot.states[index] != BeingState::Dead {
+                for need in world.beings.hot.needs[index].iter_mut() {
                     *need = (*need + magnitude * 0.4).min(1.0);
                 }
-                world.beings.emotions[index][EMO_JOY] = (world.beings.emotions[index][EMO_JOY] + magnitude * 0.6).min(1.0);
-                world.beings.emotions[index][EMO_CONTENTMENT] = (world.beings.emotions[index][EMO_CONTENTMENT] + magnitude * 0.5).min(1.0);
+                world.beings.hot.emotions[index][EMO_JOY] = (world.beings.hot.emotions[index][EMO_JOY] + magnitude * 0.6).min(1.0);
+                world.beings.hot.emotions[index][EMO_CONTENTMENT] = (world.beings.hot.emotions[index][EMO_CONTENTMENT] + magnitude * 0.5).min(1.0);
             }
         }
 
         GodAction::HealBeing { index } => {
-            if index < world.beings.count && world.beings.states[index] != BeingState::Dead {
-                for need in world.beings.needs[index].iter_mut() {
+            if index < world.beings.hot.count && world.beings.hot.states[index] != BeingState::Dead {
+                for need in world.beings.hot.needs[index].iter_mut() {
                     *need = (*need + 0.5).min(1.0);
                 }
-                world.beings.emotions[index][EMO_FEAR] = (world.beings.emotions[index][EMO_FEAR] - 0.3).max(0.0);
+                world.beings.hot.emotions[index][EMO_FEAR] = (world.beings.hot.emotions[index][EMO_FEAR] - 0.3).max(0.0);
             }
         }
 
         GodAction::HealRegion { region } => {
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let pos = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let pos = world.beings.hot.positions[i];
                     if region.contains_pos(pos) {
-                        for need in world.beings.needs[i].iter_mut() {
+                        for need in world.beings.hot.needs[i].iter_mut() {
                             *need = (*need + 0.3).min(1.0);
                         }
                     }
@@ -874,59 +876,59 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         }
 
         GodAction::InspireCourage { region } => {
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let pos = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let pos = world.beings.hot.positions[i];
                     if region.contains_pos(pos) {
-                        world.beings.emotions[i][EMO_FEAR] = (world.beings.emotions[i][EMO_FEAR] - 0.5).max(0.0);
-                        world.beings.emotions[i][EMO_CURIOSITY] = (world.beings.emotions[i][EMO_CURIOSITY] + 0.4).min(1.0);
+                        world.beings.hot.emotions[i][EMO_FEAR] = (world.beings.hot.emotions[i][EMO_FEAR] - 0.5).max(0.0);
+                        world.beings.hot.emotions[i][EMO_CURIOSITY] = (world.beings.hot.emotions[i][EMO_CURIOSITY] + 0.4).min(1.0);
                     }
                 }
             }
         }
 
         GodAction::InspireCalm { region } => {
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let pos = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let pos = world.beings.hot.positions[i];
                     if region.contains_pos(pos) {
-                        world.beings.emotions[i][EMO_ANGER] = (world.beings.emotions[i][EMO_ANGER] - 0.5).max(0.0);
-                        world.beings.emotions[i][EMO_FEAR] = (world.beings.emotions[i][EMO_FEAR] - 0.3).max(0.0);
-                        world.beings.emotions[i][EMO_CONTENTMENT] = (world.beings.emotions[i][EMO_CONTENTMENT] + 0.4).min(1.0);
+                        world.beings.hot.emotions[i][EMO_ANGER] = (world.beings.hot.emotions[i][EMO_ANGER] - 0.5).max(0.0);
+                        world.beings.hot.emotions[i][EMO_FEAR] = (world.beings.hot.emotions[i][EMO_FEAR] - 0.3).max(0.0);
+                        world.beings.hot.emotions[i][EMO_CONTENTMENT] = (world.beings.hot.emotions[i][EMO_CONTENTMENT] + 0.4).min(1.0);
                     }
                 }
             }
         }
 
         GodAction::InspireJoy { region } => {
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let pos = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let pos = world.beings.hot.positions[i];
                     if region.contains_pos(pos) {
-                        world.beings.emotions[i][EMO_JOY] = (world.beings.emotions[i][EMO_JOY] + 0.6).min(1.0);
-                        world.beings.emotions[i][EMO_GRIEF] = (world.beings.emotions[i][EMO_GRIEF] - 0.3).max(0.0);
+                        world.beings.hot.emotions[i][EMO_JOY] = (world.beings.hot.emotions[i][EMO_JOY] + 0.6).min(1.0);
+                        world.beings.hot.emotions[i][EMO_GRIEF] = (world.beings.hot.emotions[i][EMO_GRIEF] - 0.3).max(0.0);
                     }
                 }
             }
         }
 
         GodAction::LoveSpark { a, b } => {
-            if a < world.beings.count && b < world.beings.count {
-                if world.beings.states[a] != BeingState::Dead && world.beings.states[b] != BeingState::Dead {
+            if a < world.beings.hot.count && b < world.beings.hot.count {
+                if world.beings.hot.states[a] != BeingState::Dead && world.beings.hot.states[b] != BeingState::Dead {
                     modify_relationship(&mut world.beings, a, b, 0.5, 0.3, 0.1);
                     modify_relationship(&mut world.beings, b, a, 0.5, 0.3, 0.1);
-                    world.beings.emotions[a][EMO_JOY] = (world.beings.emotions[a][EMO_JOY] + 0.4).min(1.0);
-                    world.beings.emotions[b][EMO_JOY] = (world.beings.emotions[b][EMO_JOY] + 0.4).min(1.0);
+                    world.beings.hot.emotions[a][EMO_JOY] = (world.beings.hot.emotions[a][EMO_JOY] + 0.4).min(1.0);
+                    world.beings.hot.emotions[b][EMO_JOY] = (world.beings.hot.emotions[b][EMO_JOY] + 0.4).min(1.0);
                 }
             }
         }
 
         GodAction::FeedRegion { region, amount } => {
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let pos = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let pos = world.beings.hot.positions[i];
                     if region.contains_pos(pos) {
-                        world.beings.needs[i][NEED_HUNGER] = (world.beings.needs[i][NEED_HUNGER] + amount).min(1.0);
+                        world.beings.hot.needs[i][NEED_HUNGER] = (world.beings.hot.needs[i][NEED_HUNGER] + amount).min(1.0);
                     }
                 }
             }
@@ -934,11 +936,11 @@ fn apply_god_action(world: &mut World, action: GodAction) {
 
         GodAction::InspireArea { region, emotion, intensity } => {
             if emotion < 6 {
-                for i in 0..world.beings.count {
-                    if world.beings.states[i] != BeingState::Dead {
-                        let pos = world.beings.positions[i];
+                for i in 0..world.beings.hot.count {
+                    if world.beings.hot.states[i] != BeingState::Dead {
+                        let pos = world.beings.hot.positions[i];
                         if region.contains_pos(pos) {
-                            world.beings.emotions[i][emotion] = (world.beings.emotions[i][emotion] + intensity).clamp(0.0, 1.0);
+                            world.beings.hot.emotions[i][emotion] = (world.beings.hot.emotions[i][emotion] + intensity).clamp(0.0, 1.0);
                         }
                     }
                 }
@@ -947,16 +949,16 @@ fn apply_god_action(world: &mut World, action: GodAction) {
 
         GodAction::ExtendLifespan { indices, multiplier } => {
             for &idx in &indices {
-                if idx < world.beings.count {
-                    world.beings.lifespans[idx] = (world.beings.lifespans[idx] as f32 * multiplier) as u32;
+                if idx < world.beings.hot.count {
+                    world.beings.hot.lifespans[idx] = (world.beings.hot.lifespans[idx] as f32 * multiplier) as u32;
                 }
             }
         }
 
         GodAction::Rejuvenate { index } => {
-            if index < world.beings.count && world.beings.states[index] != BeingState::Dead {
-                world.beings.ages[index] = world.beings.ages[index] / 3;
-                for need in world.beings.needs[index].iter_mut() {
+            if index < world.beings.hot.count && world.beings.hot.states[index] != BeingState::Dead {
+                world.beings.hot.ages[index] = world.beings.hot.ages[index] / 3;
+                for need in world.beings.hot.needs[index].iter_mut() {
                     *need = (*need + 0.4).min(1.0);
                 }
             }
@@ -964,10 +966,10 @@ fn apply_god_action(world: &mut World, action: GodAction) {
 
         GodAction::ModifyNeeds { indices, changes } => {
             for &idx in &indices {
-                if idx < world.beings.count && world.beings.states[idx] != BeingState::Dead {
+                if idx < world.beings.hot.count && world.beings.hot.states[idx] != BeingState::Dead {
                     for (need_idx, delta) in &changes {
                         if *need_idx < 6 {
-                            world.beings.needs[idx][*need_idx] = (world.beings.needs[idx][*need_idx] + delta).clamp(0.0, 1.0);
+                            world.beings.hot.needs[idx][*need_idx] = (world.beings.hot.needs[idx][*need_idx] + delta).clamp(0.0, 1.0);
                         }
                     }
                 }
@@ -976,26 +978,26 @@ fn apply_god_action(world: &mut World, action: GodAction) {
 
         // ── Curse ─────────────────────────────────────────────────────────────
         GodAction::Curse { index, magnitude } => {
-            if index < world.beings.count && world.beings.states[index] != BeingState::Dead {
-                for need in world.beings.needs[index].iter_mut() {
+            if index < world.beings.hot.count && world.beings.hot.states[index] != BeingState::Dead {
+                for need in world.beings.hot.needs[index].iter_mut() {
                     *need = (*need - magnitude * 0.4).max(0.0);
                 }
-                world.beings.emotions[index][EMO_GRIEF] = (world.beings.emotions[index][EMO_GRIEF] + magnitude * 0.5).min(1.0);
-                world.beings.emotions[index][EMO_FEAR] = (world.beings.emotions[index][EMO_FEAR] + magnitude * 0.3).min(1.0);
+                world.beings.hot.emotions[index][EMO_GRIEF] = (world.beings.hot.emotions[index][EMO_GRIEF] + magnitude * 0.5).min(1.0);
+                world.beings.hot.emotions[index][EMO_FEAR] = (world.beings.hot.emotions[index][EMO_FEAR] + magnitude * 0.3).min(1.0);
             }
         }
 
         GodAction::CurseMadness { region } => {
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let pos = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let pos = world.beings.hot.positions[i];
                     if region.contains_pos(pos) {
-                        world.beings.emotions[i][EMO_ANGER] = (world.beings.emotions[i][EMO_ANGER] + 0.7).min(1.0);
-                        world.beings.emotions[i][EMO_FEAR] = (world.beings.emotions[i][EMO_FEAR] + 0.5).min(1.0);
+                        world.beings.hot.emotions[i][EMO_ANGER] = (world.beings.hot.emotions[i][EMO_ANGER] + 0.7).min(1.0);
+                        world.beings.hot.emotions[i][EMO_FEAR] = (world.beings.hot.emotions[i][EMO_FEAR] + 0.5).min(1.0);
                         // Randomize personality slightly
                         for t in 0..5 {
                             let delta = (world.rng.f32() - 0.5) * 0.4;
-                            world.beings.personalities[i][t] = (world.beings.personalities[i][t] + delta).clamp(-1.0, 1.0);
+                            world.beings.hot.personalities[i][t] = (world.beings.hot.personalities[i][t] + delta).clamp(-1.0, 1.0);
                         }
                     }
                 }
@@ -1003,49 +1005,49 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         }
 
         GodAction::CurseIsolation { index } => {
-            if index < world.beings.count && world.beings.states[index] != BeingState::Dead {
+            if index < world.beings.hot.count && world.beings.hot.states[index] != BeingState::Dead {
                 // Set social personality very negative, reduce belonging
-                world.beings.personalities[index][1] = -0.9; // TRAIT_SOCIAL
-                world.beings.needs[index][NEED_BELONGING] = 0.1;
-                world.beings.emotions[index][EMO_GRIEF] = (world.beings.emotions[index][EMO_GRIEF] + 0.5).min(1.0);
+                world.beings.hot.personalities[index][1] = -0.9; // TRAIT_SOCIAL
+                world.beings.hot.needs[index][NEED_BELONGING] = 0.1;
+                world.beings.hot.emotions[index][EMO_GRIEF] = (world.beings.hot.emotions[index][EMO_GRIEF] + 0.5).min(1.0);
             }
         }
 
         GodAction::CursePlague { region } => {
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let pos = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let pos = world.beings.hot.positions[i];
                     if region.contains_pos(pos) {
-                        world.beings.needs[i][NEED_WARMTH] = (world.beings.needs[i][NEED_WARMTH] - 0.5).max(0.0);
-                        world.beings.needs[i][NEED_REST] = (world.beings.needs[i][NEED_REST] - 0.5).max(0.0);
-                        world.beings.needs[i][NEED_PURPOSE] = (world.beings.needs[i][NEED_PURPOSE] - 0.3).max(0.0);
+                        world.beings.hot.needs[i][NEED_WARMTH] = (world.beings.hot.needs[i][NEED_WARMTH] - 0.5).max(0.0);
+                        world.beings.hot.needs[i][NEED_REST] = (world.beings.hot.needs[i][NEED_REST] - 0.5).max(0.0);
+                        world.beings.hot.needs[i][NEED_PURPOSE] = (world.beings.hot.needs[i][NEED_PURPOSE] - 0.3).max(0.0);
                     }
                 }
             }
         }
 
         GodAction::CurseAging { index, years } => {
-            if index < world.beings.count && world.beings.states[index] != BeingState::Dead {
+            if index < world.beings.hot.count && world.beings.hot.states[index] != BeingState::Dead {
                 // 1 year = 28800 ticks (from dashboard code)
-                world.beings.ages[index] = world.beings.ages[index].saturating_add(years * 28800);
+                world.beings.hot.ages[index] = world.beings.hot.ages[index].saturating_add(years * 28800);
             }
         }
 
         GodAction::CurseHunger { index } => {
-            if index < world.beings.count && world.beings.states[index] != BeingState::Dead {
-                world.beings.needs[index][NEED_HUNGER] = 0.0;
-                world.beings.carry[index] = [0.0, 0.0];
+            if index < world.beings.hot.count && world.beings.hot.states[index] != BeingState::Dead {
+                world.beings.hot.needs[index][NEED_HUNGER] = 0.0;
+                world.beings.hot.carry[index] = [0.0, 0.0];
             }
         }
 
         GodAction::ModifyEmotions { region, changes } => {
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let pos = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let pos = world.beings.hot.positions[i];
                     if region.contains_pos(pos) {
                         for (emo_idx, delta) in &changes {
                             if *emo_idx < 6 {
-                                world.beings.emotions[i][*emo_idx] = (world.beings.emotions[i][*emo_idx] + delta).clamp(0.0, 1.0);
+                                world.beings.hot.emotions[i][*emo_idx] = (world.beings.hot.emotions[i][*emo_idx] + delta).clamp(0.0, 1.0);
                             }
                         }
                     }
@@ -1056,8 +1058,8 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         GodAction::ModifyPersonality { indices, trait_idx, delta, duration: _ } => {
             if trait_idx < 5 {
                 for &idx in &indices {
-                    if idx < world.beings.count {
-                        world.beings.personalities[idx][trait_idx] = (world.beings.personalities[idx][trait_idx] + delta).clamp(-1.0, 1.0);
+                    if idx < world.beings.hot.count {
+                        world.beings.hot.personalities[idx][trait_idx] = (world.beings.hot.personalities[idx][trait_idx] + delta).clamp(-1.0, 1.0);
                     }
                 }
             }
@@ -1065,23 +1067,23 @@ fn apply_god_action(world: &mut World, action: GodAction) {
 
         GodAction::ClearMemory { indices } => {
             for &idx in &indices {
-                if idx < world.beings.count {
-                    world.beings.causal_memories[idx].clear();
+                if idx < world.beings.hot.count {
+                    world.beings.cold.causal_memories[idx].clear();
                 }
             }
         }
 
         GodAction::MarkHostile { target, radius, anger, duration: _ } => {
-            if target < world.beings.count && world.beings.states[target] != BeingState::Dead {
-                let pos = world.beings.positions[target];
+            if target < world.beings.hot.count && world.beings.hot.states[target] != BeingState::Dead {
+                let pos = world.beings.hot.positions[target];
                 let r2 = radius * radius;
-                for i in 0..world.beings.count {
-                    if i != target && world.beings.states[i] != BeingState::Dead {
-                        let p = world.beings.positions[i];
+                for i in 0..world.beings.hot.count {
+                    if i != target && world.beings.hot.states[i] != BeingState::Dead {
+                        let p = world.beings.hot.positions[i];
                         let dx = p[0] - pos[0];
                         let dy = p[1] - pos[1];
                         if dx * dx + dy * dy <= r2 {
-                            world.beings.emotions[i][EMO_ANGER] = (world.beings.emotions[i][EMO_ANGER] + anger).min(1.0);
+                            world.beings.hot.emotions[i][EMO_ANGER] = (world.beings.hot.emotions[i][EMO_ANGER] + anger).min(1.0);
                         }
                     }
                 }
@@ -1089,12 +1091,12 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         }
 
         GodAction::InduceRage { region } => {
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let pos = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let pos = world.beings.hot.positions[i];
                     if region.contains_pos(pos) {
-                        world.beings.emotions[i][EMO_ANGER] = (world.beings.emotions[i][EMO_ANGER] + 0.8).min(1.0);
-                        world.beings.emotions[i][EMO_FEAR] = (world.beings.emotions[i][EMO_FEAR] - 0.3).max(0.0);
+                        world.beings.hot.emotions[i][EMO_ANGER] = (world.beings.hot.emotions[i][EMO_ANGER] + 0.8).min(1.0);
+                        world.beings.hot.emotions[i][EMO_FEAR] = (world.beings.hot.emotions[i][EMO_FEAR] - 0.3).max(0.0);
                     }
                 }
             }
@@ -1104,7 +1106,7 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         GodAction::ForceAlliance { a_group, b_group } => {
             for &a in &a_group {
                 for &b in &b_group {
-                    if a < world.beings.count && b < world.beings.count {
+                    if a < world.beings.hot.count && b < world.beings.hot.count {
                         modify_relationship(&mut world.beings, a, b, 0.4, 0.3, 0.2);
                         modify_relationship(&mut world.beings, b, a, 0.4, 0.3, 0.2);
                     }
@@ -1115,7 +1117,7 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         GodAction::ForceWar { a_group, b_group } => {
             for &a in &a_group {
                 for &b in &b_group {
-                    if a < world.beings.count && b < world.beings.count {
+                    if a < world.beings.hot.count && b < world.beings.hot.count {
                         modify_relationship(&mut world.beings, a, b, -0.5, -0.4, -0.5);
                         modify_relationship(&mut world.beings, b, a, -0.5, -0.4, -0.5);
                     }
@@ -1124,48 +1126,48 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         }
 
         GodAction::Revolution { region } => {
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let pos = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let pos = world.beings.hot.positions[i];
                     if region.contains_pos(pos) {
-                        world.beings.emotions[i][EMO_ANGER] = (world.beings.emotions[i][EMO_ANGER] + 0.6).min(1.0);
-                        world.beings.emotions[i][EMO_CURIOSITY] = (world.beings.emotions[i][EMO_CURIOSITY] + 0.3).min(1.0);
+                        world.beings.hot.emotions[i][EMO_ANGER] = (world.beings.hot.emotions[i][EMO_ANGER] + 0.6).min(1.0);
+                        world.beings.hot.emotions[i][EMO_CURIOSITY] = (world.beings.hot.emotions[i][EMO_CURIOSITY] + 0.3).min(1.0);
                     }
                 }
             }
         }
 
         GodAction::Exile { index, dest } => {
-            if index < world.beings.count && world.beings.states[index] != BeingState::Dead {
+            if index < world.beings.hot.count && world.beings.hot.states[index] != BeingState::Dead {
                 let dx = dest[0].clamp(0.0, world.config.size.0 as f32 - 1.0);
                 let dy = dest[1].clamp(0.0, world.config.size.1 as f32 - 1.0);
-                world.beings.positions[index] = [dx, dy];
-                world.beings.emotions[index][EMO_GRIEF] = (world.beings.emotions[index][EMO_GRIEF] + 0.5).min(1.0);
-                world.beings.needs[index][NEED_BELONGING] = (world.beings.needs[index][NEED_BELONGING] - 0.4).max(0.0);
+                world.beings.hot.positions[index] = [dx, dy];
+                world.beings.hot.emotions[index][EMO_GRIEF] = (world.beings.hot.emotions[index][EMO_GRIEF] + 0.5).min(1.0);
+                world.beings.hot.needs[index][NEED_BELONGING] = (world.beings.hot.needs[index][NEED_BELONGING] - 0.4).max(0.0);
             }
         }
 
         GodAction::TeleportBeing { index, target } => {
-            if index < world.beings.count && world.beings.states[index] != BeingState::Dead {
+            if index < world.beings.hot.count && world.beings.hot.states[index] != BeingState::Dead {
                 let tx = target[0].clamp(0.0, world.config.size.0 as f32 - 1.0);
                 let ty = target[1].clamp(0.0, world.config.size.1 as f32 - 1.0);
-                world.beings.positions[index] = [tx, ty];
+                world.beings.hot.positions[index] = [tx, ty];
             }
         }
 
         GodAction::AppointLeader { index } => {
-            if index < world.beings.count && world.beings.states[index] != BeingState::Dead {
+            if index < world.beings.hot.count && world.beings.hot.states[index] != BeingState::Dead {
                 // Boost social standing: purpose, belonging, and boldness
-                world.beings.needs[index][NEED_PURPOSE] = (world.beings.needs[index][NEED_PURPOSE] + 0.4).min(1.0);
-                world.beings.needs[index][NEED_BELONGING] = (world.beings.needs[index][NEED_BELONGING] + 0.3).min(1.0);
-                world.beings.personalities[index][0] = (world.beings.personalities[index][0] + 0.2).min(1.0); // BOLD
-                world.beings.emotions[index][EMO_JOY] = (world.beings.emotions[index][EMO_JOY] + 0.4).min(1.0);
+                world.beings.hot.needs[index][NEED_PURPOSE] = (world.beings.hot.needs[index][NEED_PURPOSE] + 0.4).min(1.0);
+                world.beings.hot.needs[index][NEED_BELONGING] = (world.beings.hot.needs[index][NEED_BELONGING] + 0.3).min(1.0);
+                world.beings.hot.personalities[index][0] = (world.beings.hot.personalities[index][0] + 0.2).min(1.0); // BOLD
+                world.beings.hot.emotions[index][EMO_JOY] = (world.beings.hot.emotions[index][EMO_JOY] + 0.4).min(1.0);
             }
         }
 
         GodAction::MergeSettlements { a, b } => {
             // Force trust between two settlement representatives
-            if a < world.beings.count && b < world.beings.count {
+            if a < world.beings.hot.count && b < world.beings.hot.count {
                 modify_relationship(&mut world.beings, a, b, 0.6, 0.5, 0.2);
                 modify_relationship(&mut world.beings, b, a, 0.6, 0.5, 0.2);
             }
@@ -1174,7 +1176,7 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         GodAction::InspireTrade { a_group, b_group } => {
             for &a in &a_group {
                 for &b in &b_group {
-                    if a < world.beings.count && b < world.beings.count {
+                    if a < world.beings.hot.count && b < world.beings.hot.count {
                         modify_relationship(&mut world.beings, a, b, 0.2, 0.3, 0.1);
                         modify_relationship(&mut world.beings, b, a, 0.2, 0.3, 0.1);
                     }
@@ -1183,12 +1185,12 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         }
 
         GodAction::BoostLoyalty { region, amount } => {
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let pos = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let pos = world.beings.hot.positions[i];
                     if region.contains_pos(pos) {
-                        world.beings.needs[i][NEED_BELONGING] = (world.beings.needs[i][NEED_BELONGING] + amount).min(1.0);
-                        world.beings.emotions[i][EMO_CONTENTMENT] = (world.beings.emotions[i][EMO_CONTENTMENT] + amount * 0.5).min(1.0);
+                        world.beings.hot.needs[i][NEED_BELONGING] = (world.beings.hot.needs[i][NEED_BELONGING] + amount).min(1.0);
+                        world.beings.hot.emotions[i][EMO_CONTENTMENT] = (world.beings.hot.emotions[i][EMO_CONTENTMENT] + amount * 0.5).min(1.0);
                     }
                 }
             }
@@ -1199,7 +1201,7 @@ fn apply_god_action(world: &mut World, action: GodAction) {
             let debt_delta = -anger;
             for &a in &a_group {
                 for &b in &b_group {
-                    if a < world.beings.count && b < world.beings.count {
+                    if a < world.beings.hot.count && b < world.beings.hot.count {
                         modify_relationship(&mut world.beings, a, b, warmth, trust, debt_delta);
                     }
                 }
@@ -1228,18 +1230,18 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         }
 
         GodAction::AgeUp { index, years } => {
-            if index < world.beings.count && world.beings.states[index] != BeingState::Dead {
-                world.beings.ages[index] = world.beings.ages[index].saturating_add(years * 28800);
+            if index < world.beings.hot.count && world.beings.hot.states[index] != BeingState::Dead {
+                world.beings.hot.ages[index] = world.beings.hot.ages[index].saturating_add(years * 28800);
             }
         }
 
         GodAction::RemoveAll { region } => {
-            for i in 0..world.beings.count {
-                if world.beings.states[i] != BeingState::Dead {
-                    let pos = world.beings.positions[i];
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let pos = world.beings.hot.positions[i];
                     if region.contains_pos(pos) {
-                        world.beings.states[i] = BeingState::Dead;
-                        world.beings.alive_count = world.beings.alive_count.saturating_sub(1);
+                        world.beings.hot.states[i] = BeingState::Dead;
+                        world.beings.hot.alive_count = world.beings.hot.alive_count.saturating_sub(1);
                     }
                 }
             }
@@ -1334,11 +1336,11 @@ fn modify_relationship(
     trust_delta: f32,
     debt_delta: f32,
 ) {
-    if from >= beings.count {
+    if from >= beings.hot.count {
         return;
     }
     // Use get_or_create (tick=0 is fine for god actions)
-    let slot = beings.relationships[from].get_or_create(to as u32, 0);
+    let slot = beings.cold.relationships[from].get_or_create(to as u32, 0);
     slot.warmth = (slot.warmth + warmth_delta).clamp(-1.0, 1.0);
     slot.trust = (slot.trust + trust_delta).clamp(-1.0, 1.0);
     slot.debt = (slot.debt + debt_delta).clamp(-1.0, 1.0);

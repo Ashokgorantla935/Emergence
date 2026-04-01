@@ -42,7 +42,7 @@ impl Inspector {
             .default_width(280.0)
             .show(egui_ctx, |ui| {
                 if let Some(idx) = self.selected_being {
-                    if idx >= beings.count {
+                    if idx >= beings.hot.count {
                         self.selected_being = None;
                         return;
                     }
@@ -61,13 +61,13 @@ impl Inspector {
         idx: usize,
         _tick: u32,
     ) {
-        let age = beings.ages[idx];
-        let lifespan = beings.lifespans[idx];
+        let age = beings.hot.ages[idx];
+        let lifespan = beings.hot.lifespans[idx];
 
         // Header: name prominently
-        let ct = beings::creature_type_name(beings.creature_type[idx]);
-        let name = if idx < beings.names.len() && !beings.names[idx].is_empty() {
-            beings.names[idx].clone()
+        let ct = beings::creature_type_name(beings.hot.creature_type[idx]);
+        let name = if idx < beings.cold.names.len() && !beings.cold.names[idx].is_empty() {
+            beings.cold.names[idx].clone()
         } else {
             emergence_core::being::names::generate_name(&mut fastrand::Rng::with_seed(idx as u64))
         };
@@ -85,7 +85,7 @@ impl Inspector {
         ui.label(format!("{ct} — {age_label} (lives ~{lifespan_years}y)"));
 
         // Current action as plain English
-        let action_str = action_readable(beings.pending_action[idx]);
+        let action_str = action_readable(beings.hot.pending_action[idx]);
         ui.colored_label(egui::Color32::from_rgb(100, 200, 255), action_str);
 
         // Dominant emotion as single text label
@@ -98,7 +98,7 @@ impl Inspector {
             egui::Color32::from_rgb(60, 90, 220),   // Grief
             egui::Color32::from_rgb(50, 200, 70),   // Contentment
         ];
-        let emos = &beings.emotions[idx];
+        let emos = &beings.hot.emotions[idx];
         let (dom_emo_idx, dom_emo_val) = {
             let mut bi = 0usize;
             let mut bv = 0.0f32;
@@ -137,7 +137,7 @@ impl Inspector {
         ui.label("Needs");
         let need_names = ["Hunger", "Warmth", "Safety", "Belonging", "Purpose", "Rest"];
         for (i, &name) in need_names.iter().enumerate() {
-            let val = beings.needs[idx][i];
+            let val = beings.hot.needs[idx][i];
             let (label, color) = need_label(name, val);
             ui.colored_label(color, label);
         }
@@ -146,13 +146,13 @@ impl Inspector {
 
         // Family — human-readable
         ui.label("Family");
-        let parents = beings.parent_ids[idx];
+        let parents = beings.cold.parent_ids[idx];
         let has_parents = parents[0] != u32::MAX || parents[1] != u32::MAX;
         if has_parents {
             let pa_name = if parents[0] != u32::MAX {
                 let pid = parents[0] as usize;
-                if pid < beings.names.len() && !beings.names[pid].is_empty() {
-                    beings.names[pid].clone()
+                if pid < beings.cold.names.len() && !beings.cold.names[pid].is_empty() {
+                    beings.cold.names[pid].clone()
                 } else {
                     format!("#{}", parents[0])
                 }
@@ -161,8 +161,8 @@ impl Inspector {
             };
             let pb_name = if parents[1] != u32::MAX {
                 let pid = parents[1] as usize;
-                if pid < beings.names.len() && !beings.names[pid].is_empty() {
-                    beings.names[pid].clone()
+                if pid < beings.cold.names.len() && !beings.cold.names[pid].is_empty() {
+                    beings.cold.names[pid].clone()
                 } else {
                     format!("#{}", parents[1])
                 }
@@ -221,7 +221,7 @@ impl Inspector {
 
         // History: trait badges, kill count, age milestone
         ui.label("History");
-        let trait_bits = beings.traits[idx];
+        let trait_bits = beings.cold.traits[idx];
         if trait_bits != 0 {
             ui.horizontal_wrapped(|ui| {
                 let legendary_color = egui::Color32::from_rgb(255, 200, 0);   // gold
@@ -237,7 +237,7 @@ impl Inspector {
                     ui.colored_label(legendary_color, "Founder");
                 }
                 if trait_bits & BEING_TRAIT_ELDER != 0 {
-                    let age_years = (beings.ages[idx] as f32 / 28800.0) as u32;
+                    let age_years = (beings.hot.ages[idx] as f32 / 28800.0) as u32;
                     ui.colored_label(positive_color, format!("Elder ({age_years}y)"));
                 }
                 if trait_bits & BEING_TRAIT_BRAVE != 0 {
@@ -272,7 +272,7 @@ impl Inspector {
                 }
             });
         }
-        let kills = beings.kill_count[idx];
+        let kills = beings.cold.kill_count[idx];
         if kills > 0 {
             ui.label(format!("Defeated {} foes", kills));
         }
@@ -298,11 +298,11 @@ impl Inspector {
         let mut best_dist = f32::MAX;
         let mut best_idx = None;
         for &ni in &nearby {
-            if beings.states[ni] == BeingState::Dead {
+            if beings.hot.states[ni] == BeingState::Dead {
                 continue;
             }
-            let dx = beings.positions[ni][0] - world_pos[0];
-            let dy = beings.positions[ni][1] - world_pos[1];
+            let dx = beings.hot.positions[ni][0] - world_pos[0];
+            let dy = beings.hot.positions[ni][1] - world_pos[1];
             let dist = dx * dx + dy * dy;
             if dist < best_dist {
                 best_dist = dist;
@@ -396,10 +396,10 @@ fn need_label(need: &str, val: f32) -> (String, egui::Color32) {
 
 fn life_event_readable(evt: &emergence_core::sim::world_state::Event, beings: &Beings) -> String {
     use emergence_core::sim::world_state::EventType;
-    let target_name = if evt.target_id != u32::MAX && (evt.target_id as usize) < beings.names.len()
-        && !beings.names[evt.target_id as usize].is_empty()
+    let target_name = if evt.target_id != u32::MAX && (evt.target_id as usize) < beings.cold.names.len()
+        && !beings.cold.names[evt.target_id as usize].is_empty()
     {
-        beings.names[evt.target_id as usize].clone()
+        beings.cold.names[evt.target_id as usize].clone()
     } else if evt.target_id != u32::MAX {
         format!("#{}", evt.target_id)
     } else {

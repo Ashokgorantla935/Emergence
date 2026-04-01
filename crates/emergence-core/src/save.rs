@@ -153,6 +153,7 @@ pub struct SaveFile {
     pub signal_style: Vec<u8>,          // cultural fingerprint
     pub states: Vec<u8>,
     pub creature_type: Vec<u8>,
+    pub fauna_params: Vec<[f32; 6]>,
     pub parent_ids: Vec<[u32; 2]>,
     pub traits: Vec<u64>,
     pub kill_count: Vec<u16>,
@@ -192,14 +193,14 @@ impl SaveFile {
             .unwrap_or(0);
 
         let beings = &world.beings;
-        let n = beings.count;
+        let n = beings.hot.count;
 
         let relationships = (0..n)
             .map(|i| {
-                let slots = beings.relationships[i]
+                let slots = beings.cold.relationships[i]
                     .slots
                     .iter()
-                    .take(beings.relationships[i].count as usize)
+                    .take(beings.cold.relationships[i].count as usize)
                     .map(|imp| SerializedRelationship {
                         target_id: imp.target_id,
                         trust: imp.trust,
@@ -215,7 +216,7 @@ impl SaveFile {
 
         let causal_memories = (0..n)
             .map(|i| {
-                let ring = &beings.causal_memories[i];
+                let ring = &beings.cold.causal_memories[i];
                 let entries = (0..ring.len as usize)
                     .map(|j| {
                         let idx = (ring.head as usize + 32 - ring.len as usize + j) % 32;
@@ -279,31 +280,32 @@ impl SaveFile {
             signals: world.signals.channels.clone(),
 
             being_count: n as u32,
-            positions: beings.positions.clone(),
-            velocities: beings.velocities.clone(),
-            needs: beings.needs.clone(),
-            needs_prev: beings.needs_prev.clone(),
-            emotions: beings.emotions.clone(),
-            personalities: beings.personalities.clone(),
-            ages: beings.ages.clone(),
-            lifespans: beings.lifespans.clone(),
-            carry: beings.carry.clone(),
-            hunger_zero_ticks: beings.hunger_zero_ticks.clone(),
-            warmth_zero_ticks: beings.warmth_zero_ticks.clone(),
-            freeze_ticks: beings.freeze_ticks.clone(),
-            pending_action: beings.pending_action.clone(),
-            pending_context: beings.pending_context.clone(),
-            pending_tick: beings.pending_tick.clone(),
-            pending_needs: beings.pending_needs.clone(),
-            tool_quality: beings.tool_quality.clone(),
-            signal_style: beings.signal_style.clone(),
-            states: beings.states.iter().map(|s| *s as u8).collect(),
-            creature_type: beings.creature_type.clone(),
-            parent_ids: beings.parent_ids.clone(),
-            traits: beings.traits.clone(),
-            kill_count: beings.kill_count.clone(),
-            last_birth_tick: beings.last_birth_tick.clone(),
-            names: beings.names.clone(),
+            positions: beings.hot.positions.clone(),
+            velocities: beings.hot.velocities.clone(),
+            needs: beings.hot.needs.clone(),
+            needs_prev: beings.hot.needs_prev.clone(),
+            emotions: beings.hot.emotions.clone(),
+            personalities: beings.hot.personalities.clone(),
+            ages: beings.hot.ages.clone(),
+            lifespans: beings.hot.lifespans.clone(),
+            carry: beings.hot.carry.clone(),
+            hunger_zero_ticks: beings.hot.hunger_zero_ticks.clone(),
+            warmth_zero_ticks: beings.hot.warmth_zero_ticks.clone(),
+            freeze_ticks: beings.hot.freeze_ticks.clone(),
+            pending_action: beings.hot.pending_action.clone(),
+            pending_context: beings.hot.pending_context.clone(),
+            pending_tick: beings.hot.pending_tick.clone(),
+            pending_needs: beings.hot.pending_needs.clone(),
+            tool_quality: beings.hot.tool_quality.clone(),
+            signal_style: beings.hot.signal_style.clone(),
+            states: beings.hot.states.iter().map(|s| *s as u8).collect(),
+            creature_type: beings.hot.creature_type.clone(),
+            fauna_params: beings.hot.fauna_params.clone(),
+            parent_ids: beings.cold.parent_ids.clone(),
+            traits: beings.cold.traits.clone(),
+            kill_count: beings.cold.kill_count.clone(),
+            last_birth_tick: beings.cold.last_birth_tick.clone(),
+            names: beings.cold.names.clone(),
 
             relationships,
             causal_memories,
@@ -398,32 +400,39 @@ impl SaveFile {
         // Reconstruct Beings
         let mut beings = Beings::new();
         for i in 0..n {
-            beings.positions.push(self.positions[i]);
-            beings.velocities.push(self.velocities[i]);
-            beings.needs.push(self.needs[i]);
-            beings.needs_prev.push(self.needs_prev[i]);
-            beings.emotions.push(self.emotions[i]);
-            beings.personalities.push(self.personalities[i]);
-            beings.ages.push(self.ages[i]);
-            beings.lifespans.push(self.lifespans[i]);
-            beings.carry.push(self.carry[i]);
-            beings.hunger_zero_ticks.push(self.hunger_zero_ticks[i]);
-            beings.warmth_zero_ticks.push(self.warmth_zero_ticks[i]);
-            beings.freeze_ticks.push(self.freeze_ticks[i]);
-            beings.pending_action.push(self.pending_action[i]);
-            beings.pending_context.push(self.pending_context[i]);
-            beings.pending_tick.push(self.pending_tick[i]);
-            beings.pending_needs.push(self.pending_needs[i]);
-            beings.tool_quality.push(self.tool_quality[i]);
-            beings.signal_style.push(self.signal_style[i]);
-            beings.states.push(being_state_from_u8(self.states[i]));
-            beings.creature_type.push(self.creature_type[i]);
-            beings.parent_ids.push(self.parent_ids[i]);
-            beings.traits.push(if i < self.traits.len() { self.traits[i] } else { 0 });
-            beings.kill_count.push(if i < self.kill_count.len() { self.kill_count[i] } else { 0 });
-            beings.last_birth_tick.push(if i < self.last_birth_tick.len() { self.last_birth_tick[i] } else { 0 });
-            beings.names.push(if i < self.names.len() { self.names[i].clone() } else { String::new() });
-            beings.traces.push(None);
+            beings.hot.positions.push(self.positions[i]);
+            beings.hot.velocities.push(self.velocities[i]);
+            beings.hot.needs.push(self.needs[i]);
+            beings.hot.needs_prev.push(self.needs_prev[i]);
+            beings.hot.emotions.push(self.emotions[i]);
+            beings.hot.personalities.push(self.personalities[i]);
+            beings.hot.ages.push(self.ages[i]);
+            beings.hot.lifespans.push(self.lifespans[i]);
+            beings.hot.carry.push(self.carry[i]);
+            beings.hot.hunger_zero_ticks.push(self.hunger_zero_ticks[i]);
+            beings.hot.warmth_zero_ticks.push(self.warmth_zero_ticks[i]);
+            beings.hot.freeze_ticks.push(self.freeze_ticks[i]);
+            beings.hot.pending_action.push(self.pending_action[i]);
+            beings.hot.pending_context.push(self.pending_context[i]);
+            beings.hot.pending_tick.push(self.pending_tick[i]);
+            beings.hot.pending_needs.push(self.pending_needs[i]);
+            beings.hot.tool_quality.push(self.tool_quality[i]);
+            beings.hot.signal_style.push(self.signal_style[i]);
+            beings.hot.states.push(being_state_from_u8(self.states[i]));
+            beings.hot.creature_type.push(self.creature_type[i]);
+            beings.hot.fauna_params.push(
+                if i < self.fauna_params.len() {
+                    self.fauna_params[i]
+                } else {
+                    crate::being::data::init_fauna_params(self.creature_type[i])
+                }
+            );
+            beings.cold.parent_ids.push(self.parent_ids[i]);
+            beings.cold.traits.push(if i < self.traits.len() { self.traits[i] } else { 0 });
+            beings.cold.kill_count.push(if i < self.kill_count.len() { self.kill_count[i] } else { 0 });
+            beings.cold.last_birth_tick.push(if i < self.last_birth_tick.len() { self.last_birth_tick[i] } else { 0 });
+            beings.cold.names.push(if i < self.names.len() { self.names[i].clone() } else { String::new() });
+            beings.cold.traces.push(None);
 
             // Relationships
             let mut slots = crate::being::memory::RelationshipSlots::new();
@@ -442,7 +451,7 @@ impl SaveFile {
                     slots.count += 1;
                 }
             }
-            beings.relationships.push(slots);
+            beings.cold.relationships.push(slots);
 
             // Causal memory
             let mut ring = crate::being::memory::CausalMemoryRing::new();
@@ -458,12 +467,12 @@ impl SaveFile {
                     _padding: 0,
                 };
             }
-            beings.causal_memories.push(ring);
+            beings.cold.causal_memories.push(ring);
         }
-        beings.count = n;
+        beings.hot.count = n;
         // Recount alive
-        beings.alive_count = beings
-            .states
+        beings.hot.alive_count = beings
+            .hot.states
             .iter()
             .filter(|&&s| s != BeingState::Dead)
             .count();
@@ -471,7 +480,7 @@ impl SaveFile {
 
         // Spatial index rebuilt from positions
         let mut spatial = SpatialIndex::new(w, h, 4.0);
-        spatial.rebuild(&beings.positions, &beings.states);
+        spatial.rebuild(&beings.hot.positions, &beings.hot.states);
 
         let rng = fastrand::Rng::with_seed(self.rng_state);
 
@@ -671,19 +680,19 @@ mod tests {
     #[test]
     fn test_save_roundtrip_being_count() {
         let world = tiny_world();
-        let original_count = world.beings.count;
+        let original_count = world.beings.hot.count;
         let save_file = SaveFile::from_world(&world);
         let restored = save_file.to_world();
-        assert_eq!(restored.beings.count, original_count);
+        assert_eq!(restored.beings.hot.count, original_count);
     }
 
     #[test]
     fn test_save_roundtrip_positions() {
         let world = tiny_world();
-        let original_pos: Vec<[f32; 2]> = world.beings.positions.clone();
+        let original_pos: Vec<[f32; 2]> = world.beings.hot.positions.clone();
         let save_file = SaveFile::from_world(&world);
         let restored = save_file.to_world();
-        for (i, (orig, rest)) in original_pos.iter().zip(restored.beings.positions.iter()).enumerate() {
+        for (i, (orig, rest)) in original_pos.iter().zip(restored.beings.hot.positions.iter()).enumerate() {
             assert!(
                 (orig[0] - rest[0]).abs() < 1e-5 && (orig[1] - rest[1]).abs() < 1e-5,
                 "Position mismatch at being {i}"

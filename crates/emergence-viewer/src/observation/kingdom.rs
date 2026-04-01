@@ -80,14 +80,14 @@ impl KingdomDetector {
             let mut best_idx: Option<usize> = None;
 
             for &ci in &candidates {
-                if ci >= beings.count {
+                if ci >= beings.hot.count {
                     continue;
                 }
                 // avg_trust: average warmth others in settlement have toward ci
                 let warmth_sum: f32 = candidates
                     .iter()
-                    .filter(|&&oi| oi != ci && oi < beings.count)
-                    .filter_map(|&oi| beings.relationships[oi].find(ci as u32))
+                    .filter(|&&oi| oi != ci && oi < beings.hot.count)
+                    .filter_map(|&oi| beings.cold.relationships[oi].find(ci as u32))
                     .map(|imp| imp.warmth)
                     .sum();
                 let avg_trust = if candidates.len() > 1 {
@@ -95,8 +95,8 @@ impl KingdomDetector {
                 } else {
                     0.0
                 };
-                let bold = beings.personalities[ci][TRAIT_BOLD];
-                let social = beings.personalities[ci][TRAIT_SOCIAL];
+                let bold = beings.hot.personalities[ci][TRAIT_BOLD];
+                let social = beings.hot.personalities[ci][TRAIT_SOCIAL];
                 let score = avg_trust * 0.7 + bold * 0.15 + social * 0.15;
 
                 if score > best_score {
@@ -135,7 +135,7 @@ impl KingdomDetector {
                 let allied_leaders = match (settlement_leaders[i], settlement_leaders[j]) {
                     (Some(li), Some(lj)) => {
                         // Check mutual warmth > 0.3 and centroid distance < 40
-                        let warmth = beings.relationships[li]
+                        let warmth = beings.cold.relationships[li]
                             .find(lj as u32)
                             .map(|imp| imp.warmth)
                             .unwrap_or(0.0);
@@ -208,12 +208,12 @@ impl KingdomDetector {
                 let sum: f32 = all_beings
                     .iter()
                     .map(|&bi| {
-                        let belonging = beings.needs[bi][3];
-                        let warmth_to_leader = beings.relationships[bi]
+                        let belonging = beings.hot.needs[bi][3];
+                        let warmth_to_leader = beings.cold.relationships[bi]
                             .find(leader_idx as u32)
                             .map(|imp| imp.warmth)
                             .unwrap_or(0.0);
-                        belonging * 0.30 + warmth_to_leader * 0.35 + beings.needs[bi][2] * 0.20 + 0.15
+                        belonging * 0.30 + warmth_to_leader * 0.35 + beings.hot.needs[bi][2] * 0.20 + 0.15
                     })
                     .sum();
                 sum / all_beings.len() as f32
@@ -223,7 +223,7 @@ impl KingdomDetector {
             let avg_warmth = if all_beings.is_empty() {
                 0.0
             } else {
-                let sum: f32 = all_beings.iter().map(|&bi| beings.emotions[bi][1]).sum();
+                let sum: f32 = all_beings.iter().map(|&bi| beings.hot.emotions[bi][1]).sum();
                 sum / all_beings.len() as f32
             };
 
@@ -268,7 +268,7 @@ impl KingdomDetector {
             for j in (i + 1)..nk {
                 let li = new_kingdoms[i].leader_idx;
                 let lj = new_kingdoms[j].leader_idx;
-                let warmth_ij = beings.relationships[li]
+                let warmth_ij = beings.cold.relationships[li]
                     .find(lj as u32)
                     .map(|imp| imp.warmth)
                     .unwrap_or(0.0);
@@ -365,10 +365,10 @@ fn compute_territory(
 
 /// Derive kingdom color from leader's dominant personality trait.
 fn personality_color(beings: &Beings, leader_idx: usize) -> [u8; 3] {
-    if leader_idx >= beings.count {
+    if leader_idx >= beings.hot.count {
         return [128, 128, 128];
     }
-    let p = beings.personalities[leader_idx];
+    let p = beings.hot.personalities[leader_idx];
     // bold=0, social=1, curious=2, generous=3, diurnal=4
     let dominant = p
         .iter()

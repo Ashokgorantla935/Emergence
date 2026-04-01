@@ -502,15 +502,15 @@ pub fn extract_kingdoms(beings: &Beings, tick: u32) -> KingdomFrame {
     use std::collections::HashMap;
 
     let mut groups: HashMap<u8, Vec<usize>> = HashMap::new();
-    for i in 0..beings.count {
-        if beings.states[i] == BeingState::Dead {
+    for i in 0..beings.hot.count {
+        if beings.hot.states[i] == BeingState::Dead {
             continue;
         }
-        if beings.creature_type[i] != 0 {
+        if beings.hot.creature_type[i] != 0 {
             // not human
             continue;
         }
-        let style = beings.signal_style[i];
+        let style = beings.hot.signal_style[i];
         groups.entry(style).or_default().push(i);
     }
 
@@ -528,8 +528,8 @@ pub fn extract_kingdoms(beings: &Beings, tick: u32) -> KingdomFrame {
         let mut cx = 0.0_f32;
         let mut cy = 0.0_f32;
         for &i in indices {
-            cx += beings.positions[i][0];
-            cy += beings.positions[i][1];
+            cx += beings.hot.positions[i][0];
+            cy += beings.hot.positions[i][1];
         }
         cx /= n;
         cy /= n;
@@ -537,26 +537,26 @@ pub fn extract_kingdoms(beings: &Beings, tick: u32) -> KingdomFrame {
         // Find leader: being with highest average warmth-like emotion (joy+contentment)
         // as proxy for social standing
         let leader_idx = indices.iter().copied().max_by(|&a, &b| {
-            let score_a = beings.emotions[a][1] + beings.emotions[a][5]; // joy + contentment
-            let score_b = beings.emotions[b][1] + beings.emotions[b][5];
+            let score_a = beings.hot.emotions[a][1] + beings.hot.emotions[a][5]; // joy + contentment
+            let score_b = beings.hot.emotions[b][1] + beings.hot.emotions[b][5];
             score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
         }).unwrap_or(usize::MAX);
 
         let leader_pos = if leader_idx != usize::MAX {
-            beings.positions[leader_idx]
+            beings.hot.positions[leader_idx]
         } else {
             [cx, cy]
         };
 
         // Derive kingdom color from leader personality
         let color = if leader_idx != usize::MAX {
-            personality_to_kingdom_color(&beings.personalities[leader_idx])
+            personality_to_kingdom_color(&beings.hot.personalities[leader_idx])
         } else {
             [0.6, 0.6, 0.6]
         };
 
         // Convex hull (gift wrapping, O(nh))
-        let positions: Vec<[f32; 2]> = indices.iter().map(|&i| beings.positions[i]).collect();
+        let positions: Vec<[f32; 2]> = indices.iter().map(|&i| beings.hot.positions[i]).collect();
         let hull = convex_hull(&positions);
 
         kingdoms.push(KingdomInfo {
@@ -580,8 +580,8 @@ pub fn extract_kingdoms(beings: &Beings, tick: u32) -> KingdomFrame {
                 let li = kingdoms[i].leader_idx;
                 let lj = kingdoms[j].leader_idx;
                 if li != usize::MAX && lj != usize::MAX {
-                    let joy_i = beings.emotions[li][1];
-                    let joy_j = beings.emotions[lj][1];
+                    let joy_i = beings.hot.emotions[li][1];
+                    let joy_j = beings.hot.emotions[lj][1];
                     if joy_i > 0.6 && joy_j > 0.6 {
                         alliances.push((kingdoms[i].id, kingdoms[j].id));
                     }

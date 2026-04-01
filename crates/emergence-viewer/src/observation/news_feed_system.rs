@@ -447,8 +447,8 @@ impl NewsFeedSystem {
     }
 
     fn being_name(&self, being_idx: usize, beings: &Beings) -> String {
-        if being_idx < beings.names.len() && !beings.names[being_idx].is_empty() {
-            return beings.names[being_idx].clone();
+        if being_idx < beings.cold.names.len() && !beings.cold.names[being_idx].is_empty() {
+            return beings.cold.names[being_idx].clone();
         }
         if let Some(nb) = self.notable_beings.iter().find(|nb| nb.being_idx == being_idx) {
             nb.name.clone()

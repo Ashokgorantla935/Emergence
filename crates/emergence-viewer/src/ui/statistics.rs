@@ -50,19 +50,19 @@ impl StatsHistory {
         }
         self.last_sample_tick = tick;
 
-        let live: Vec<usize> = (0..beings.count)
-            .filter(|&i| beings.states[i] != emergence_core::being::data::BeingState::Dead)
+        let live: Vec<usize> = (0..beings.hot.count)
+            .filter(|&i| beings.hot.states[i] != emergence_core::being::data::BeingState::Dead)
             .collect();
         let pop = live.len() as u32;
         let avg_hunger = if live.is_empty() {
             0.0
         } else {
-            live.iter().map(|&i| beings.needs[i][0]).sum::<f32>() / live.len() as f32
+            live.iter().map(|&i| beings.hot.needs[i][0]).sum::<f32>() / live.len() as f32
         };
         let avg_warmth = if live.is_empty() {
             0.0
         } else {
-            live.iter().map(|&i| beings.needs[i][1]).sum::<f32>() / live.len() as f32
+            live.iter().map(|&i| beings.hot.needs[i][1]).sum::<f32>() / live.len() as f32
         };
 
         // Emotion counts: dominant emotion per being
@@ -71,8 +71,8 @@ impl StatsHistory {
             let mut max_val = 0.0_f32;
             let mut max_idx = 0;
             for e in 0..6 {
-                if beings.emotions[i][e] > max_val {
-                    max_val = beings.emotions[i][e];
+                if beings.hot.emotions[i][e] > max_val {
+                    max_val = beings.hot.emotions[i][e];
                     max_idx = e;
                 }
             }
@@ -419,8 +419,8 @@ fn render_tree(ui: &mut egui::Ui, beings: &Beings, root: usize) -> Option<usize>
     for _ in 0..4 {
         let mut next_gen: Vec<usize> = Vec::new();
         for &idx in &current_gen {
-            if idx < beings.count {
-                let p = beings.parent_ids[idx];
+            if idx < beings.hot.count {
+                let p = beings.cold.parent_ids[idx];
                 if p[0] != u32::MAX {
                     next_gen.push(p[0] as usize);
                 }
@@ -458,9 +458,9 @@ fn render_tree(ui: &mut egui::Ui, beings: &Beings, root: usize) -> Option<usize>
     });
 
     // Children: 2 generations down (scan parent_ids)
-    let children: Vec<usize> = (0..beings.count)
+    let children: Vec<usize> = (0..beings.hot.count)
         .filter(|&i| {
-            let p = beings.parent_ids[i];
+            let p = beings.cold.parent_ids[i];
             p[0] == root as u32 || p[1] == root as u32
         })
         .collect();
@@ -478,8 +478,8 @@ fn render_tree(ui: &mut egui::Ui, beings: &Beings, root: usize) -> Option<usize>
 
         // Grandchildren
         let grandchildren: Vec<usize> = children.iter().flat_map(|&c| {
-            (0..beings.count).filter(move |&i| {
-                let p = beings.parent_ids[i];
+            (0..beings.hot.count).filter(move |&i| {
+                let p = beings.cold.parent_ids[i];
                 p[0] == c as u32 || p[1] == c as u32
             })
         }).collect();
@@ -501,10 +501,10 @@ fn render_tree(ui: &mut egui::Ui, beings: &Beings, root: usize) -> Option<usize>
 }
 
 fn being_button(ui: &mut egui::Ui, beings: &Beings, idx: usize) -> Option<usize> {
-    if idx >= beings.count {
+    if idx >= beings.hot.count {
         return None;
     }
-    let is_dead = beings.states[idx] == emergence_core::being::data::BeingState::Dead;
+    let is_dead = beings.hot.states[idx] == emergence_core::being::data::BeingState::Dead;
     let label = format!("#{idx}");
     let color = if is_dead { Color32::GRAY } else { Color32::WHITE };
     if ui.colored_label(color, &label).clicked() {

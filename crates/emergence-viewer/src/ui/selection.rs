@@ -47,11 +47,11 @@ impl BoxSelect {
         let max_y = start[1].max(end[1]);
 
         self.selected.clear();
-        for i in 0..beings.count {
-            if beings.states[i] == emergence_core::being::data::BeingState::Dead {
+        for i in 0..beings.hot.count {
+            if beings.hot.states[i] == emergence_core::being::data::BeingState::Dead {
                 continue;
             }
-            let [x, y] = beings.positions[i];
+            let [x, y] = beings.hot.positions[i];
             if x >= min_x && x <= max_x && y >= min_y && y <= max_y {
                 self.selected.push(i);
                 if self.selected.len() >= 200 {
@@ -89,8 +89,8 @@ impl BoxSelect {
         let mut avg_emotions = [0.0f32; 6];
         for &idx in &self.selected {
             for n in 0..6 {
-                avg_needs[n] += beings.needs[idx][n];
-                avg_emotions[n] += beings.emotions[idx][n];
+                avg_needs[n] += beings.hot.needs[idx][n];
+                avg_emotions[n] += beings.hot.emotions[idx][n];
             }
         }
         let n = count as f32;

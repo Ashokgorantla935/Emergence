@@ -38,11 +38,11 @@ impl PopulationFilters {
     ) -> f32 {
         use emergence_core::being::data::{BeingState, LifePhase};
 
-        if beings.states[idx] == BeingState::Dead {
+        if beings.hot.states[idx] == BeingState::Dead {
             return 0.0;
         }
 
-        let ct = CreatureType::from_u8(beings.creature_type[idx]);
+        let ct = CreatureType::from_u8(beings.hot.creature_type[idx]);
         let is_human = ct == CreatureType::Human;
         if is_human && !self.show_humans {
             return 0.3;
@@ -61,16 +61,16 @@ impl PopulationFilters {
             return 0.3;
         }
 
-        if !self.show_sleeping && beings.states[idx] == BeingState::Sleeping {
+        if !self.show_sleeping && beings.hot.states[idx] == BeingState::Sleeping {
             return 0.3;
         }
 
-        if beings.needs[idx][0] < self.min_need_hunger {
+        if beings.hot.needs[idx][0] < self.min_need_hunger {
             return 0.3;
         }
 
         if let Some(emo_idx) = self.emotion_filter {
-            if beings.emotions[idx][emo_idx] < 0.3 {
+            if beings.hot.emotions[idx][emo_idx] < 0.3 {
                 return 0.3;
             }
         }

@@ -8,3 +8,6 @@ pub mod projection;
 pub mod actions;
 pub mod social;
 pub mod names;
+pub mod hebbian;
+pub mod brain;
+pub mod memes;

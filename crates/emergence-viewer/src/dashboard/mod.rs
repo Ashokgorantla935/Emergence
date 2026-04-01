@@ -39,7 +39,7 @@ impl Dashboard {
         _climate: &Climate,
         actual_tick_rate: f32,
     ) {
-        self.population = beings.alive_count as u32;
+        self.population = beings.hot.alive_count as u32;
         self.tick_rate = actual_tick_rate;
         // Lerp displayed population toward actual for slot-machine roll effect
         self.displayed_pop += (self.population as f32 - self.displayed_pop) * 0.1;
@@ -77,12 +77,12 @@ impl Dashboard {
         // Average needs
         let mut need_sum = [0.0f32; 6];
         let mut count = 0;
-        for i in 0..beings.count {
-            if beings.states[i] == BeingState::Dead {
+        for i in 0..beings.hot.count {
+            if beings.hot.states[i] == BeingState::Dead {
                 continue;
             }
             for n in 0..6 {
-                need_sum[n] += beings.needs[i][n];
+                need_sum[n] += beings.hot.needs[i][n];
             }
             count += 1;
         }
@@ -94,12 +94,12 @@ impl Dashboard {
 
         // Emotion distribution (fraction with emotion > 0.1 — visible threshold)
         let mut emo_count = [0u32; 6];
-        for i in 0..beings.count {
-            if beings.states[i] == BeingState::Dead {
+        for i in 0..beings.hot.count {
+            if beings.hot.states[i] == BeingState::Dead {
                 continue;
             }
             for e in 0..6 {
-                if beings.emotions[i][e] > 0.1 {
+                if beings.hot.emotions[i][e] > 0.1 {
                     emo_count[e] += 1;
                 }
             }

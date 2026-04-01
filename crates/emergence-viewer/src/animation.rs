@@ -110,16 +110,16 @@ impl AnimationManager {
 
     /// Advance animations by `dt` seconds.
     pub fn update(&mut self, dt: f32, beings: &Beings) {
-        let count = beings.count.min(self.frame_timers.len());
+        let count = beings.hot.count.min(self.frame_timers.len());
 
         for i in 0..count {
-            if beings.states[i] == BeingState::Dead {
+            if beings.hot.states[i] == BeingState::Dead {
                 self.current_states[i] = AnimState::Die;
             }
 
             // Derive facing from positional delta
             let prev = self.prev_positions[i];
-            let curr = beings.positions[i];
+            let curr = beings.hot.positions[i];
             let dx = curr[0] - prev[0];
             let dy = curr[1] - prev[1];
             if dx.abs() > 0.001 || dy.abs() > 0.001 {
@@ -149,12 +149,12 @@ impl AnimationManager {
     }
 
     fn anim_for_being(&self, beings: &Beings, i: usize) -> AnimState {
-        match beings.states[i] {
+        match beings.hot.states[i] {
             BeingState::Dead     => AnimState::Die,
             BeingState::Sleeping => AnimState::Sleep,
             BeingState::Awake    => {
                 // Map pending_action (u8) to anim state; 255 = no pending action.
-                let action_u8 = beings.pending_action[i];
+                let action_u8 = beings.hot.pending_action[i];
                 if action_u8 != 255 {
                     // Safe: Action is repr(u8) with values 0-21; anything outside falls through.
                     let action = match action_u8 {
@@ -206,7 +206,7 @@ impl AnimationManager {
 
                 // Fallback: derive from velocity magnitude
                 let prev = self.prev_positions[i];
-                let curr = beings.positions[i];
+                let curr = beings.hot.positions[i];
                 let dx = curr[0] - prev[0];
                 let dy = curr[1] - prev[1];
                 let speed = (dx * dx + dy * dy).sqrt();
@@ -223,7 +223,7 @@ impl AnimationManager {
     /// Fauna use rows 12-13, column base per species (4 frames each).
     /// Humans use rows 0-11 (build x phase matrix).
     pub fn atlas_uv(&self, beings: &Beings, i: usize) -> [f32; 2] {
-        let ct = CreatureType::from_u8(beings.creature_type[i]);
+        let ct = CreatureType::from_u8(beings.hot.creature_type[i]);
 
         if ct != CreatureType::Human {
             return fauna_atlas_uv(ct, self.current_frames[i]);
@@ -255,7 +255,7 @@ fn life_phase_index(beings: &Beings, i: usize) -> u32 {
 
 fn body_build_index(beings: &Beings, i: usize) -> u32 {
     // Hash personality floats into build 0-3
-    let p = &beings.personalities[i];
+    let p = &beings.hot.personalities[i];
     if p[0] > 0.3 {
         0 // bold -> stout
     } else if p[2] > 0.3 {

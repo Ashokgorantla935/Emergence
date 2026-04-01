@@ -1,4 +1,5 @@
 use super::memory::{CausalMemoryRing, RelationshipSlots};
+use super::memes::MemeSlots;
 use crate::trace::DecisionTraceRing;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -97,8 +98,26 @@ pub const BEING_TRAIT_SURVIVOR: u64   = 1 << 13;
 pub const BEING_TRAIT_FOUNDER: u64    = 1 << 14;
 pub const BEING_TRAIT_VETERAN: u64    = 1 << 15;
 
-pub struct Beings {
-    // Hot data
+/// Per-being learnable behavior parameters. Updated via Hebbian learning.
+/// Fauna use these to replace hardcoded boids/scoring constants.
+/// Humans get default [1.0; 6] (no fauna-specific behavior).
+/// [0] separation_weight, [1] cohesion_weight, [2] flee_weight,
+/// [3] hunt_weight, [4] cluster_weight, [5] wander_weight
+pub fn init_fauna_params(creature_type: u8) -> [f32; 6] {
+    match CreatureType::from_u8(creature_type) {
+        CreatureType::Hawk   => [1.5, 2.0, 0.5, 1.5, 2.0, 0.3],
+        CreatureType::Wolf   => [1.0, 1.5, 0.3, 2.5, 1.5, 0.4],
+        CreatureType::Deer   => [0.8, 2.0, 2.5, 0.0, 2.0, 0.8],
+        CreatureType::Rabbit => [0.5, 1.5, 2.0, 0.0, 1.5, 0.5],
+        CreatureType::Fish   => [1.0, 2.0, 1.0, 0.0, 2.0, 0.5],
+        CreatureType::Bear   => [0.3, 0.5, 0.3, 2.0, 0.3, 1.5],
+        CreatureType::Snake  => [0.1, 0.1, 1.0, 0.5, 0.1, 2.0],
+        CreatureType::Human  => [1.0; 6],
+    }
+}
+
+/// Hot data — accessed every tick in the simulation loop. Keep in contiguous memory.
+pub struct BeingsHot {
     pub positions: Vec<[f32; 2]>,
     pub velocities: Vec<[f32; 2]>,
     pub needs: Vec<[f32; 6]>,
@@ -116,77 +135,96 @@ pub struct Beings {
     pub pending_needs: Vec<[f32; 6]>,
     pub tool_quality: Vec<f32>,   // renamed from combat_modifier; 0=bare hands, 1=excellent tool
     pub signal_style: Vec<u8>,    // cultural fingerprint: personality_hash % 8
-
-    // Warm data
     pub personalities: Vec<[f32; 5]>,
     pub states: Vec<BeingState>,
+    pub creature_type: Vec<u8>,   // 0=Human. See CreatureType enum. 1 byte per being.
+    /// Per-being learnable behavior parameters. Updated via Hebbian learning.
+    /// Fauna use these to replace hardcoded boids/scoring constants.
+    /// Humans get default [1.0; 6] (no fauna-specific behavior).
+    pub fauna_params: Vec<[f32; 6]>,
 
-    // Cold data
-    pub causal_memories: Vec<CausalMemoryRing>,
-    pub relationships: Vec<RelationshipSlots>,
-    /// Lazy: None by default. Allocated on demand when inspector selects a being.
-    /// Saves ~24MB at 10K beings (was always-allocated 200-entry rings).
-    pub traces: Vec<Option<Box<DecisionTraceRing>>>,
+    /// Per-human MLP brain weights for Q-value action scoring.
+    /// Architecture: 14 input → 8 hidden (tanh) → 22 output (Q-values)
+    /// W1(14×8=112) + b1(8) + W2(8×22=176) + b2(22) = 318 floats = 1.27KB per human
+    /// Fauna beings get zeroed weights (unused — they use fauna_params instead).
+    pub brain_weights: Vec<[f32; 318]>,
 
-    // History & trait data
-    pub traits: Vec<u64>,       // bit-field: each bit = one BEING_TRAIT_* flag
-    pub kill_count: Vec<u16>,   // total kills across all prey types
-
-    // Metadata
-    pub parent_ids: Vec<[u32; 2]>,
-    pub creature_type: Vec<u8>, // 0=Human. See CreatureType enum. 1 byte per being.
-    pub last_birth_tick: Vec<u32>,
-    pub names: Vec<String>,
-
-    // Count tracking
     pub count: usize,
     pub alive_count: usize,
     pub human_count: usize,  // updated by rebuild_partition_indices
     pub fauna_count: usize,  // updated by rebuild_partition_indices
 
     // Partition index lists — rebuilt every 600 ticks by tick.rs
-    // Human-only loops iterate human_indices; fauna-only loops iterate fauna_indices.
     pub human_indices: Vec<usize>,
     pub fauna_indices: Vec<usize>,
+}
+
+/// Cold data — accessed only for inspector, social actions, and memory lookups.
+pub struct BeingsCold {
+    pub causal_memories: Vec<CausalMemoryRing>,
+    pub relationships: Vec<RelationshipSlots>,
+    /// Lazy: None by default. Allocated on demand when inspector selects a being.
+    /// Saves ~24MB at 10K beings (was always-allocated 200-entry rings).
+    pub traces: Vec<Option<Box<DecisionTraceRing>>>,
+    pub traits: Vec<u64>,       // bit-field: each bit = one BEING_TRAIT_* flag
+    pub kill_count: Vec<u16>,   // total kills across all prey types
+    pub parent_ids: Vec<[u32; 2]>,
+    pub last_birth_tick: Vec<u32>,
+    pub names: Vec<String>,
+    /// SIRS meme slots. 4 slots per being. Humans only: fauna slots are never ticked or transmitted.
+    pub meme_slots: Vec<MemeSlots>,
+}
+
+/// Wrapper that owns both hot and cold sub-structs. All callers go through this.
+pub struct Beings {
+    pub hot: BeingsHot,
+    pub cold: BeingsCold,
 }
 
 impl Beings {
     pub fn new() -> Self {
         Beings {
-            positions: Vec::new(),
-            velocities: Vec::new(),
-            needs: Vec::new(),
-            needs_prev: Vec::new(),
-            emotions: Vec::new(),
-            ages: Vec::new(),
-            lifespans: Vec::new(),
-            carry: Vec::new(),
-            hunger_zero_ticks: Vec::new(),
-            warmth_zero_ticks: Vec::new(),
-            freeze_ticks: Vec::new(),
-            pending_action: Vec::new(),
-            pending_context: Vec::new(),
-            pending_tick: Vec::new(),
-            pending_needs: Vec::new(),
-            tool_quality: Vec::new(),
-            signal_style: Vec::new(),
-            personalities: Vec::new(),
-            states: Vec::new(),
-            causal_memories: Vec::new(),
-            relationships: Vec::new(),
-            traces: Vec::new(),
-            traits: Vec::new(),
-            kill_count: Vec::new(),
-            parent_ids: Vec::new(),
-            creature_type: Vec::new(),
-            last_birth_tick: Vec::new(),
-            names: Vec::new(),
-            count: 0,
-            alive_count: 0,
-            human_count: 0,
-            fauna_count: 0,
-            human_indices: Vec::new(),
-            fauna_indices: Vec::new(),
+            hot: BeingsHot {
+                positions: Vec::new(),
+                velocities: Vec::new(),
+                needs: Vec::new(),
+                needs_prev: Vec::new(),
+                emotions: Vec::new(),
+                ages: Vec::new(),
+                lifespans: Vec::new(),
+                carry: Vec::new(),
+                hunger_zero_ticks: Vec::new(),
+                warmth_zero_ticks: Vec::new(),
+                freeze_ticks: Vec::new(),
+                pending_action: Vec::new(),
+                pending_context: Vec::new(),
+                pending_tick: Vec::new(),
+                pending_needs: Vec::new(),
+                tool_quality: Vec::new(),
+                signal_style: Vec::new(),
+                personalities: Vec::new(),
+                states: Vec::new(),
+                creature_type: Vec::new(),
+                fauna_params: Vec::new(),
+                brain_weights: Vec::new(),
+                count: 0,
+                alive_count: 0,
+                human_count: 0,
+                fauna_count: 0,
+                human_indices: Vec::new(),
+                fauna_indices: Vec::new(),
+            },
+            cold: BeingsCold {
+                causal_memories: Vec::new(),
+                relationships: Vec::new(),
+                traces: Vec::new(),
+                traits: Vec::new(),
+                kill_count: Vec::new(),
+                parent_ids: Vec::new(),
+                last_birth_tick: Vec::new(),
+                names: Vec::new(),
+                meme_slots: Vec::new(),
+            },
         }
     }
 
@@ -197,39 +235,42 @@ impl Beings {
         lifespan: u32,
         parent_ids: [u32; 2],
     ) -> usize {
-        let idx = self.count;
-        self.positions.push(position);
-        self.velocities.push([0.0, 0.0]);
-        self.needs.push([1.0; 6]); // fully satisfied
-        self.needs_prev.push([1.0; 6]);
-        self.emotions.push([0.0; 6]);
-        self.ages.push(0);
-        self.lifespans.push(lifespan);
-        self.carry.push([0.0, 0.0]);
-        self.hunger_zero_ticks.push(0);
-        self.warmth_zero_ticks.push(0);
-        self.freeze_ticks.push(0);
-        self.pending_action.push(255); // no pending action
-        self.pending_context.push(0);
-        self.pending_tick.push(0);
-        self.pending_needs.push([1.0; 6]);
-        self.tool_quality.push(0.0);
+        let idx = self.hot.count;
+        self.hot.positions.push(position);
+        self.hot.velocities.push([0.0, 0.0]);
+        self.hot.needs.push([1.0; 6]); // fully satisfied
+        self.hot.needs_prev.push([1.0; 6]);
+        self.hot.emotions.push([0.0; 6]);
+        self.hot.ages.push(0);
+        self.hot.lifespans.push(lifespan);
+        self.hot.carry.push([0.0, 0.0]);
+        self.hot.hunger_zero_ticks.push(0);
+        self.hot.warmth_zero_ticks.push(0);
+        self.hot.freeze_ticks.push(0);
+        self.hot.pending_action.push(255); // no pending action
+        self.hot.pending_context.push(0);
+        self.hot.pending_tick.push(0);
+        self.hot.pending_needs.push([1.0; 6]);
+        self.hot.tool_quality.push(0.0);
         // Derive signal_style from personality hash (deterministic, computed once at spawn)
         let style = personality_to_style(&personality);
-        self.signal_style.push(style);
-        self.personalities.push(personality);
-        self.states.push(BeingState::Awake);
-        self.causal_memories.push(CausalMemoryRing::new());
-        self.relationships.push(RelationshipSlots::new());
-        self.traces.push(None); // allocated on demand when inspector selects
-        self.traits.push(0);
-        self.kill_count.push(0);
-        self.parent_ids.push(parent_ids);
-        self.creature_type.push(CreatureType::Human as u8); // default to Human; override after spawn for fauna
-        self.last_birth_tick.push(0);
-        self.names.push(String::new());
-        self.count += 1;
-        self.alive_count += 1;
+        self.hot.signal_style.push(style);
+        self.hot.personalities.push(personality);
+        self.hot.states.push(BeingState::Awake);
+        self.hot.creature_type.push(CreatureType::Human as u8); // default to Human; override after spawn for fauna
+        self.hot.fauna_params.push([1.0; 6]); // human default; call init_fauna_params after setting creature_type
+        self.hot.brain_weights.push([0.0; 318]); // zeroed by default; init_human_brain called for humans after spawn
+        self.cold.causal_memories.push(CausalMemoryRing::new());
+        self.cold.relationships.push(RelationshipSlots::new());
+        self.cold.traces.push(None); // allocated on demand when inspector selects
+        self.cold.traits.push(0);
+        self.cold.kill_count.push(0);
+        self.cold.parent_ids.push(parent_ids);
+        self.cold.last_birth_tick.push(0);
+        self.cold.names.push(String::new());
+        self.cold.meme_slots.push([super::memes::MemeSlotState::default(); 4]);
+        self.hot.count += 1;
+        self.hot.alive_count += 1;
         idx
     }
 
@@ -244,13 +285,13 @@ impl Beings {
         starting_age: u32,
     ) -> usize {
         let idx = self.spawn(position, personality, lifespan, parent_ids);
-        self.ages[idx] = starting_age.min(lifespan.saturating_sub(1));
+        self.hot.ages[idx] = starting_age.min(lifespan.saturating_sub(1));
         idx
     }
 
     pub fn life_phase(&self, index: usize) -> LifePhase {
-        let age = self.ages[index];
-        let lifespan = self.lifespans[index];
+        let age = self.hot.ages[index];
+        let lifespan = self.hot.lifespans[index];
         let youth_end = (lifespan as f32 * 0.2) as u32;
         let elder_start = (lifespan as f32 * 0.85) as u32;
         if age < youth_end {
@@ -273,19 +314,19 @@ impl Beings {
     /// Total food carried (carry[0]).
     #[inline]
     pub fn carry_food(&self, index: usize) -> f32 {
-        self.carry[index][0]
+        self.hot.carry[index][0]
     }
 
     /// Total stone carried (carry[1]).
     #[inline]
     pub fn carry_stone(&self, index: usize) -> f32 {
-        self.carry[index][1]
+        self.hot.carry[index][1]
     }
 
     /// Derived status: relationship_count * avg_warmth. Read-only, computed on demand.
     /// Capped at 1.0.
     pub fn derived_status(&self, index: usize) -> f32 {
-        let slots = &self.relationships[index];
+        let slots = &self.cold.relationships[index];
         if slots.count == 0 {
             return 0.0;
         }
@@ -315,32 +356,32 @@ impl Beings {
     /// Rebuild human/fauna index partition lists. O(n). ~0.1ms for 11.5K beings.
     /// Called every 600 ticks from tick.rs (Sawyer constraint 5).
     pub fn rebuild_partition_indices(&mut self) {
-        self.human_indices.clear();
-        self.fauna_indices.clear();
-        for i in 0..self.count {
-            if self.states[i] == BeingState::Dead {
+        self.hot.human_indices.clear();
+        self.hot.fauna_indices.clear();
+        for i in 0..self.hot.count {
+            if self.hot.states[i] == BeingState::Dead {
                 continue;
             }
-            if self.creature_type[i] == CreatureType::Human as u8 {
-                self.human_indices.push(i);
+            if self.hot.creature_type[i] == CreatureType::Human as u8 {
+                self.hot.human_indices.push(i);
             } else {
-                self.fauna_indices.push(i);
+                self.hot.fauna_indices.push(i);
             }
         }
-        self.human_count = self.human_indices.len();
-        self.fauna_count = self.fauna_indices.len();
+        self.hot.human_count = self.hot.human_indices.len();
+        self.hot.fauna_count = self.hot.fauna_indices.len();
     }
 
     /// Enable decision trace recording for a being (e.g. when inspector selects it).
     pub fn enable_trace(&mut self, index: usize) {
-        if self.traces[index].is_none() {
-            self.traces[index] = Some(Box::new(DecisionTraceRing::new()));
+        if self.cold.traces[index].is_none() {
+            self.cold.traces[index] = Some(Box::new(DecisionTraceRing::new()));
         }
     }
 
     /// Disable decision trace recording and free memory for a being.
     pub fn disable_trace(&mut self, index: usize) {
-        self.traces[index] = None;
+        self.cold.traces[index] = None;
     }
 
     pub fn perception_radius(&self, index: usize, light_level: f32) -> f32 {
@@ -350,14 +391,14 @@ impl Beings {
         };
 
         // Nocturnal inversion
-        let effective_light = if self.personalities[index][TRAIT_DIURNAL] < 0.0 {
+        let effective_light = if self.hot.personalities[index][TRAIT_DIURNAL] < 0.0 {
             // Nocturnal: invert light
             1.4 - light_level
         } else {
             light_level
         };
 
-        let sleep_mult = if self.states[index] == BeingState::Sleeping {
+        let sleep_mult = if self.hot.states[index] == BeingState::Sleeping {
             0.5
         } else {
             1.0
@@ -365,6 +406,35 @@ impl Beings {
 
         base * effective_light.clamp(0.4, 1.0) * sleep_mult
     }
+
+    // ── Convenience forwarding accessors ─────────────────────────────────────
+    // These let callers write `beings.count` instead of `beings.hot.count`.
+    // They are zero-cost inlines — no logic, just field delegation.
+
+    #[inline] pub fn count(&self) -> usize { self.hot.count }
+    #[inline] pub fn alive_count(&self) -> usize { self.hot.alive_count }
+    #[inline] pub fn human_count(&self) -> usize { self.hot.human_count }
+    #[inline] pub fn fauna_count(&self) -> usize { self.hot.fauna_count }
+}
+
+/// Xavier-initialized MLP brain weights for a human being.
+/// Architecture: 14 input → 8 hidden (tanh) → 22 output (Q-values)
+/// W1 indices 0..112, b1 indices 112..120, W2 indices 120..296, b2 indices 296..318
+pub fn init_human_brain(rng: &mut fastrand::Rng) -> [f32; 318] {
+    let mut w = [0.0f32; 318];
+    // W1: Xavier scale = sqrt(6 / (14+8)) = sqrt(6/22)
+    let w1_scale = (6.0f32 / 22.0).sqrt();
+    for v in w[0..112].iter_mut() {
+        *v = (rng.f32() * 2.0 - 1.0) * w1_scale;
+    }
+    // b1: indices 112..120 stay 0.0
+    // W2: Xavier scale = sqrt(6 / (8+22)) = sqrt(6/30)
+    let w2_scale = (6.0f32 / 30.0).sqrt();
+    for v in w[120..296].iter_mut() {
+        *v = (rng.f32() * 2.0 - 1.0) * w2_scale;
+    }
+    // b2: indices 296..318 stay 0.0
+    w
 }
 
 /// Derive a deterministic signal style (0–7) from a personality vector.

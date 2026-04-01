@@ -43,19 +43,19 @@ impl HoverTooltip {
             Some(i) => i,
             None => return,
         };
-        if idx >= beings.count {
+        if idx >= beings.hot.count {
             return;
         }
-        if beings.states[idx] == emergence_core::being::data::BeingState::Dead {
+        if beings.hot.states[idx] == emergence_core::being::data::BeingState::Dead {
             return;
         }
 
         let phase = beings.life_phase(idx);
-        let ct = emergence_core::being::data::CreatureType::from_u8(beings.creature_type[idx]);
+        let ct = emergence_core::being::data::CreatureType::from_u8(beings.hot.creature_type[idx]);
 
         // Dominant emotion
         let emo_names = ["Fear", "Joy", "Curiosity", "Anger", "Grief", "Content"];
-        let dom_emo = beings.emotions[idx]
+        let dom_emo = beings.hot.emotions[idx]
             .iter()
             .enumerate()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
@@ -63,7 +63,7 @@ impl HoverTooltip {
 
         // Most critical need
         let need_names = ["Hunger", "Warmth", "Safety", "Belong", "Purpose", "Rest"];
-        let crit_need = beings.needs[idx]
+        let crit_need = beings.hot.needs[idx]
             .iter()
             .enumerate()
             .min_by(|a, b| a.1.partial_cmp(b.1).unwrap())

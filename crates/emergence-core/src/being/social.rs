@@ -52,25 +52,25 @@ pub fn process_witnessing(
     current_tick: u32,
 ) {
     let mut rng = fastrand::Rng::with_seed(current_tick as u64 ^ actor as u64);
-    let witnesses = capped_witnesses(actor, spatial, &beings.positions, &beings.states, perception_radius, &mut rng);
+    let witnesses = capped_witnesses(actor, spatial, &beings.hot.positions, &beings.hot.states, perception_radius, &mut rng);
 
     // Snapshot actor's context hash for observational memory
-    let actor_pending_context = beings.pending_context[actor];
+    let actor_pending_context = beings.hot.pending_context[actor];
 
     for &observer in &witnesses {
         if observer == actor || observer == target {
             continue;
         }
-        if beings.states[observer] == BeingState::Dead {
+        if beings.hot.states[observer] == BeingState::Dead {
             continue;
         }
 
-        let generous_trait = beings.personalities[observer][TRAIT_GENEROUS];
+        let generous_trait = beings.hot.personalities[observer][TRAIT_GENEROUS];
 
         match action {
             Action::TakeFood => {
                 // Harmful action witnessed
-                let imp = beings.relationships[observer].get_or_create(actor as u32, current_tick);
+                let imp = beings.cold.relationships[observer].get_or_create(actor as u32, current_tick);
                 imp.warmth -= 0.1 * (generous_trait + 1.0) / 2.0;
                 imp.warmth = imp.warmth.clamp(-1.0, 1.0);
                 imp.trust -= 0.05;
@@ -80,18 +80,18 @@ pub fn process_witnessing(
 
                 // Sympathy for target
                 let imp_target =
-                    beings.relationships[observer].get_or_create(target as u32, current_tick);
+                    beings.cold.relationships[observer].get_or_create(target as u32, current_tick);
                 imp_target.warmth += 0.03;
                 imp_target.warmth = imp_target.warmth.clamp(-1.0, 1.0);
                 imp_target.last_interaction = current_tick;
 
                 // Observational memory: negative outcome from witnessed theft
                 // Frequency cap: only record if last interaction gap > 100 ticks
-                let last = beings.relationships[observer].find(actor as u32)
+                let last = beings.cold.relationships[observer].find(actor as u32)
                     .map(|imp| imp.last_interaction)
                     .unwrap_or(0);
                 if current_tick.saturating_sub(last) >= 100 {
-                    beings.causal_memories[observer].record(
+                    beings.cold.causal_memories[observer].record(
                         action as u8,
                         actor_pending_context,
                         -0.2, // negative outcome observed
@@ -99,14 +99,14 @@ pub fn process_witnessing(
                     );
                     // Reduce confidence to 0.3x by scaling (record() adds 1.0 confidence)
                     // We set confidence in last-written entry directly
-                    let head = beings.causal_memories[observer].head as usize;
+                    let head = beings.cold.causal_memories[observer].head as usize;
                     let last_written = (head + 32 - 1) % 32;
-                    beings.causal_memories[observer].entries[last_written].confidence *= 0.3;
+                    beings.cold.causal_memories[observer].entries[last_written].confidence *= 0.3;
                 }
             }
             Action::ShareFood => {
                 // Kind action witnessed
-                let imp = beings.relationships[observer].get_or_create(actor as u32, current_tick);
+                let imp = beings.cold.relationships[observer].get_or_create(actor as u32, current_tick);
                 imp.warmth += 0.05;
                 imp.warmth = imp.warmth.clamp(-1.0, 1.0);
                 imp.trust += 0.03;
@@ -115,19 +115,19 @@ pub fn process_witnessing(
                 imp.memory_count = imp.memory_count.saturating_add(1);
 
                 // Observational memory: positive outcome from witnessed sharing
-                let last = beings.relationships[observer].find(actor as u32)
+                let last = beings.cold.relationships[observer].find(actor as u32)
                     .map(|imp| imp.last_interaction)
                     .unwrap_or(0);
                 if current_tick.saturating_sub(last) >= 100 {
-                    beings.causal_memories[observer].record(
+                    beings.cold.causal_memories[observer].record(
                         action as u8,
                         actor_pending_context,
                         0.2,
                         false,
                     );
-                    let head = beings.causal_memories[observer].head as usize;
+                    let head = beings.cold.causal_memories[observer].head as usize;
                     let last_written = (head + 32 - 1) % 32;
-                    beings.causal_memories[observer].entries[last_written].confidence *= 0.3;
+                    beings.cold.causal_memories[observer].entries[last_written].confidence *= 0.3;
                 }
             }
             _ => {}
@@ -139,22 +139,22 @@ pub fn process_witnessing(
 /// Scans nearby beings for shared parent_ids and sets warmth=0.3, trust=0.2 for siblings.
 /// Called once at birth from tick.rs.
 pub fn init_kinship_warmth(beings: &mut Beings, new_idx: usize, current_tick: u32) {
-    let parents = beings.parent_ids[new_idx];
+    let parents = beings.cold.parent_ids[new_idx];
     if parents[0] == u32::MAX && parents[1] == u32::MAX {
         return; // no parents = no siblings to initialize
     }
 
-    for i in 0..beings.count {
-        if i == new_idx || beings.states[i] == BeingState::Dead {
+    for i in 0..beings.hot.count {
+        if i == new_idx || beings.hot.states[i] == BeingState::Dead {
             continue;
         }
-        let other_parents = beings.parent_ids[i];
+        let other_parents = beings.cold.parent_ids[i];
         // Shared parent = sibling
         let shares_parent = (parents[0] != u32::MAX && (other_parents[0] == parents[0] || other_parents[1] == parents[0]))
             || (parents[1] != u32::MAX && (other_parents[0] == parents[1] || other_parents[1] == parents[1]));
         if shares_parent {
             // Init relationship in new being toward sibling
-            let imp = beings.relationships[new_idx].get_or_create(i as u32, current_tick);
+            let imp = beings.cold.relationships[new_idx].get_or_create(i as u32, current_tick);
             if imp.warmth < 0.3 {
                 imp.warmth = 0.3;
             }
@@ -163,7 +163,7 @@ pub fn init_kinship_warmth(beings: &mut Beings, new_idx: usize, current_tick: u3
             }
             imp.last_interaction = current_tick;
             // Mutual: sibling also recognizes new being
-            let imp2 = beings.relationships[i].get_or_create(new_idx as u32, current_tick);
+            let imp2 = beings.cold.relationships[i].get_or_create(new_idx as u32, current_tick);
             if imp2.warmth < 0.3 {
                 imp2.warmth = 0.3;
             }
@@ -178,16 +178,16 @@ pub fn init_kinship_warmth(beings: &mut Beings, new_idx: usize, current_tick: u3
 /// Deposit emotion-based signals for all alive beings.
 /// Fauna also deposit biome-specific signals (predator scent, prey food trail, death grief).
 pub fn deposit_emotion_signals(beings: &Beings, signals: &mut SignalGrid) {
-    for i in 0..beings.count {
-        if beings.states[i] == BeingState::Dead {
+    for i in 0..beings.hot.count {
+        if beings.hot.states[i] == BeingState::Dead {
             continue;
         }
 
-        let pos = beings.positions[i];
+        let pos = beings.hot.positions[i];
         let cx = (pos[0] as u32).min(signals.width - 1);
         let cy = (pos[1] as u32).min(signals.height - 1);
 
-        let ct = beings.creature_type[i];
+        let ct = beings.hot.creature_type[i];
         let is_human = ct == CreatureType::Human as u8;
 
         if is_human {
@@ -202,7 +202,7 @@ pub fn deposit_emotion_signals(beings: &Beings, signals: &mut SignalGrid) {
             ];
 
             for &(emo_idx, channel) in &emotion_signal_map {
-                let intensity = beings.emotions[i][emo_idx];
+                let intensity = beings.hot.emotions[i][emo_idx];
                 if intensity > 0.1 {
                     let deposit = if intensity > 0.7 {
                         intensity * 0.5
@@ -225,7 +225,7 @@ pub fn deposit_emotion_signals(beings: &Beings, signals: &mut SignalGrid) {
                     // Wolf always deposits scent (predator presence)
                     signals.deposit(SignalChannel::Scent, cx, cy, 0.4);
                     // Hunting wolf deposits danger
-                    if beings.needs[i][NEED_HUNGER] < 0.5 {
+                    if beings.hot.needs[i][NEED_HUNGER] < 0.5 {
                         signals.deposit(SignalChannel::Danger, cx, cy, 0.6);
                     }
                 }
@@ -237,7 +237,7 @@ pub fn deposit_emotion_signals(beings: &Beings, signals: &mut SignalGrid) {
                 CreatureType::Hawk => {
                     // Hawk deposits scent while airborne (hunting)
                     signals.deposit(SignalChannel::Scent, cx, cy, 0.3);
-                    if beings.needs[i][NEED_HUNGER] < 0.5 {
+                    if beings.hot.needs[i][NEED_HUNGER] < 0.5 {
                         signals.deposit(SignalChannel::Danger, cx, cy, 0.4);
                     }
                 }
@@ -276,13 +276,13 @@ mod tests {
         let spatial = SpatialIndex::new(64, 64, 4.0);
         // Manually build spatial index
         let mut spatial = SpatialIndex::new(64, 64, 4.0);
-        spatial.rebuild(&beings.positions, &beings.states);
+        spatial.rebuild(&beings.hot.positions, &beings.hot.states);
 
         // A steals from B, C observes
         process_witnessing(&mut beings, &spatial, 0, 1, Action::TakeFood, 8.0, 100);
 
         // C's warmth toward A should decrease
-        let c_to_a = beings.relationships[2].find(0);
+        let c_to_a = beings.cold.relationships[2].find(0);
         assert!(c_to_a.is_some(), "C should have impression of A");
         assert!(
             c_to_a.unwrap().warmth < 0.0,
@@ -290,7 +290,7 @@ mod tests {
         );
 
         // C's warmth toward B should increase (sympathy)
-        let c_to_b = beings.relationships[2].find(1);
+        let c_to_b = beings.cold.relationships[2].find(1);
         assert!(c_to_b.is_some(), "C should have impression of B");
         assert!(
             c_to_b.unwrap().warmth > 0.0,

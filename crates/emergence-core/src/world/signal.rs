@@ -85,7 +85,76 @@ impl SignalGrid {
         self
     }
 
+    /// Chemical reaction step: nonlinear interactions between signal channels.
+    /// Must be called BEFORE diffusion each tick.
+    fn reaction_step(&mut self) {
+        let w = self.width as usize;
+        let h = self.height as usize;
+        let len = w * h;
+
+        const DANGER: usize = 0;
+        const FOOD_TRAIL: usize = 1;
+        const COMFORT: usize = 2;
+        const ANGER: usize = 5;
+        const SCENT: usize = 6;
+
+        // Rule 1 — Fear Synthesis: anger * comfort -> danger
+        // Rule 2 — Trail Reinforcement: food_trail * scent -> amplify food_trail
+        // Both rules are per-cell, no spatial coupling, safe to do in one linear pass.
+        for i in 0..len {
+            let anger = self.channels[ANGER][i];
+            let comfort = self.channels[COMFORT][i];
+            let product = anger * comfort;
+            if product > 0.05 {
+                self.channels[DANGER][i] = (self.channels[DANGER][i] + product * 0.3).min(10.0);
+                self.channels[ANGER][i] *= 0.9;
+                self.channels[COMFORT][i] *= 0.9;
+            }
+
+            let food_trail = self.channels[FOOD_TRAIL][i];
+            let scent = self.channels[SCENT][i];
+            if food_trail > 0.1 && scent > 0.1 {
+                self.channels[FOOD_TRAIL][i] = (food_trail * 1.05).min(10.0);
+            }
+        }
+
+        // Rule 3 — Panic Cascade: high danger spreads rapidly to cardinal neighbors.
+        // Use scratch buffer to avoid read-write aliasing.
+        let panic_channel = &self.channels[DANGER];
+        let ww = self.width;
+
+        // Zero scratch then accumulate panic additions.
+        for v in self.scratch.iter_mut() {
+            *v = 0.0;
+        }
+
+        for y in 0..h {
+            for x in 0..w {
+                let idx = y * w + x;
+                if panic_channel[idx] > 0.8 {
+                    // Cardinal neighbors
+                    if x > 0 { self.scratch[idx - 1] += 0.2; }
+                    if x + 1 < w { self.scratch[idx + 1] += 0.2; }
+                    if y > 0 { self.scratch[idx - w] += 0.2; }
+                    if y + 1 < h { self.scratch[idx + w] += 0.2; }
+                }
+            }
+        }
+
+        let danger_ch = &mut self.channels[DANGER];
+        for i in 0..len {
+            if self.scratch[i] > 0.0 {
+                danger_ch[i] = (danger_ch[i] + self.scratch[i]).min(10.0);
+            }
+        }
+
+        // suppress unused warning
+        let _ = ww;
+    }
+
     pub fn tick(&mut self) {
+        self.reaction_step();
+
         let w = self.width;
         let h = self.height;
         let len = (w * h) as usize;
@@ -341,5 +410,45 @@ mod tests {
             dy.abs() < 0.5,
             "gradient should be roughly horizontal, got dy={dy}"
         );
+    }
+
+    #[test]
+    fn test_fear_synthesis() {
+        let mut grid = SignalGrid::new(16, 16);
+        grid.deposit(SignalChannel::Anger, 8, 8, 1.0);
+        grid.deposit(SignalChannel::Comfort, 8, 8, 1.0);
+
+        let danger_before = grid.read(SignalChannel::Danger, 8, 8);
+        grid.tick();
+        let danger_after = grid.read(SignalChannel::Danger, 8, 8);
+
+        assert!(
+            danger_after > danger_before,
+            "danger should increase when anger and comfort overlap, before={danger_before} after={danger_after}"
+        );
+    }
+
+    #[test]
+    fn test_panic_cascade() {
+        let mut grid = SignalGrid::new(16, 16);
+        // Deposit enough danger to trigger panic cascade (> 0.8 threshold)
+        grid.deposit(SignalChannel::Danger, 8, 8, 1.0);
+
+        let n_before = grid.read(SignalChannel::Danger, 7, 8);
+        let s_before = grid.read(SignalChannel::Danger, 9, 8);
+        let w_before = grid.read(SignalChannel::Danger, 8, 7);
+        let e_before = grid.read(SignalChannel::Danger, 8, 9);
+
+        grid.tick();
+
+        let n_after = grid.read(SignalChannel::Danger, 7, 8);
+        let s_after = grid.read(SignalChannel::Danger, 9, 8);
+        let w_after = grid.read(SignalChannel::Danger, 8, 7);
+        let e_after = grid.read(SignalChannel::Danger, 8, 9);
+
+        assert!(n_after > n_before, "panic should spread north: before={n_before} after={n_after}");
+        assert!(s_after > s_before, "panic should spread south: before={s_before} after={s_after}");
+        assert!(w_after > w_before, "panic should spread west: before={w_before} after={w_after}");
+        assert!(e_after > e_before, "panic should spread east: before={e_before} after={e_after}");
     }
 }

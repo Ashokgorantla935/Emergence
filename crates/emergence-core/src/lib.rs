@@ -8,6 +8,7 @@ pub mod god_action;
 
 use being::data::{Beings, CreatureType};
 use being::lifecycle::generate_initial_personality;
+use being::memes::{random_meme, MemeSlotState};
 use being::names::generate_name;
 use god_action::GodActionQueue;
 use sim::spatial::SpatialIndex;
@@ -83,10 +84,21 @@ pub fn create_world(config: WorldConfig) -> World {
         // We distribute 60-90% of max across beings for natural variety
         let lifespan = 86400 + rng.u32(0..57601); // 3-5 sim-years
         let idx = beings.spawn([x, y], personality, lifespan, [u32::MAX, u32::MAX]);
-        beings.names[idx] = generate_name(&mut rng);
+        beings.cold.names[idx] = generate_name(&mut rng);
         // Starting ages: mix of children, young adults, adults (0..~50% of lifespan).
         // No elders at world start — population begins in its reproductive prime.
-        beings.ages[idx] = rng.u32(0..(lifespan / 2));
+        beings.hot.ages[idx] = rng.u32(0..(lifespan / 2));
+    }
+
+    // Seed 5-10% of initial humans with 1 random meme each.
+    // This provides starting cultural diversity for SIRS propagation.
+    let human_count = beings.hot.count; // all spawned so far are humans
+    for i in 0..human_count {
+        if rng.f32() < 0.075 {
+            // ~7.5% chance — lands in 5-10% range with natural variation
+            let meme = random_meme(&mut rng);
+            beings.cold.meme_slots[i][0] = MemeSlotState::Infected(meme);
+        }
     }
 
     // Spawn fauna distributed by biome (~280 total)
@@ -174,9 +186,10 @@ pub fn spawn_fauna(beings: &mut Beings, terrain: &Terrain, rng: &mut fastrand::R
             let noise = (rng.f32() - 0.5) * 0.1 * lifespan_base as f32;
             let lifespan = (lifespan_base as f32 + noise).max(10000.0) as u32;
             let idx = beings.spawn([jx, jy], personality, lifespan, [u32::MAX, u32::MAX]);
-            beings.creature_type[idx] = creature_type as u8;
+            beings.hot.creature_type[idx] = creature_type as u8;
+            beings.hot.fauna_params[idx] = crate::being::data::init_fauna_params(creature_type as u8);
             // Random starting age so some fauna are already adults/elders at world start
-            beings.ages[idx] = rng.u32(0..lifespan);
+            beings.hot.ages[idx] = rng.u32(0..lifespan);
         }
     }
 

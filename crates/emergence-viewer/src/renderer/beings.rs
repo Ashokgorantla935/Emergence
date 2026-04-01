@@ -101,16 +101,16 @@ impl BeingRenderer {
             else if pixels_per_unit > 3.0  { 1 }
             else                           { 2 };
         // Grow prev_positions buffer to cover all being slots
-        if self.prev_positions.len() < beings.count {
-            self.prev_positions.resize(beings.count, [0.0, 0.0]);
+        if self.prev_positions.len() < beings.hot.count {
+            self.prev_positions.resize(beings.hot.count, [0.0, 0.0]);
         }
 
-        let mut instances = Vec::with_capacity(beings.alive_count);
+        let mut instances = Vec::with_capacity(beings.hot.alive_count);
 
-        for i in 0..beings.count {
-            if beings.states[i] == BeingState::Dead {
+        for i in 0..beings.hot.count {
+            if beings.hot.states[i] == BeingState::Dead {
                 // Keep prev_position in sync so it's correct when being revives/respawns
-                self.prev_positions[i] = beings.positions[i];
+                self.prev_positions[i] = beings.hot.positions[i];
                 continue;
             }
 
@@ -119,24 +119,24 @@ impl BeingRenderer {
 
             let (emotion_tint, size) = state_color_and_size(
                 i,
-                &beings.needs[i],
-                &beings.emotions[i],
-                beings.states[i],
-                beings.creature_type[i],
+                &beings.hot.needs[i],
+                &beings.hot.emotions[i],
+                beings.hot.states[i],
+                beings.hot.creature_type[i],
                 beings.life_phase(i),
             );
-            let skin_tone    = personality_skin_tone(&beings.personalities[i]);
+            let skin_tone    = personality_skin_tone(&beings.hot.personalities[i]);
 
-            let lowest_need = beings.needs[i].iter().copied().fold(f32::MAX, f32::min);
+            let lowest_need = beings.hot.needs[i].iter().copied().fold(f32::MAX, f32::min);
             let brightness  = if lowest_need < 0.3 { 1.15 } else { 1.0 };
 
-            let alpha = match beings.states[i] {
+            let alpha = match beings.hot.states[i] {
                 BeingState::Sleeping => 0.5,
                 _                    => 1.0,
             };
 
             // Smooth interpolation: lerp from previous position to current
-            let cur = beings.positions[i];
+            let cur = beings.hot.positions[i];
             let prev = self.prev_positions[i];
             let t = frame_frac.clamp(0.0, 1.0);
             let position = [
@@ -146,7 +146,7 @@ impl BeingRenderer {
 
             // Bob + flip: check if moving by comparing velocity magnitude.
             // Encode both into one f32: sign = facing dir, magnitude = bob phase.
-            let vel = beings.velocities[i];
+            let vel = beings.hot.velocities[i];
             let speed_sq = vel[0] * vel[0] + vel[1] * vel[1];
             let is_walking = speed_sq > 0.0001;
             // flip_sign: +1.0 = face right (default), -1.0 = face left
@@ -188,9 +188,9 @@ impl BeingRenderer {
         }
 
         // Snapshot current positions as "previous" for next frame
-        for i in 0..beings.count {
-            if beings.states[i] != BeingState::Dead {
-                self.prev_positions[i] = beings.positions[i];
+        for i in 0..beings.hot.count {
+            if beings.hot.states[i] != BeingState::Dead {
+                self.prev_positions[i] = beings.hot.positions[i];
             }
         }
 

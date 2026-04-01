@@ -76,17 +76,17 @@ impl Minimap {
         }
 
         // Reset to terrain (terrain is already baked in, we just overlay dots)
-        for i in 0..beings.count {
-            if beings.states[i] == emergence_core::being::data::BeingState::Dead {
+        for i in 0..beings.hot.count {
+            if beings.hot.states[i] == emergence_core::being::data::BeingState::Dead {
                 continue;
             }
-            let wx = beings.positions[i][0];
-            let wy = beings.positions[i][1];
+            let wx = beings.hot.positions[i][0];
+            let wy = beings.hot.positions[i][1];
             let px = ((wx / self.world_size[0]) * MAP_SIZE as f32) as usize;
             let py = ((wy / self.world_size[1]) * MAP_SIZE as f32) as usize;
             if px < MAP_SIZE && py < MAP_SIZE {
                 // Color by dominant emotion
-                let emo = beings.emotions[i];
+                let emo = beings.hot.emotions[i];
                 let color = dominant_emotion_color(&emo);
                 self.pixels[py * MAP_SIZE + px] = color;
             }

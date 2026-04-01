@@ -272,9 +272,9 @@ impl App {
         // Compute being centroid for camera positioning.
         // Fall back to world center if no beings spawned yet.
         let centroid = {
-            let count = world.beings.count;
+            let count = world.beings.hot.count;
             if count > 0 {
-                let sum = world.beings.positions[..count]
+                let sum = world.beings.hot.positions[..count]
                     .iter()
                     .fold([0.0f32, 0.0f32], |acc, p| [acc[0] + p[0], acc[1] + p[1]]);
                 [sum[0] / count as f32, sum[1] / count as f32]
@@ -1010,8 +1010,8 @@ impl ApplicationHandler for App {
             if let Some(idx) = self.inspector.selected_being {
                 if let Some(ref world) = self.world {
                     let world = world.read().unwrap();
-                    if idx < world.beings.count {
-                        self.camera.position = world.beings.positions[idx];
+                    if idx < world.beings.hot.count {
+                        self.camera.position = world.beings.hot.positions[idx];
                     }
                 }
             }
@@ -1225,12 +1225,12 @@ impl ApplicationHandler for App {
                     };
                     let bucket = (world.tick % 20) as usize;
                     let beings = &world.beings;
-                    for i in (bucket..beings.count).step_by(20) {
-                        if beings.states[i] == BeingState::Dead {
+                    for i in (bucket..beings.hot.count).step_by(20) {
+                        if beings.hot.states[i] == BeingState::Dead {
                             continue;
                         }
-                        let emos = &beings.emotions[i];
-                        let pos = beings.positions[i];
+                        let emos = &beings.hot.emotions[i];
+                        let pos = beings.hot.positions[i];
                         // Joy spike
                         if emos[EMO_JOY] > 0.55 {
                             ps.emit(EmitterKind::EmotionJoy, pos, world.tick);
@@ -1252,12 +1252,12 @@ impl ApplicationHandler for App {
                 {
                     let bucket = (world.tick % 100) as usize;
                     let beings = &world.beings;
-                    for i in (bucket..beings.count).step_by(100) {
-                        if beings.states[i] != emergence_core::being::data::BeingState::Dead {
+                    for i in (bucket..beings.hot.count).step_by(100) {
+                        if beings.hot.states[i] != emergence_core::being::data::BeingState::Dead {
                             // ~1% hit rate: fire when (tick * being_id) hashes into low slot
                             let hash = (world.tick.wrapping_mul(i as u32 + 1).wrapping_add((i as u32).wrapping_mul(2654435761))) % 100;
                             if hash == 0 {
-                                let pos = beings.positions[i];
+                                let pos = beings.hot.positions[i];
                                 ps.emit(EmitterKind::TalkBubble, pos, world.tick);
                             }
                         }
@@ -1314,8 +1314,8 @@ impl ApplicationHandler for App {
                 let (tick, population) = self.world.as_ref()
                     .map(|w| {
                         let w = w.read().unwrap();
-                        let pop = (0..w.beings.count)
-                            .filter(|&i| w.beings.states[i] != emergence_core::being::data::BeingState::Dead)
+                        let pop = (0..w.beings.hot.count)
+                            .filter(|&i| w.beings.hot.states[i] != emergence_core::being::data::BeingState::Dead)
                             .count() as u32;
                         (w.tick, pop)
                     })
@@ -1580,12 +1580,12 @@ impl ApplicationHandler for App {
                 if let Some(sel_idx) = self.inspector.selected_being {
                     if let Some(ref world) = self.world {
                         let world = world.read().unwrap();
-                        if sel_idx < world.beings.count
-                            && world.beings.states[sel_idx]
+                        if sel_idx < world.beings.hot.count
+                            && world.beings.hot.states[sel_idx]
                                 != emergence_core::being::data::BeingState::Dead
                         {
-                            let pos = world.beings.positions[sel_idx];
-                            let emos = &world.beings.emotions[sel_idx];
+                            let pos = world.beings.hot.positions[sel_idx];
+                            let emos = &world.beings.hot.emotions[sel_idx];
                             // Find dominant emotion
                             let (dom_idx, dom_val) = {
                                 let mut bi = 0usize;
@@ -1682,7 +1682,7 @@ impl ApplicationHandler for App {
                     let screen_w = rs.surface_config.width as f32;
                     let screen_h = rs.surface_config.height as f32;
                     let tick_bucket = (world.tick % 30) as usize;
-                    let count = world.beings.count;
+                    let count = world.beings.hot.count;
 
                     // Collect label data before the egui closure (borrow checker)
                     struct LabelEntry {
@@ -1698,10 +1698,10 @@ impl ApplicationHandler for App {
                             break;
                         }
                         // Skip dead beings
-                        if world.beings.states[i] == emergence_core::being::data::BeingState::Dead {
+                        if world.beings.hot.states[i] == emergence_core::being::data::BeingState::Dead {
                             continue;
                         }
-                        let action_u8 = world.beings.pending_action[i];
+                        let action_u8 = world.beings.hot.pending_action[i];
                         let (text, color): (&'static str, egui::Color32) = match action_u8 {
                             5  => ("Bonding",   egui::Color32::from_rgb(255, 180, 220)), // Bond — pink
                             6  => ("Sharing",   egui::Color32::from_rgb(255, 220, 30)),  // ShareFood — yellow
@@ -1714,7 +1714,7 @@ impl ApplicationHandler for App {
                             _  => continue, // skip unremarkable actions
                         };
 
-                        let pos = world.beings.positions[i];
+                        let pos = world.beings.hot.positions[i];
                         let Some([sx, sy]) = self.camera.world_to_screen(pos[0], pos[1], screen_w, screen_h)
                         else { continue };
 
@@ -1785,7 +1785,7 @@ impl ApplicationHandler for App {
                         // Build per-being kingdom id map (being_idx -> kingdom color [u8;3])
                         // kingdom_colors[i] = Some([r,g,b]) if being i belongs to a kingdom
                         let mut kingdom_colors: Vec<Option<[u8; 3]>> =
-                            vec![None; world.beings.count];
+                            vec![None; world.beings.hot.count];
                         if self.show_kingdom_colors {
                             for kingdom in &self.kingdom_detector.kingdoms {
                                 let kc = kingdom.color;
@@ -1796,7 +1796,7 @@ impl ApplicationHandler for App {
                                         .find(|s| s.id == *s_id)
                                     {
                                         for &bi in &s.beings {
-                                            if bi < world.beings.count {
+                                            if bi < world.beings.hot.count {
                                                 kingdom_colors[bi] = Some(kc);
                                             }
                                         }
@@ -1814,11 +1814,11 @@ impl ApplicationHandler for App {
                         let mut bond_lines: Vec<BondLine> = Vec::new();
 
                         if self.show_bond_lines {
-                            'outer: for i in 0..world.beings.count {
-                                if world.beings.states[i] == emergence_core::being::data::BeingState::Dead {
+                            'outer: for i in 0..world.beings.hot.count {
+                                if world.beings.hot.states[i] == emergence_core::being::data::BeingState::Dead {
                                     continue;
                                 }
-                                let slots = &world.beings.relationships[i];
+                                let slots = &world.beings.cold.relationships[i];
                                 for si in 0..slots.count as usize {
                                     if bond_lines.len() >= 100 {
                                         break 'outer;
@@ -1826,10 +1826,10 @@ impl ApplicationHandler for App {
                                     let imp = &slots.slots[si];
                                     let target = imp.target_id as usize;
                                     // Only draw bond once (i < target to avoid duplicates)
-                                    if target <= i || target >= world.beings.count {
+                                    if target <= i || target >= world.beings.hot.count {
                                         continue;
                                     }
-                                    if world.beings.states[target] == emergence_core::being::data::BeingState::Dead {
+                                    if world.beings.hot.states[target] == emergence_core::being::data::BeingState::Dead {
                                         continue;
                                     }
                                     let strong_trust = imp.trust > 0.5;
@@ -1837,8 +1837,8 @@ impl ApplicationHandler for App {
                                     if !strong_trust && !strong_warmth {
                                         continue;
                                     }
-                                    let pa = world.beings.positions[i];
-                                    let pb = world.beings.positions[target];
+                                    let pa = world.beings.hot.positions[i];
+                                    let pb = world.beings.hot.positions[target];
                                     // Only draw if both are on-screen (rough check)
                                     let Some([sax, say]) = self.camera.world_to_screen(pa[0], pa[1], screen_w, screen_h) else { continue };
                                     let Some([sbx, sby]) = self.camera.world_to_screen(pb[0], pb[1], screen_w, screen_h) else { continue };
@@ -1866,10 +1866,10 @@ impl ApplicationHandler for App {
                             let aura_r = 1.5 * pixels_per_unit; // world radius 1.5 → screen px
                             for (i, kc_opt) in kingdom_colors.iter().enumerate() {
                                 if let Some(kc) = kc_opt {
-                                    if world.beings.states[i] == emergence_core::being::data::BeingState::Dead {
+                                    if world.beings.hot.states[i] == emergence_core::being::data::BeingState::Dead {
                                         continue;
                                     }
-                                    let pos = world.beings.positions[i];
+                                    let pos = world.beings.hot.positions[i];
                                     let Some([sx, sy]) = self.camera.world_to_screen(pos[0], pos[1], screen_w, screen_h) else { continue };
                                     if sx < -20.0 || sx > screen_w + 20.0 || sy < -20.0 || sy > screen_h + 20.0 {
                                         continue;
@@ -1914,9 +1914,9 @@ impl ApplicationHandler for App {
                                     }
                                 }
                                 for &bi in &s.beings {
-                                    if bi >= world.beings.count { continue; }
-                                    if world.beings.states[bi] == emergence_core::being::data::BeingState::Dead { continue; }
-                                    let p = world.beings.positions[bi];
+                                    if bi >= world.beings.hot.count { continue; }
+                                    if world.beings.hot.states[bi] == emergence_core::being::data::BeingState::Dead { continue; }
+                                    let p = world.beings.hot.positions[bi];
                                     let dx = p[0] - s.center[0];
                                     let dy = p[1] - s.center[1];
                                     if dx * dx + dy * dy <= group_radius_sq {
@@ -2417,8 +2417,8 @@ fn build_kingdom_frame(
 ) -> KingdomFrame {
     let kingdoms: Vec<KingdomInfo> = detector.kingdoms.iter().map(|k| {
         // Find leader position
-        let leader_pos = if k.leader_idx < world.beings.count {
-            world.beings.positions[k.leader_idx]
+        let leader_pos = if k.leader_idx < world.beings.hot.count {
+            world.beings.hot.positions[k.leader_idx]
         } else {
             k.centroid
         };

@@ -4,12 +4,12 @@ use crate::world::climate::Season;
 /// Award earned traits to a being based on their current state.
 /// Call periodically (e.g. every 600 ticks) from the tick loop.
 pub fn check_and_award_traits(beings: &mut Beings, idx: usize, _tick: u32) {
-    if beings.states[idx] == BeingState::Dead {
+    if beings.hot.states[idx] == BeingState::Dead {
         return;
     }
 
-    let age = beings.ages[idx];
-    let traits = &mut beings.traits[idx];
+    let age = beings.hot.ages[idx];
+    let traits = &mut beings.cold.traits[idx];
 
     // Elder: > 72000 ticks (~2.5 years at 28800 ticks/year)
     if age > 72000 {
@@ -17,23 +17,23 @@ pub fn check_and_award_traits(beings: &mut Beings, idx: usize, _tick: u32) {
     }
 
     // Brave: bold personality > 0.7
-    if beings.personalities[idx][TRAIT_BOLD] > 0.7 {
+    if beings.hot.personalities[idx][TRAIT_BOLD] > 0.7 {
         *traits |= BEING_TRAIT_BRAVE;
     }
 
     // Coward: bold personality < -0.5
-    if beings.personalities[idx][TRAIT_BOLD] < -0.5 {
+    if beings.hot.personalities[idx][TRAIT_BOLD] < -0.5 {
         *traits |= BEING_TRAIT_COWARD;
     }
 
     // Strong: tool_quality > 0.8
-    if beings.tool_quality[idx] > 0.8 {
+    if beings.hot.tool_quality[idx] > 0.8 {
         *traits |= BEING_TRAIT_STRONG;
     }
 
     // Builder: >= 5 build actions (action code 16) in causal memory
     {
-        let mem = &beings.causal_memories[idx];
+        let mem = &beings.cold.causal_memories[idx];
         let build_count = (0..mem.len as usize)
             .filter(|&i| {
                 let slot = (mem.head as usize + 32 - mem.len as usize + i) % 32;
@@ -53,9 +53,9 @@ pub fn check_and_award_traits(beings: &mut Beings, idx: usize, _tick: u32) {
 
 /// Age all living beings by one tick without killing them (for immortal/invulnerable laws).
 pub fn age_beings_no_death(beings: &mut Beings) -> Vec<usize> {
-    for i in 0..beings.count {
-        if beings.states[i] != BeingState::Dead {
-            beings.ages[i] += 1;
+    for i in 0..beings.hot.count {
+        if beings.hot.states[i] != BeingState::Dead {
+            beings.hot.ages[i] += 1;
         }
     }
     Vec::new()
@@ -64,15 +64,15 @@ pub fn age_beings_no_death(beings: &mut Beings) -> Vec<usize> {
 /// Age all living beings by one tick. Returns indices of beings who just died of old age.
 pub fn age_beings(beings: &mut Beings) -> Vec<usize> {
     let mut newly_dead = Vec::new();
-    for i in 0..beings.count {
-        if beings.states[i] == BeingState::Dead {
+    for i in 0..beings.hot.count {
+        if beings.hot.states[i] == BeingState::Dead {
             continue;
         }
-        beings.ages[i] += 1;
+        beings.hot.ages[i] += 1;
         // Natural death: reached lifespan
-        if beings.ages[i] >= beings.lifespans[i] {
-            beings.states[i] = BeingState::Dead;
-            beings.alive_count -= 1;
+        if beings.hot.ages[i] >= beings.hot.lifespans[i] {
+            beings.hot.states[i] = BeingState::Dead;
+            beings.hot.alive_count -= 1;
             newly_dead.push(i);
         }
     }
@@ -81,46 +81,46 @@ pub fn age_beings(beings: &mut Beings) -> Vec<usize> {
 
 pub fn drift_personality(beings: &mut Beings, rng: &mut fastrand::Rng) {
     // Called once per year (every 28800 ticks)
-    for i in 0..beings.count {
-        if beings.states[i] == BeingState::Dead {
+    for i in 0..beings.hot.count {
+        if beings.hot.states[i] == BeingState::Dead {
             continue;
         }
         for t in 0..5 {
             let drift = (rng.f32() - 0.5) * 0.002; // ±0.001 range
-            beings.personalities[i][t] = (beings.personalities[i][t] + drift).clamp(-1.0, 1.0);
+            beings.hot.personalities[i][t] = (beings.hot.personalities[i][t] + drift).clamp(-1.0, 1.0);
         }
 
         // Bias by experience
-        if beings.relationships[i].has_negative_debt() {
+        if beings.cold.relationships[i].has_negative_debt() {
             // Been wronged -> drift toward cautious
-            beings.personalities[i][TRAIT_CURIOUS] =
-                (beings.personalities[i][TRAIT_CURIOUS] - 0.001).clamp(-1.0, 1.0);
+            beings.hot.personalities[i][TRAIT_CURIOUS] =
+                (beings.hot.personalities[i][TRAIT_CURIOUS] - 0.001).clamp(-1.0, 1.0);
         }
-        if beings.relationships[i].has_positive_sharing() {
+        if beings.cold.relationships[i].has_positive_sharing() {
             // Shared successfully -> drift toward more generous
-            beings.personalities[i][TRAIT_GENEROUS] =
-                (beings.personalities[i][TRAIT_GENEROUS] + 0.001).clamp(-1.0, 1.0);
+            beings.hot.personalities[i][TRAIT_GENEROUS] =
+                (beings.hot.personalities[i][TRAIT_GENEROUS] + 0.001).clamp(-1.0, 1.0);
         }
     }
 }
 
 /// Personality drift for humans only. Fauna have fixed personalities.
 pub fn drift_personality_humans(beings: &mut Beings, rng: &mut fastrand::Rng) {
-    for &i in &beings.human_indices.clone() {
-        if beings.states[i] == BeingState::Dead {
+    for &i in &beings.hot.human_indices.clone() {
+        if beings.hot.states[i] == BeingState::Dead {
             continue;
         }
         for t in 0..5 {
             let drift = (rng.f32() - 0.5) * 0.002;
-            beings.personalities[i][t] = (beings.personalities[i][t] + drift).clamp(-1.0, 1.0);
+            beings.hot.personalities[i][t] = (beings.hot.personalities[i][t] + drift).clamp(-1.0, 1.0);
         }
-        if beings.relationships[i].has_negative_debt() {
-            beings.personalities[i][TRAIT_CURIOUS] =
-                (beings.personalities[i][TRAIT_CURIOUS] - 0.001).clamp(-1.0, 1.0);
+        if beings.cold.relationships[i].has_negative_debt() {
+            beings.hot.personalities[i][TRAIT_CURIOUS] =
+                (beings.hot.personalities[i][TRAIT_CURIOUS] - 0.001).clamp(-1.0, 1.0);
         }
-        if beings.relationships[i].has_positive_sharing() {
-            beings.personalities[i][TRAIT_GENEROUS] =
-                (beings.personalities[i][TRAIT_GENEROUS] + 0.001).clamp(-1.0, 1.0);
+        if beings.cold.relationships[i].has_positive_sharing() {
+            beings.hot.personalities[i][TRAIT_GENEROUS] =
+                (beings.hot.personalities[i][TRAIT_GENEROUS] + 0.001).clamp(-1.0, 1.0);
         }
     }
 }
@@ -129,42 +129,42 @@ pub fn drift_personality_humans(beings: &mut Beings, rng: &mut fastrand::Rng) {
 pub fn check_death_conditions(beings: &mut Beings, season: Season) -> Vec<usize> {
     let mut newly_dead = Vec::new();
 
-    for i in 0..beings.count {
-        if beings.states[i] == BeingState::Dead {
+    for i in 0..beings.hot.count {
+        if beings.hot.states[i] == BeingState::Dead {
             continue;
         }
 
         // Track consecutive ticks at zero hunger
-        if beings.needs[i][NEED_HUNGER] <= 0.0 {
-            beings.hunger_zero_ticks[i] = beings.hunger_zero_ticks[i].saturating_add(1);
+        if beings.hot.needs[i][NEED_HUNGER] <= 0.0 {
+            beings.hot.hunger_zero_ticks[i] = beings.hot.hunger_zero_ticks[i].saturating_add(1);
         } else {
-            beings.hunger_zero_ticks[i] = 0;
+            beings.hot.hunger_zero_ticks[i] = 0;
         }
 
         // Track consecutive ticks at zero warmth
-        if beings.needs[i][NEED_WARMTH] <= 0.0 {
-            beings.warmth_zero_ticks[i] = beings.warmth_zero_ticks[i].saturating_add(1);
+        if beings.hot.needs[i][NEED_WARMTH] <= 0.0 {
+            beings.hot.warmth_zero_ticks[i] = beings.hot.warmth_zero_ticks[i].saturating_add(1);
         } else {
-            beings.warmth_zero_ticks[i] = 0;
+            beings.hot.warmth_zero_ticks[i] = 0;
         }
 
         // Decrement rabbit freeze countdown
-        if beings.freeze_ticks[i] > 0 {
-            beings.freeze_ticks[i] -= 1;
+        if beings.hot.freeze_ticks[i] > 0 {
+            beings.hot.freeze_ticks[i] -= 1;
         }
 
         // Starvation death: 10000+ ticks at zero hunger (generous grace period)
-        if beings.hunger_zero_ticks[i] >= 10000 {
-            beings.states[i] = BeingState::Dead;
-            beings.alive_count -= 1;
+        if beings.hot.hunger_zero_ticks[i] >= 10000 {
+            beings.hot.states[i] = BeingState::Dead;
+            beings.hot.alive_count -= 1;
             newly_dead.push(i);
             continue;
         }
 
         // Exposure death: 10000+ ticks at zero warmth in winter
-        if season == Season::Winter && beings.warmth_zero_ticks[i] >= 10000 {
-            beings.states[i] = BeingState::Dead;
-            beings.alive_count -= 1;
+        if season == Season::Winter && beings.hot.warmth_zero_ticks[i] >= 10000 {
+            beings.hot.states[i] = BeingState::Dead;
+            beings.hot.alive_count -= 1;
             newly_dead.push(i);
         }
     }
@@ -220,8 +220,8 @@ mod tests {
             beings.spawn(pos, personality, lifespan, [u32::MAX, u32::MAX]);
         }
 
-        assert_eq!(beings.count, 100);
-        assert_eq!(beings.alive_count, 100);
+        assert_eq!(beings.hot.count, 100);
+        assert_eq!(beings.hot.alive_count, 100);
 
         // Age through 3 years (86400 ticks)
         for _ in 0..86400 {
@@ -234,8 +234,8 @@ mod tests {
         let mut saw_elder = false;
         let mut dead_count = 0;
 
-        for i in 0..beings.count {
-            if beings.states[i] == BeingState::Dead {
+        for i in 0..beings.hot.count {
+            if beings.hot.states[i] == BeingState::Dead {
                 dead_count += 1;
                 continue;
             }
@@ -264,7 +264,7 @@ mod tests {
 
         // All needs start at 1.0
         for n in 0..6 {
-            assert!((beings.needs[0][n] - 1.0).abs() < 0.001);
+            assert!((beings.hot.needs[0][n] - 1.0).abs() < 0.001);
         }
 
         // Use a summer climate (normal warmth decay)
@@ -290,14 +290,14 @@ mod tests {
 
         // Hunger: 1.0 - 2500 * 0.0004 = 0.0
         assert!(
-            beings.needs[0][NEED_HUNGER] <= 0.001,
+            beings.hot.needs[0][NEED_HUNGER] <= 0.001,
             "hunger should be at 0 after 2500 decays, got {}",
-            beings.needs[0][NEED_HUNGER]
+            beings.hot.needs[0][NEED_HUNGER]
         );
 
         // Rest should have decreased
         assert!(
-            beings.needs[0][NEED_REST] < 1.0,
+            beings.hot.needs[0][NEED_REST] < 1.0,
             "rest should have decreased"
         );
     }
@@ -310,7 +310,7 @@ mod tests {
         beings.spawn([128.0, 128.0], personality, 100000, [u32::MAX, u32::MAX]);
 
         // Set fear to 1.0
-        beings.emotions[0][EMO_FEAR] = 1.0;
+        beings.hot.emotions[0][EMO_FEAR] = 1.0;
 
         // Decay uses multiplicative 0.995/tick. After 1000 ticks: 0.995^1000 ≈ 0.0067.
         for _ in 0..1000 {
@@ -318,9 +318,9 @@ mod tests {
         }
 
         assert!(
-            beings.emotions[0][EMO_FEAR] < 0.01,
+            beings.hot.emotions[0][EMO_FEAR] < 0.01,
             "fear should be near 0 after 1000 decays, got {}",
-            beings.emotions[0][EMO_FEAR]
+            beings.hot.emotions[0][EMO_FEAR]
         );
     }
 }

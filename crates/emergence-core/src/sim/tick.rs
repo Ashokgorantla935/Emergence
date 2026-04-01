@@ -65,7 +65,7 @@ pub fn tick(world: &mut World) {
     world.signals.tick();
 
     // 4. Rebuild spatial index
-    world.spatial.rebuild(&world.beings.positions, &world.beings.states);
+    world.spatial.rebuild(&world.beings.hot.positions, &world.beings.hot.states);
 
     // 5. Being updates
 
@@ -74,18 +74,18 @@ pub fn tick(world: &mut World) {
 
     // Double metabolism law (Phase 6): extra need decay
     if world.laws.double_metabolism {
-        for i in 0..world.beings.count {
-            if world.beings.states[i] == BeingState::Dead { continue; }
-            for need in &mut world.beings.needs[i] {
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] == BeingState::Dead { continue; }
+            for need in &mut world.beings.hot.needs[i] {
                 *need = (*need - 0.0004).max(0.0);
             }
         }
     }
     // No sleep law: pin rest to 1.0
     if world.laws.no_sleep {
-        for i in 0..world.beings.count {
-            if world.beings.states[i] != BeingState::Dead {
-                world.beings.needs[i][NEED_REST] = 1.0;
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] != BeingState::Dead {
+                world.beings.hot.needs[i][NEED_REST] = 1.0;
             }
         }
     }
@@ -96,9 +96,9 @@ pub fn tick(world: &mut World) {
     // 5d. Age + death checks
     if world.laws.fast_aging {
         // Age 2x per tick
-        for i in 0..world.beings.count {
-            if world.beings.states[i] != BeingState::Dead {
-                world.beings.ages[i] = world.beings.ages[i].saturating_add(1);
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] != BeingState::Dead {
+                world.beings.hot.ages[i] = world.beings.hot.ages[i].saturating_add(1);
             }
         }
     }
@@ -120,16 +120,16 @@ pub fn tick(world: &mut World) {
     let mut newly_dead_with_cause: Vec<(usize, EventCause)> = Vec::new();
     for idx in &age_dead {
         let cause = EventCause::OldAge {
-            age: world.beings.ages[*idx],
-            lifespan: world.beings.lifespans[*idx],
+            age: world.beings.hot.ages[*idx],
+            lifespan: world.beings.hot.lifespans[*idx],
         };
         newly_dead_with_cause.push((*idx, cause));
     }
     for idx in &condition_dead {
-        let cause = if world.beings.hunger_zero_ticks[*idx] >= 10000 {
-            EventCause::Starvation { hunger_zero_ticks: world.beings.hunger_zero_ticks[*idx] }
+        let cause = if world.beings.hot.hunger_zero_ticks[*idx] >= 10000 {
+            EventCause::Starvation { hunger_zero_ticks: world.beings.hot.hunger_zero_ticks[*idx] }
         } else {
-            EventCause::Exposure { warmth_zero_ticks: world.beings.warmth_zero_ticks[*idx] }
+            EventCause::Exposure { warmth_zero_ticks: world.beings.hot.warmth_zero_ticks[*idx] }
         };
         newly_dead_with_cause.push((*idx, cause));
     }
@@ -138,7 +138,7 @@ pub fn tick(world: &mut World) {
 
     // Handle death consequences
     for &dead_idx in &newly_dead {
-        let pos = world.beings.positions[dead_idx];
+        let pos = world.beings.hot.positions[dead_idx];
         let cx = (pos[0] as u32).min(world.signals.width - 1);
         let cy = (pos[1] as u32).min(world.signals.height - 1);
 
@@ -146,22 +146,22 @@ pub fn tick(world: &mut World) {
         world.signals.deposit(SignalChannel::Grief, cx, cy, 1.0);
 
         // Drop carried food
-        if world.beings.carry[dead_idx][0] > 0.0 {
+        if world.beings.hot.carry[dead_idx][0] > 0.0 {
             world.resources.deposit(
                 cx.min(world.terrain.width - 1),
                 cy.min(world.terrain.height - 1),
                 world.terrain.width,
-                world.beings.carry[dead_idx][0],
+                world.beings.hot.carry[dead_idx][0],
             );
-            world.beings.carry[dead_idx][0] = 0.0;
+            world.beings.hot.carry[dead_idx][0] = 0.0;
         }
 
         // Bonded beings enter grief
-        for i in 0..world.beings.count {
-            if world.beings.states[i] == BeingState::Dead || i == dead_idx {
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] == BeingState::Dead || i == dead_idx {
                 continue;
             }
-            if let Some(imp) = world.beings.relationships[i].find(dead_idx as u32) {
+            if let Some(imp) = world.beings.cold.relationships[i].find(dead_idx as u32) {
                 if imp.warmth > 0.3 {
                     trigger_emotion(&mut world.beings, i, EMO_GRIEF, 0.9);
                 }
@@ -171,7 +171,7 @@ pub fn tick(world: &mut World) {
 
     // Emit death events with causes (separate loop so grief processing doesn't need cause).
     for (dead_idx, cause) in &newly_dead_with_cause {
-        let pos = world.beings.positions[*dead_idx];
+        let pos = world.beings.hot.positions[*dead_idx];
         world.events.push(Event {
             tick: world.tick,
             actor_id: *dead_idx as u32,
@@ -184,12 +184,12 @@ pub fn tick(world: &mut World) {
 
     // 5e. Score actions (parallel via rayon)
     let base_seed = world.rng.u64(..);
-    let being_count = world.beings.count;
+    let being_count = world.beings.hot.count;
 
     let decisions: Vec<Option<ScoredAction>> = (0..being_count)
         .into_par_iter()
         .map(|i| {
-            if world.beings.states[i] != BeingState::Awake {
+            if world.beings.hot.states[i] != BeingState::Awake {
                 return None;
             }
             let mut rng = fastrand::Rng::with_seed(base_seed.wrapping_add(i as u64));
@@ -209,7 +209,91 @@ pub fn tick(world: &mut World) {
     // 5f. Execute actions (sequential)
     for (i, decision) in decisions.iter().enumerate() {
         if let Some(ref action) = decision {
+            // Snapshot needs before execution for Hebbian update
+            let needs_before = world.beings.hot.needs[i];
+
             execute_action(world, i, action);
+
+            // Hebbian update: fauna only, after action execution
+            if world.beings.hot.creature_type[i] != CreatureType::Human as u8
+                && world.beings.hot.states[i] != BeingState::Dead
+            {
+                let needs_after = world.beings.hot.needs[i];
+                crate::being::hebbian::hebbian_update(
+                    &mut world.beings.hot.fauna_params[i],
+                    action.action as u8,
+                    &needs_before,
+                    &needs_after,
+                );
+            }
+
+            // TD(0) brain update: humans only, after action execution
+            if world.beings.hot.creature_type[i] == CreatureType::Human as u8
+                && world.beings.hot.states[i] != BeingState::Dead
+            {
+                let needs_after = world.beings.hot.needs[i];
+                let pos = world.beings.hot.positions[i];
+                let cx = (pos[0] as u32).min(world.signals.width - 1);
+                let cy = (pos[1] as u32).min(world.signals.height - 1);
+
+                // Reconstruct old brain input (pre-execution state) for backprop
+                let old_brain_input: [f32; 14] = [
+                    needs_before[0], needs_before[1], needs_before[2],
+                    needs_before[3], needs_before[4], needs_before[5],
+                    world.signals.read(crate::world::signal::SignalChannel::Danger, cx, cy),
+                    world.signals.read(crate::world::signal::SignalChannel::FoodTrail, cx, cy),
+                    world.signals.read(crate::world::signal::SignalChannel::Comfort, cx, cy),
+                    world.signals.read(crate::world::signal::SignalChannel::Grief, cx, cy),
+                    world.signals.read(crate::world::signal::SignalChannel::Celebration, cx, cy),
+                    world.signals.read(crate::world::signal::SignalChannel::Anger, cx, cy),
+                    world.signals.read(crate::world::signal::SignalChannel::Scent, cx, cy),
+                    world.climate.light_level(),
+                ];
+
+                // Recompute old forward pass to get hidden activations for backprop
+                let (old_q_values, old_hidden) = crate::being::brain::forward(
+                    &world.beings.hot.brain_weights[i],
+                    &old_brain_input,
+                );
+                let chosen_action_idx = action.action as usize;
+                let old_q_chosen = old_q_values[chosen_action_idx];
+
+                // New state input for next-state Q-values
+                let new_brain_input: [f32; 14] = [
+                    needs_after[0], needs_after[1], needs_after[2],
+                    needs_after[3], needs_after[4], needs_after[5],
+                    world.signals.read(crate::world::signal::SignalChannel::Danger, cx, cy),
+                    world.signals.read(crate::world::signal::SignalChannel::FoodTrail, cx, cy),
+                    world.signals.read(crate::world::signal::SignalChannel::Comfort, cx, cy),
+                    world.signals.read(crate::world::signal::SignalChannel::Grief, cx, cy),
+                    world.signals.read(crate::world::signal::SignalChannel::Celebration, cx, cy),
+                    world.signals.read(crate::world::signal::SignalChannel::Anger, cx, cy),
+                    world.signals.read(crate::world::signal::SignalChannel::Scent, cx, cy),
+                    world.climate.light_level(),
+                ];
+                let (new_q_values, _) = crate::being::brain::forward(
+                    &world.beings.hot.brain_weights[i],
+                    &new_brain_input,
+                );
+
+                // Reward: improvement in minimum need
+                let min_before = needs_before.iter().copied().fold(f32::MAX, f32::min);
+                let min_after = needs_after.iter().copied().fold(f32::MAX, f32::min);
+                let reward = min_after - min_before;
+
+                // TD error: δ = reward + γ * max(new_q) - old_q[chosen]
+                let max_new_q = new_q_values.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                let td_error = reward + 0.95 * max_new_q - old_q_chosen;
+
+                crate::being::brain::td_update(
+                    &mut world.beings.hot.brain_weights[i],
+                    &old_hidden,
+                    &old_brain_input,
+                    chosen_action_idx,
+                    td_error,
+                    0.01,
+                );
+            }
 
             // 5h. Record decision trace
             let mut trigger_flags: u8 = 0;
@@ -220,24 +304,24 @@ pub fn tick(world: &mut World) {
             let trace = crate::trace::DecisionTrace {
                 tick: world.tick,
                 being_id: i as u32,
-                lowest_need: find_lowest_need_idx(&world.beings.needs[i]),
+                lowest_need: find_lowest_need_idx(&world.beings.hot.needs[i]),
                 chosen_action: action.action as u8,
                 chosen_score: half::f16::from_f32(action.score),
                 runner_up_action: action.runner_up_action,
                 runner_up_score: half::f16::from_f32(action.runner_up_score),
-                dominant_emotion: find_dominant_emotion(&world.beings.emotions[i]),
+                dominant_emotion: find_dominant_emotion(&world.beings.hot.emotions[i]),
                 trigger_flags,
             };
-            if let Some(ref mut ring) = world.beings.traces[i] {
+            if let Some(ref mut ring) = world.beings.cold.traces[i] {
                 ring.push(trace);
             }
 
             // Set new pending action
-            world.beings.pending_action[i] = action.action as u8;
-            world.beings.pending_tick[i] = world.tick;
-            world.beings.pending_needs[i] = world.beings.needs[i];
+            world.beings.hot.pending_action[i] = action.action as u8;
+            world.beings.hot.pending_tick[i] = world.tick;
+            world.beings.hot.pending_needs[i] = world.beings.hot.needs[i];
             // Context hash
-            let pos = world.beings.positions[i];
+            let pos = world.beings.hot.positions[i];
             let cx = (pos[0] as u32).min(world.signals.width - 1);
             let cy = (pos[1] as u32).min(world.signals.height - 1);
             let signal_levels = [
@@ -251,7 +335,7 @@ pub fn tick(world: &mut World) {
             ];
             let biome = world.terrain.biome_at(cx, cy);
             let nearby_count = world.spatial.count_in_radius(pos[0], pos[1], 8.0).min(255) as u8;
-            world.beings.pending_context[i] = crate::being::context::compute_context_hash(
+            world.beings.hot.pending_context[i] = crate::being::context::compute_context_hash(
                 biome,
                 signal_levels,
                 nearby_count,
@@ -262,19 +346,19 @@ pub fn tick(world: &mut World) {
 
     // 5f-2. Causal memory association window check for humans only (fauna skip)
     for i in 0..being_count {
-        if world.beings.states[i] == BeingState::Dead {
+        if world.beings.hot.states[i] == BeingState::Dead {
             continue;
         }
         // Fauna don't form causal memories (no purpose/belonging reasoning)
-        if world.beings.creature_type[i] != crate::being::data::CreatureType::Human as u8 {
+        if world.beings.hot.creature_type[i] != crate::being::data::CreatureType::Human as u8 {
             continue;
         }
-        let prev_pending_action = world.beings.pending_action[i];
+        let prev_pending_action = world.beings.hot.pending_action[i];
         if prev_pending_action == 255 {
             continue;
         }
-        let prev_pending_tick = world.beings.pending_tick[i];
-        let curious = world.beings.personalities[i][TRAIT_CURIOUS];
+        let prev_pending_tick = world.beings.hot.pending_tick[i];
+        let curious = world.beings.hot.personalities[i][TRAIT_CURIOUS];
         let window: u32 = if curious > 0.3 {
             150
         } else if curious < -0.3 {
@@ -284,33 +368,44 @@ pub fn tick(world: &mut World) {
         };
         if world.tick.saturating_sub(prev_pending_tick) >= window {
             let is_youth = world.beings.life_phase(i) == LifePhase::Youth;
-            let current_lowest: f32 = world.beings.needs[i]
+            let current_lowest: f32 = world.beings.hot.needs[i]
                 .iter()
                 .copied()
                 .fold(f32::MAX, f32::min);
-            let prev_lowest: f32 = world.beings.pending_needs[i]
+            let prev_lowest: f32 = world.beings.hot.pending_needs[i]
                 .iter()
                 .copied()
                 .fold(f32::MAX, f32::min);
             let outcome_delta = current_lowest - prev_lowest;
-            world.beings.causal_memories[i].record(
+            world.beings.cold.causal_memories[i].record(
                 prev_pending_action,
-                world.beings.pending_context[i],
+                world.beings.hot.pending_context[i],
                 outcome_delta,
                 is_youth,
             );
             // Clear pending to avoid re-triggering
-            world.beings.pending_action[i] = 255;
+            world.beings.hot.pending_action[i] = 255;
         }
     }
 
     // 5f-3. Wake-up pass: sleeping beings with rest > 0.9 wake up (Fix #1)
     for i in 0..being_count {
-        if world.beings.states[i] == BeingState::Sleeping
-            && world.beings.needs[i][NEED_REST] > 0.9
+        if world.beings.hot.states[i] == BeingState::Sleeping
+            && world.beings.hot.needs[i][NEED_REST] > 0.9
         {
-            world.beings.states[i] = BeingState::Awake;
+            world.beings.hot.states[i] = BeingState::Awake;
         }
+    }
+
+    // 5f-4. Meme lifecycle tick — humans only. O(n * 4 slots), trivial cost.
+    for i in 0..being_count {
+        if world.beings.hot.states[i] == BeingState::Dead {
+            continue;
+        }
+        if world.beings.hot.creature_type[i] != CreatureType::Human as u8 {
+            continue;
+        }
+        crate::being::memes::tick_memes(&mut world.beings.cold.meme_slots[i]);
     }
 
     // 5g. Deposit emotion signals
@@ -322,42 +417,42 @@ pub fn tick(world: &mut World) {
     }
 
     // 6b. Boredom mechanic: when all needs > 0.7, purpose decays 2x faster
-    for i in 0..world.beings.count {
-        if world.beings.states[i] == BeingState::Dead {
+    for i in 0..world.beings.hot.count {
+        if world.beings.hot.states[i] == BeingState::Dead {
             continue;
         }
-        if world.beings.creature_type[i] != crate::being::data::CreatureType::Human as u8 {
+        if world.beings.hot.creature_type[i] != crate::being::data::CreatureType::Human as u8 {
             continue;
         }
-        let all_satisfied = world.beings.needs[i].iter().all(|&n| n > 0.7);
+        let all_satisfied = world.beings.hot.needs[i].iter().all(|&n| n > 0.7);
         if all_satisfied {
             // Extra purpose decay from boredom (normal decay in needs.rs already applied)
-            world.beings.needs[i][NEED_PURPOSE] =
-                (world.beings.needs[i][NEED_PURPOSE] - 0.0002).max(0.0);
+            world.beings.hot.needs[i][NEED_PURPOSE] =
+                (world.beings.hot.needs[i][NEED_PURPOSE] - 0.0002).max(0.0);
         }
         // tool_quality degrades slightly per tick
-        if world.beings.tool_quality[i] > 0.0 {
-            world.beings.tool_quality[i] = (world.beings.tool_quality[i] - 0.0001).max(0.0);
+        if world.beings.hot.tool_quality[i] > 0.0 {
+            world.beings.hot.tool_quality[i] = (world.beings.hot.tool_quality[i] - 0.0001).max(0.0);
         }
         // Comfort bonus near own structures (builder_id match)
-        let pos = world.beings.positions[i];
+        let pos = world.beings.hot.positions[i];
         let bx = (pos[0] as u32).min(world.terrain.width - 1);
         let by = (pos[1] as u32).min(world.terrain.height - 1);
         let cidx = (by * world.terrain.width + bx) as usize;
         if world.terrain.builder_id[cidx] == i as u32 && world.terrain.structure[cidx] != 0 {
-            world.beings.needs[i][NEED_WARMTH] =
-                (world.beings.needs[i][NEED_WARMTH] + 0.002).min(1.0);
-            world.beings.needs[i][NEED_SAFETY] =
-                (world.beings.needs[i][NEED_SAFETY] + 0.001).min(1.0);
+            world.beings.hot.needs[i][NEED_WARMTH] =
+                (world.beings.hot.needs[i][NEED_WARMTH] + 0.002).min(1.0);
+            world.beings.hot.needs[i][NEED_SAFETY] =
+                (world.beings.hot.needs[i][NEED_SAFETY] + 0.001).min(1.0);
         }
         // Purpose satisfaction for high-status beings with nearby observers
         let status = world.beings.derived_status(i);
         if status > 0.3 {
-            world.beings.needs[i][NEED_PURPOSE] =
-                (world.beings.needs[i][NEED_PURPOSE] + status * 0.001).min(1.0);
+            world.beings.hot.needs[i][NEED_PURPOSE] =
+                (world.beings.hot.needs[i][NEED_PURPOSE] + status * 0.001).min(1.0);
         }
         // Signal style: dominant_style update at current position
-        let style = world.beings.signal_style[i];
+        let style = world.beings.hot.signal_style[i];
         let sw = world.terrain.width as usize;
         let cell_idx = by as usize * sw + bx as usize;
         if cell_idx < world.terrain.dominant_style.len() {
@@ -365,8 +460,8 @@ pub fn tick(world: &mut World) {
         }
         // Style comfort: beings gain comfort near matching signal style
         if world.terrain.dominant_style[cell_idx] == style {
-            world.beings.needs[i][NEED_BELONGING] =
-                (world.beings.needs[i][NEED_BELONGING] + 0.001).min(1.0);
+            world.beings.hot.needs[i][NEED_BELONGING] =
+                (world.beings.hot.needs[i][NEED_BELONGING] + 0.001).min(1.0);
         }
     }
 
@@ -393,8 +488,8 @@ pub fn tick(world: &mut World) {
     if world.tick % 600 == 0 {
         world.beings.rebuild_partition_indices();
         // Award traits based on accumulated stats (runs alongside partition rebuild)
-        for i in 0..world.beings.count {
-            if world.beings.states[i] != BeingState::Dead {
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] != BeingState::Dead {
                 crate::being::lifecycle::check_and_award_traits(&mut world.beings, i, world.tick);
             }
         }
@@ -534,11 +629,11 @@ fn apply_weather_effects(world: &mut World) {
                 }
             }
             // Warmth damage + scatter for beings in region
-            for i in 0..world.beings.count {
-                if world.beings.states[i] == BeingState::Dead {
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] == BeingState::Dead {
                     continue;
                 }
-                let pos = world.beings.positions[i];
+                let pos = world.beings.hot.positions[i];
                 let bx = pos[0] as u32;
                 let by = pos[1] as u32;
                 if bx >= rx && bx < rx + rw && by >= ry && by < ry + rh {
@@ -548,16 +643,16 @@ fn apply_weather_effects(world: &mut World) {
                         by.min(world.terrain.height - 1),
                     );
                     if !in_shelter {
-                        world.beings.needs[i][NEED_WARMTH] =
-                            (world.beings.needs[i][NEED_WARMTH] - 0.01).max(0.0);
+                        world.beings.hot.needs[i][NEED_WARMTH] =
+                            (world.beings.hot.needs[i][NEED_WARMTH] - 0.01).max(0.0);
                         // Scatter: push away from storm center
                         let center_x = rx as f32 + rw as f32 / 2.0;
                         let center_y = ry as f32 + rh as f32 / 2.0;
                         let dx = pos[0] - center_x;
                         let dy = pos[1] - center_y;
                         let len = (dx * dx + dy * dy).sqrt().max(1.0);
-                        world.beings.velocities[i][0] += dx / len * 0.1;
-                        world.beings.velocities[i][1] += dy / len * 0.1;
+                        world.beings.hot.velocities[i][0] += dx / len * 0.1;
+                        world.beings.hot.velocities[i][1] += dy / len * 0.1;
                     }
                     trigger_emotion(&mut world.beings, i, EMO_FEAR, 0.3);
                 }
@@ -571,49 +666,49 @@ fn process_births(world: &mut World) {
     let mut new_beings: Vec<([f32; 2], [f32; 5], u32, [u32; 2])> = Vec::new();
 
     // Find candidate parent pairs — humans only (fauna populations are fixed at world gen)
-    for i in 0..world.beings.count {
-        if world.beings.states[i] != BeingState::Awake {
+    for i in 0..world.beings.hot.count {
+        if world.beings.hot.states[i] != BeingState::Awake {
             continue;
         }
         // Only humans reproduce through this system
-        if world.beings.creature_type[i] != CreatureType::Human as u8 {
+        if world.beings.hot.creature_type[i] != CreatureType::Human as u8 {
             continue;
         }
         if world.beings.life_phase(i) != LifePhase::Adult {
             continue;
         }
-        if world.beings.needs[i][NEED_HUNGER] < 0.3 {
+        if world.beings.hot.needs[i][NEED_HUNGER] < 0.3 {
             continue;
         }
 
         // Birth cooldown: 400 ticks (~50s at 8t/s) per parent
-        if i < world.beings.last_birth_tick.len() && tick.saturating_sub(world.beings.last_birth_tick[i]) < 400 {
+        if i < world.beings.cold.last_birth_tick.len() && tick.saturating_sub(world.beings.cold.last_birth_tick[i]) < 400 {
             continue;
         }
 
         // Find any adult partner nearby within 10 cells (no relationship required)
-        let pos = world.beings.positions[i];
-        let nearby = world.spatial.query_radius_with_positions(pos[0], pos[1], 10.0, &world.beings.positions);
+        let pos = world.beings.hot.positions[i];
+        let nearby = world.spatial.query_radius_with_positions(pos[0], pos[1], 10.0, &world.beings.hot.positions);
         for partner in nearby {
             // Only check from the lower index to prevent both parents triggering birth
             if partner <= i {
                 continue;
             }
-            if partner >= world.beings.count
-                || world.beings.states[partner] != BeingState::Awake
-                || world.beings.creature_type[partner] != CreatureType::Human as u8
+            if partner >= world.beings.hot.count
+                || world.beings.hot.states[partner] != BeingState::Awake
+                || world.beings.hot.creature_type[partner] != CreatureType::Human as u8
                 || world.beings.life_phase(partner) != LifePhase::Adult
             {
                 continue;
             }
 
             // Partner cooldown check
-            if partner < world.beings.last_birth_tick.len() && tick.saturating_sub(world.beings.last_birth_tick[partner]) < 400 {
+            if partner < world.beings.cold.last_birth_tick.len() && tick.saturating_sub(world.beings.cold.last_birth_tick[partner]) < 400 {
                 continue;
             }
 
             // Check partner's needs
-            if world.beings.needs[partner][NEED_HUNGER] < 0.3 {
+            if world.beings.hot.needs[partner][NEED_HUNGER] < 0.3 {
                 continue;
             }
 
@@ -626,7 +721,7 @@ fn process_births(world: &mut World) {
             // Stochastic birth: base 0.08% per tick per eligible pair, scaled by carrying capacity.
             // Carrying capacity = map_size / 40. Uses human-only count so fauna don't inflate the cap.
             // At low population: near full rate. Near capacity: rate drops to near zero.
-            let human_alive = world.beings.human_count as f32;
+            let human_alive = world.beings.hot.human_count as f32;
             let carrying_capacity = (world.config.size.0 * world.config.size.1) as f32 / 25.0;
             let density_factor = (1.0 - human_alive / carrying_capacity).max(0.0);
             let birth_prob = 0.003 * density_factor;
@@ -635,17 +730,17 @@ fn process_births(world: &mut World) {
             }
 
             // Birth!
-            let parent_a_personality = world.beings.personalities[i];
-            let parent_b_personality = world.beings.personalities[partner];
+            let parent_a_personality = world.beings.hot.personalities[i];
+            let parent_b_personality = world.beings.hot.personalities[partner];
             let child_personality =
                 generate_personality(parent_a_personality, parent_b_personality, &mut world.rng);
 
             let avg_lifespan =
-                (world.beings.lifespans[i] + world.beings.lifespans[partner]) / 2;
+                (world.beings.hot.lifespans[i] + world.beings.hot.lifespans[partner]) / 2;
             let noise = (world.rng.f32() - 0.5) * 0.2 * avg_lifespan as f32;
             let child_lifespan = (avg_lifespan as f32 + noise).clamp(86000.0, 144000.0) as u32;
 
-            let partner_pos = world.beings.positions[partner];
+            let partner_pos = world.beings.hot.positions[partner];
             let birth_pos = [
                 (pos[0] + partner_pos[0]) / 2.0,
                 (pos[1] + partner_pos[1]) / 2.0,
@@ -667,16 +762,16 @@ fn process_births(world: &mut World) {
         // Set birth cooldown on both parents BEFORE spawn (spawn grows vecs)
         let pa = parents[0] as usize;
         let pb = parents[1] as usize;
-        if pa < world.beings.last_birth_tick.len() {
-            world.beings.last_birth_tick[pa] = tick;
+        if pa < world.beings.cold.last_birth_tick.len() {
+            world.beings.cold.last_birth_tick[pa] = tick;
         }
-        if pb < world.beings.last_birth_tick.len() {
-            world.beings.last_birth_tick[pb] = tick;
+        if pb < world.beings.cold.last_birth_tick.len() {
+            world.beings.cold.last_birth_tick[pb] = tick;
         }
         let idx = world.beings.spawn(pos, personality, lifespan, parents);
-        world.beings.names[idx] = generate_name(&mut world.rng);
+        world.beings.cold.names[idx] = generate_name(&mut world.rng);
         // New births are human by default; keep human_count in sync so capacity check stays accurate.
-        world.beings.human_count += 1;
+        world.beings.hot.human_count += 1;
         // Kinship warmth: siblings start with warmth 0.3 / trust 0.2
         init_kinship_warmth(&mut world.beings, idx, tick);
         world.events.push(Event {
@@ -750,8 +845,8 @@ mod tests {
         assert_eq!(world.tick, 100);
 
         // All positions should be within bounds
-        for i in 0..world.beings.count {
-            let pos = world.beings.positions[i];
+        for i in 0..world.beings.hot.count {
+            let pos = world.beings.hot.positions[i];
             assert!(pos[0] >= 0.0 && pos[0] < 256.0, "x out of bounds: {}", pos[0]);
             assert!(pos[1] >= 0.0 && pos[1] < 256.0, "y out of bounds: {}", pos[1]);
         }
@@ -777,15 +872,15 @@ mod tests {
 
         // Rebuild partition indices so human_count is accurate
         world.beings.rebuild_partition_indices();
-        let initial_humans = world.beings.human_count;
+        let initial_humans = world.beings.hot.human_count;
         crate::step_n(&mut world, 2000);
 
         world.beings.rebuild_partition_indices();
         // Carrying capacity = 64*64/10 = 409. Population should not grow unboundedly.
         assert!(
-            world.beings.human_count <= initial_humans + 200,
+            world.beings.hot.human_count <= initial_humans + 200,
             "population should not grow unboundedly: {} humans (started {})",
-            world.beings.human_count, initial_humans
+            world.beings.hot.human_count, initial_humans
         );
     }
 
@@ -793,12 +888,12 @@ mod tests {
     fn test_population_survives_5000_ticks() {
         let config = test_config(200);
         let mut world = crate::create_world(config);
-        let initial_humans = world.beings.human_indices.len();
+        let initial_humans = world.beings.hot.human_indices.len();
         crate::step_n(&mut world, 5000);
         // At least 90% of initial humans should survive 5000 ticks
         let min_survivors = (initial_humans * 9 / 10).max(1);
-        let human_alive: usize = world.beings.human_indices.iter()
-            .filter(|&&i| world.beings.states[i] != crate::being::data::BeingState::Dead)
+        let human_alive: usize = world.beings.hot.human_indices.iter()
+            .filter(|&&i| world.beings.hot.states[i] != crate::being::data::BeingState::Dead)
             .count();
         assert!(
             human_alive >= min_survivors,
@@ -813,14 +908,14 @@ mod tests {
         let config = test_config(200); // 256x256 with 200 beings = decent density
         let mut world = crate::create_world(config);
 
-        let initial_count = world.beings.count;
+        let initial_count = world.beings.hot.count;
         // Run 5000 ticks (fast on 256x256)
         crate::step_n(&mut world, 5000);
 
-        let births = world.beings.count - initial_count;
-        let final_alive = world.beings.alive_count;
+        let births = world.beings.hot.count - initial_count;
+        let final_alive = world.beings.hot.alive_count;
         let deaths = (initial_count as isize - final_alive as isize + births as isize).max(0) as usize;
-        eprintln!("births={} deaths={} alive={}/{}", births, deaths, final_alive, world.beings.count);
+        eprintln!("births={} deaths={} alive={}/{}", births, deaths, final_alive, world.beings.hot.count);
 
         assert!(
             births > 0 || deaths > 0,

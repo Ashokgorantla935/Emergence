@@ -1,3 +1,4 @@
+use super::brain;
 use super::context::compute_context_hash;
 use super::data::*;
 use super::projection::projection_bonus;
@@ -134,10 +135,10 @@ pub fn score_actions(
     spatial: &SpatialIndex,
     rng: &mut fastrand::Rng,
 ) -> ScoredAction {
-    let pos = beings.positions[being_index];
-    let needs = &beings.needs[being_index];
-    let emotions = &beings.emotions[being_index];
-    let personality = &beings.personalities[being_index];
+    let pos = beings.hot.positions[being_index];
+    let needs = &beings.hot.needs[being_index];
+    let emotions = &beings.hot.emotions[being_index];
+    let personality = &beings.hot.personalities[being_index];
     let light = climate.light_level();
     let radius = beings.perception_radius(being_index, light);
 
@@ -193,18 +194,18 @@ pub fn score_actions(
     }
 
     // Short-circuit: rest need critical and safe location
-    if needs[NEED_REST] < 0.2 && beings.states[being_index] != BeingState::Sleeping {
+    if needs[NEED_REST] < 0.2 && beings.hot.states[being_index] != BeingState::Sleeping {
         let comfort = local.values[CH_COMFORT];
         let danger = local.values[CH_DANGER];
 
         if comfort > 0.3 && danger < 0.1 {
             // Check no hostile being nearby
-            let nearby = spatial.query_radius_with_positions(pos[0], pos[1], radius, &beings.positions);
+            let nearby = spatial.query_radius_with_positions(pos[0], pos[1], radius, &beings.hot.positions);
             let hostile_nearby = nearby.iter().any(|&ni| {
-                if ni == being_index || beings.states[ni] == BeingState::Dead {
+                if ni == being_index || beings.hot.states[ni] == BeingState::Dead {
                     return false;
                 }
-                beings.relationships[being_index]
+                beings.cold.relationships[being_index]
                     .find(ni as u32)
                     .map(|imp| imp.warmth < 0.0)
                     .unwrap_or(false)
@@ -227,7 +228,139 @@ pub fn score_actions(
     }
 
     // Nearby beings for social actions
-    let nearby = spatial.query_radius_with_positions(pos[0], pos[1], radius, &beings.positions);
+    let nearby = spatial.query_radius_with_positions(pos[0], pos[1], radius, &beings.hot.positions);
+
+    // ── Human brain path ──────────────────────────────────────────────────────
+    // Humans use a learned MLP to select actions via Boltzmann sampling.
+    // Fauna continue through the heuristic path below.
+    let creature_type = beings.hot.creature_type[being_index];
+    if creature_type == CreatureType::Human as u8 {
+        // Assemble 14-float input: [needs[0..6], signal_values[0..7], light]
+        let mut brain_input: [f32; 14] = [
+            needs[0], needs[1], needs[2], needs[3], needs[4], needs[5],
+            local.values[0], local.values[1], local.values[2],
+            local.values[3], local.values[4], local.values[5], local.values[6],
+            climate.light_level(),
+        ];
+
+        // Apply meme bias: active memes shift perceived sensory input
+        let meme_bias = super::memes::aggregate_meme_bias(&beings.cold.meme_slots[being_index]);
+        for i in 0..14 {
+            brain_input[i] += meme_bias[i];
+        }
+
+        let (q_values, _hidden) = brain::forward(&beings.hot.brain_weights[being_index], &brain_input);
+
+        // Build allowed action indices for Boltzmann selection
+        let allowed_indices: Vec<u8> = Action::ALL.iter().map(|&a| a as u8).collect();
+
+        let curiosity = beings.hot.personalities[being_index][TRAIT_CURIOUS].clamp(-1.0, 1.0);
+        let temperature = 0.5 + 1.5 * curiosity;
+
+        let (chosen_idx, chosen_q) = brain::boltzmann_select(&q_values, &allowed_indices, temperature, rng);
+        let chosen_action = Action::ALL[chosen_idx];
+
+        // Resolve target for chosen action using existing helper logic
+        let mut target_being: Option<usize> = None;
+        let mut target_pos: Option<[f32; 2]> = None;
+
+        match chosen_action {
+            Action::ApproachBeing | Action::Bond | Action::ShareFood | Action::TakeFood | Action::AvoidBeing => {
+                let (target, _) = find_social_target(chosen_action, being_index, beings, &nearby);
+                if let Some(ti) = target {
+                    target_being = Some(ti);
+                    target_pos = Some(beings.hot.positions[ti]);
+                }
+            }
+            Action::SeekFood => {
+                let [gx, gy] = local.gradients[CH_FOOD];
+                if gx.abs() > 0.01 || gy.abs() > 0.01 {
+                    target_pos = Some([pos[0] + gx * 5.0, pos[1] + gy * 5.0]);
+                } else {
+                    target_pos = find_nearest_food(pos, radius * 2.0, terrain, resources)
+                        .or_else(|| find_food_biome_direction(pos, terrain, 20.0));
+                }
+            }
+            Action::SeekShelter => {
+                target_pos = find_nearest_shelter(pos, radius, terrain);
+            }
+            Action::Flee => {
+                let [gx, gy] = local.gradients[CH_DANGER];
+                if gx.abs() > 0.01 || gy.abs() > 0.01 {
+                    target_pos = Some([pos[0] - gx * 10.0, pos[1] - gy * 10.0]);
+                }
+            }
+            Action::Explore => {
+                let [gx, gy] = local.gradients[CH_SCENT];
+                if gx.abs() > 0.01 || gy.abs() > 0.01 {
+                    target_pos = Some([pos[0] - gx * 8.0, pos[1] - gy * 8.0]);
+                } else {
+                    let angle = rng.f32() * std::f32::consts::TAU;
+                    target_pos = Some([pos[0] + angle.cos() * 5.0, pos[1] + angle.sin() * 5.0]);
+                }
+            }
+            Action::Cluster => {
+                let [gx, gy] = local.gradients[CH_COMFORT];
+                if gx.abs() > 0.01 || gy.abs() > 0.01 {
+                    target_pos = Some([pos[0] + gx * 3.0, pos[1] + gy * 3.0]);
+                }
+            }
+            Action::Mourn => {
+                let [gx, gy] = local.gradients[CH_GRIEF];
+                if gx.abs() > 0.01 || gy.abs() > 0.01 {
+                    target_pos = Some([pos[0] + gx * 3.0, pos[1] + gy * 3.0]);
+                }
+            }
+            Action::PickUpFood => {
+                target_pos = find_nearest_food(pos, radius, terrain, resources);
+            }
+            Action::PickUpStone => {
+                target_pos = find_nearest_stone(pos, radius, terrain);
+            }
+            Action::Build | Action::Craft | Action::Memorialize | Action::CreateMark | Action::ShareResource => {
+                target_pos = Some(pos);
+            }
+            Action::Teach => {
+                if let Some(yt) = find_youth_target(being_index, beings, &nearby) {
+                    target_being = Some(yt);
+                    target_pos = Some(beings.hot.positions[yt]);
+                }
+            }
+            Action::Hunt => {
+                if let Some(pp) = find_nearest_prey(pos, radius, being_index, beings, &nearby) {
+                    target_pos = Some(pp.1);
+                    target_being = Some(pp.0);
+                }
+            }
+            Action::Wander | Action::Sleep => {
+                let angle = rng.f32() * std::f32::consts::TAU;
+                target_pos = Some([pos[0] + angle.cos() * 3.0, pos[1] + angle.sin() * 3.0]);
+            }
+        }
+
+        // Compute context hash for causal memory record
+        let signal_levels = local.values;
+        let biome = terrain.biome_at(cx, cy);
+        let nearby_count = nearby.len().min(255) as u8;
+        let context_hash = compute_context_hash(biome, signal_levels, nearby_count, climate.day_phase());
+
+        // Causal memory for chosen action
+        let causal = beings.cold.causal_memories[being_index].score_for_action(chosen_action as u8, context_hash);
+        let signal_contrib = local.values.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+
+        return ScoredAction {
+            action: chosen_action,
+            score: chosen_q,
+            target_being,
+            target_pos,
+            runner_up_action: 0,
+            runner_up_score: 0.0,
+            causal_contrib: causal.abs(),
+            relationship_contrib: 0.0,
+            signal_contrib,
+        };
+    }
+    // ── End human brain path ──────────────────────────────────────────────────
 
     // Compute context hash for causal memory — use cached signal values
     let signal_levels = local.values;
@@ -254,7 +387,6 @@ pub fn score_actions(
     let mut max_relationship_contrib: f32 = 0.0;
     let mut max_signal_contrib: f32 = 0.0;
 
-    let creature_type = beings.creature_type[being_index];
     for &action in Action::allowed_actions(creature_type) {
         let mut score = logistic_need_score(action, needs)
             * personality_modifier(action, personality)
@@ -265,11 +397,11 @@ pub fn score_actions(
         score += sig;
 
         // Causal memory
-        let causal = beings.causal_memories[being_index].score_for_action(action as u8, context_hash);
+        let causal = beings.cold.causal_memories[being_index].score_for_action(action as u8, context_hash);
         score += causal;
 
         // Projection bonus
-        score += projection_bonus(action, needs, &beings.causal_memories[being_index], context_hash);
+        score += projection_bonus(action, needs, &beings.cold.causal_memories[being_index], context_hash);
 
         // Social action: find best target
         let mut target_being = None;
@@ -283,7 +415,7 @@ pub fn score_actions(
                 );
                 if let Some(ti) = target {
                     target_being = Some(ti);
-                    target_pos = Some(beings.positions[ti]);
+                    target_pos = Some(beings.hot.positions[ti]);
                     score += rel_score;
                     rel_contrib = rel_score;
                 } else {
@@ -333,11 +465,11 @@ pub fn score_actions(
                 }
             }
             Action::Cluster => {
-                let ct = CreatureType::from_u8(beings.creature_type[being_index]);
+                let ct = CreatureType::from_u8(beings.hot.creature_type[being_index]);
                 if ct.is_prey() {
                     // Herbivores: herd toward nearest same-species neighbor
                     if let Some(herd_pos) = find_nearest_same_species(
-                        pos, being_index, beings.creature_type[being_index], beings, &nearby
+                        pos, being_index, beings.hot.creature_type[being_index], beings, &nearby
                     ) {
                         target_pos = Some(herd_pos);
                         score *= 1.5; // herding boost so it competes with wandering
@@ -364,7 +496,7 @@ pub fn score_actions(
                 }
             }
             Action::PickUpFood => {
-                if beings.carry[being_index][0] >= beings.carry_capacity(being_index) {
+                if beings.hot.carry[being_index][0] >= beings.carry_capacity(being_index) {
                     score = 0.0; // can't carry more food
                 } else {
                     let food_pos = find_nearest_food(pos, radius, terrain, resources);
@@ -372,7 +504,7 @@ pub fn score_actions(
                 }
             }
             Action::PickUpStone => {
-                if beings.carry[being_index][1] >= beings.carry_capacity(being_index) {
+                if beings.hot.carry[being_index][1] >= beings.carry_capacity(being_index) {
                     score = 0.0; // already carrying max stone
                 } else {
                     let stone_pos = find_nearest_stone(pos, radius, terrain);
@@ -384,18 +516,18 @@ pub fn score_actions(
                 }
             }
             Action::Build => {
-                if beings.carry[being_index][1] < 0.1 {
+                if beings.hot.carry[being_index][1] < 0.1 {
                     score = 0.0;
                 } else {
                     target_pos = Some(pos);
                     // tool_quality speeds up building
-                    score *= 1.0 + beings.tool_quality[being_index];
+                    score *= 1.0 + beings.hot.tool_quality[being_index];
                 }
             }
             Action::Craft => {
                 let near_mountain = terrain.biome_at(cx, cy) == Biome::Mountain
                     || neighbors_have_biome(pos, terrain, Biome::Mountain, 2.0);
-                if !near_mountain || beings.carry[being_index][1] < 0.1 {
+                if !near_mountain || beings.hot.carry[being_index][1] < 0.1 {
                     score = 0.0;
                 } else {
                     target_pos = Some(pos);
@@ -408,7 +540,7 @@ pub fn score_actions(
                     let youth_target = find_youth_target(being_index, beings, &nearby);
                     if let Some(yt) = youth_target {
                         target_being = Some(yt);
-                        target_pos = Some(beings.positions[yt]);
+                        target_pos = Some(beings.hot.positions[yt]);
                     } else {
                         score = 0.0;
                     }
@@ -441,13 +573,13 @@ pub fn score_actions(
                 }
             }
             Action::ShareResource => {
-                if beings.carry[being_index][1] < 0.1 {
+                if beings.hot.carry[being_index][1] < 0.1 {
                     score = 0.0;
                 } else {
                     let res_target = find_resource_need_target(being_index, beings, &nearby);
                     if let Some(rt) = res_target {
                         target_being = Some(rt);
-                        target_pos = Some(beings.positions[rt]);
+                        target_pos = Some(beings.hot.positions[rt]);
                     } else {
                         score = 0.0;
                     }
@@ -478,6 +610,7 @@ pub fn score_actions(
         }
 
         // Species-specific behavior overrides (applied after generic scoring)
+        let fauna_params = beings.hot.fauna_params[being_index];
         apply_species_behavior(
             action,
             creature_type,
@@ -490,6 +623,7 @@ pub fn score_actions(
             &nearby,
             &local,
             rng,
+            &fauna_params,
             &mut score,
             &mut target_pos,
             &mut target_being,
@@ -535,6 +669,9 @@ pub fn score_actions(
 
 /// Apply species-specific behavior overrides to an already-scored action.
 /// Called once per action per being. Modifies score/target_pos/target_being in place.
+/// `params` are the being's learnable fauna parameters:
+///   [0] separation_weight, [1] cohesion_weight, [2] flee_weight,
+///   [3] hunt_weight, [4] cluster_weight, [5] wander_weight
 #[allow(clippy::too_many_arguments)]
 fn apply_species_behavior(
     action: Action,
@@ -548,12 +685,22 @@ fn apply_species_behavior(
     nearby: &[usize],
     local: &LocalSignals,
     rng: &mut fastrand::Rng,
+    params: &[f32; 6],
     score: &mut f32,
     target_pos: &mut Option<[f32; 2]>,
     target_being: &mut Option<usize>,
 ) {
     use crate::being::data::CreatureType;
     const CH_DANGER: usize = 0;
+
+    // Param indices (named for clarity)
+    #[allow(dead_code)]
+    const SEP: usize = 0;
+    const COH: usize = 1;
+    const FLEE: usize = 2;
+    const HUNT: usize = 3;
+    const CLUSTER: usize = 4;
+    const WANDER: usize = 5;
 
     match CreatureType::from_u8(creature_type) {
         // ── HAWK: boids flocking ──────────────────────────────────────────
@@ -563,18 +710,18 @@ fn apply_species_behavior(
                 let boids = compute_hawk_boids(pos, being_index, beings, nearby, 3.0, 8.0);
                 if boids[0].abs() > 0.01 || boids[1].abs() > 0.01 {
                     *target_pos = Some([pos[0] + boids[0] * 5.0, pos[1] + boids[1] * 5.0]);
-                    *score = 8.5; // Hawks strongly prefer to flock
+                    *score = 5.0 * params[COH]; // cohesion_weight drives flock preference
                 }
             }
             Action::Wander => {
                 // Hawks near a flock still wander occasionally, but less
                 let hawk_count = nearby.iter().filter(|&&ni| {
                     ni != being_index
-                        && beings.creature_type[ni] == CreatureType::Hawk as u8
-                        && beings.states[ni] != BeingState::Dead
+                        && beings.hot.creature_type[ni] == CreatureType::Hawk as u8
+                        && beings.hot.states[ni] != BeingState::Dead
                 }).count();
                 if hawk_count >= 2 {
-                    *score *= 0.3; // suppress wandering when in a flock
+                    *score *= (1.0 - params[COH]).max(0.1); // suppress wander based on cohesion learned
                 }
             }
             _ => {}
@@ -587,17 +734,17 @@ fn apply_species_behavior(
                 if target_being.is_some() {
                     let pack_nearby = nearby.iter().any(|&ni| {
                         ni != being_index
-                            && beings.creature_type[ni] == CreatureType::Wolf as u8
-                            && beings.states[ni] != BeingState::Dead
+                            && beings.hot.creature_type[ni] == CreatureType::Wolf as u8
+                            && beings.hot.states[ni] != BeingState::Dead
                             && {
-                                let tp = beings.positions[ni];
+                                let tp = beings.hot.positions[ni];
                                 let dx = tp[0] - pos[0];
                                 let dy = tp[1] - pos[1];
                                 dx * dx + dy * dy <= 100.0 // within 10 cells
                             }
                     });
                     if pack_nearby {
-                        *score = 9.0; // coordinated hunt — highest priority
+                        *score = 4.0 * params[HUNT]; // hunt_weight drives coordinated hunt
                     }
                 }
             }
@@ -606,15 +753,15 @@ fn apply_species_behavior(
                 let prey_visible = find_nearest_prey(pos, radius, being_index, beings, nearby).is_some();
                 let pack_nearby = nearby.iter().any(|&ni| {
                     ni != being_index
-                        && beings.creature_type[ni] == CreatureType::Wolf as u8
-                        && beings.states[ni] != BeingState::Dead
+                        && beings.hot.creature_type[ni] == CreatureType::Wolf as u8
+                        && beings.hot.states[ni] != BeingState::Dead
                 });
                 if pack_nearby && !prey_visible {
                     // Stay near pack center
                     let pack_center = flock_centroid(pos, being_index, CreatureType::Wolf as u8, beings, nearby);
                     if let Some(center) = pack_center {
                         *target_pos = Some(center);
-                        *score = 5.5;
+                        *score = 3.5 * params[CLUSTER];
                     }
                 }
             }
@@ -622,13 +769,13 @@ fn apply_species_behavior(
                 // Solo wolves patrol; pack wolves suppress wandering
                 let pack_nearby = nearby.iter().any(|&ni| {
                     ni != being_index
-                        && beings.creature_type[ni] == CreatureType::Wolf as u8
-                        && beings.states[ni] != BeingState::Dead
+                        && beings.hot.creature_type[ni] == CreatureType::Wolf as u8
+                        && beings.hot.states[ni] != BeingState::Dead
                 });
                 if pack_nearby {
-                    *score *= 0.4; // suppress wander when in pack
+                    *score *= (1.0 - params[COH]).max(0.1); // suppress wander when in pack
                 } else {
-                    *score *= 1.3; // solo patrol boost
+                    *score *= params[WANDER]; // solo patrol strength from wander_weight
                 }
             }
             _ => {}
@@ -641,35 +788,35 @@ fn apply_species_behavior(
                 // deposits danger signal — we read that accumulated signal here
                 let danger = local.values[CH_DANGER];
                 if danger > 0.1 {
-                    // Amplify flee score proportional to alarm signal
-                    *score += danger * 6.0;
+                    // Amplify flee score proportional to alarm signal and flee_weight
+                    *score += danger * 6.0 * params[FLEE];
                     // Flee away from danger gradient
                     let [gx, gy] = local.gradients[CH_DANGER];
                     if gx.abs() > 0.01 || gy.abs() > 0.01 {
                         *target_pos = Some([pos[0] - gx * 15.0, pos[1] - gy * 15.0]);
                     }
                 }
-                // Direct predator in range: always flee at high score
+                // Direct predator in range: always flee at learned flee score
                 let predator_near = nearby.iter().any(|&ni| {
                     ni != being_index
-                        && beings.states[ni] != BeingState::Dead
-                        && CreatureType::from_u8(beings.creature_type[ni]).is_predator()
+                        && beings.hot.states[ni] != BeingState::Dead
+                        && CreatureType::from_u8(beings.hot.creature_type[ni]).is_predator()
                         && {
-                            let tp = beings.positions[ni];
+                            let tp = beings.hot.positions[ni];
                             let dx = tp[0] - pos[0];
                             let dy = tp[1] - pos[1];
                             dx * dx + dy * dy <= 144.0 // 12 cells
                         }
                 });
                 if predator_near {
-                    *score = 9.5; // panic flee overrides everything
+                    *score = 4.5 * params[FLEE]; // panic flee strength from flee_weight
                 }
             }
             Action::Cluster => {
                 // Peaceful grazing herds: score herding highly when no danger
                 let danger = local.values[CH_DANGER];
                 if danger < 0.05 {
-                    *score *= 1.8; // Deer strongly prefer to herd when safe
+                    *score *= params[CLUSTER]; // cluster_weight drives herd preference
                 }
             }
             _ => {}
@@ -681,56 +828,58 @@ fn apply_species_behavior(
                 // 50% chance to freeze instead of flee when predator within 8 cells
                 let predator_close = nearby.iter().any(|&ni| {
                     ni != being_index
-                        && beings.states[ni] != BeingState::Dead
-                        && CreatureType::from_u8(beings.creature_type[ni]).is_predator()
+                        && beings.hot.states[ni] != BeingState::Dead
+                        && CreatureType::from_u8(beings.hot.creature_type[ni]).is_predator()
                         && {
-                            let tp = beings.positions[ni];
+                            let tp = beings.hot.positions[ni];
                             let dx = tp[0] - pos[0];
                             let dy = tp[1] - pos[1];
                             dx * dx + dy * dy <= 64.0 // 8 cells
                         }
                 });
-                if predator_close && beings.freeze_ticks[being_index] == 0 {
+                if predator_close && beings.hot.freeze_ticks[being_index] == 0 {
                     if rng.f32() < 0.5 {
                         // Freeze: override flee with zero-movement wander (target = current pos)
                         // freeze_ticks will be set to 30 in movement.rs when this Flee action executes
                         // but here we DON'T flee; suppress flee score so Wander (frozen) wins
                         *score = -1.0;
+                    } else {
+                        // Flee with learned flee weight
+                        *score *= params[FLEE];
                     }
-                    // else: flee normally (other 50%)
                 }
                 // Already frozen: suppress flee
-                if beings.freeze_ticks[being_index] > 0 {
+                if beings.hot.freeze_ticks[being_index] > 0 {
                     *score = -5.0;
                 }
             }
             Action::Wander => {
                 // Frozen rabbit: stay in place
-                if beings.freeze_ticks[being_index] > 0 {
+                if beings.hot.freeze_ticks[being_index] > 0 {
                     *target_pos = Some(pos); // freeze in place
                     *score = 8.0; // high score so freeze wins
                 }
                 // WarrenCluster: rabbits near others prefer to cluster
                 let rabbit_neighbors = nearby.iter().filter(|&&ni| {
                     ni != being_index
-                        && beings.creature_type[ni] == CreatureType::Rabbit as u8
-                        && beings.states[ni] != BeingState::Dead
+                        && beings.hot.creature_type[ni] == CreatureType::Rabbit as u8
+                        && beings.hot.states[ni] != BeingState::Dead
                 }).count();
-                if rabbit_neighbors >= 2 && beings.freeze_ticks[being_index] == 0 {
-                    *score *= 0.6; // prefer Cluster action over wander when in warren
+                if rabbit_neighbors >= 2 && beings.hot.freeze_ticks[being_index] == 0 {
+                    *score *= (1.0 - params[CLUSTER] * 0.3).max(0.1); // prefer Cluster when params say so
                 }
             }
             Action::Cluster => {
                 // WarrenCluster: stay near rabbit neighbors
                 let rabbit_count = nearby.iter().filter(|&&ni| {
                     ni != being_index
-                        && beings.creature_type[ni] == CreatureType::Rabbit as u8
-                        && beings.states[ni] != BeingState::Dead
+                        && beings.hot.creature_type[ni] == CreatureType::Rabbit as u8
+                        && beings.hot.states[ni] != BeingState::Dead
                 }).count();
                 if rabbit_count >= 1 {
-                    *score = (*score * 1.6).min(7.0); // prefer warren clustering
+                    *score = (*score * params[CLUSTER]).min(7.0); // cluster_weight drives warren preference
                 }
-                if beings.freeze_ticks[being_index] > 0 {
+                if beings.hot.freeze_ticks[being_index] > 0 {
                     *score = -1.0; // frozen rabbits don't actively cluster
                 }
             }
@@ -754,7 +903,7 @@ fn apply_species_behavior(
                         let tidx = ty as usize * terrain.width as usize + tx as usize;
                         if terrain.water[tidx] {
                             *target_pos = Some([tx, ty]);
-                            *score = 7.5;
+                            *score = 4.0 * params[CLUSTER]; // cluster_weight drives schooling
                         }
                     }
                 }
@@ -784,6 +933,14 @@ fn apply_species_behavior(
     }
 }
 
+// Param index constants used by apply_species_behavior and hebbian.rs
+pub const PARAM_SEP: usize = 0;
+pub const PARAM_COH: usize = 1;
+pub const PARAM_FLEE: usize = 2;
+pub const PARAM_HUNT: usize = 3;
+pub const PARAM_CLUSTER: usize = 4;
+pub const PARAM_WANDER: usize = 5;
+
 /// Compute boids steering for hawks: separation + alignment + cohesion.
 /// Returns normalized steering vector [dx, dy].
 fn compute_hawk_boids(
@@ -803,13 +960,13 @@ fn compute_hawk_boids(
     let mut flock_count = 0u32;
 
     for &ni in nearby {
-        if ni == being_index || beings.states[ni] != BeingState::Awake {
+        if ni == being_index || beings.hot.states[ni] != BeingState::Awake {
             continue;
         }
-        if beings.creature_type[ni] != CreatureType::Hawk as u8 {
+        if beings.hot.creature_type[ni] != CreatureType::Hawk as u8 {
             continue;
         }
-        let tp = beings.positions[ni];
+        let tp = beings.hot.positions[ni];
         let dx = tp[0] - pos[0];
         let dy = tp[1] - pos[1];
         let d2 = dx * dx + dy * dy;
@@ -822,8 +979,8 @@ fn compute_hawk_boids(
         }
         if d2 < coh_r2 {
             // Alignment: match velocity
-            align[0] += beings.velocities[ni][0];
-            align[1] += beings.velocities[ni][1];
+            align[0] += beings.hot.velocities[ni][0];
+            align[1] += beings.hot.velocities[ni][1];
             // Cohesion: toward centroid
             coh[0] += tp[0];
             coh[1] += tp[1];
@@ -871,13 +1028,13 @@ fn compute_fish_boids(
     let mut school_count = 0u32;
 
     for &ni in nearby {
-        if ni == being_index || beings.states[ni] != BeingState::Awake {
+        if ni == being_index || beings.hot.states[ni] != BeingState::Awake {
             continue;
         }
-        if beings.creature_type[ni] != CreatureType::Fish as u8 {
+        if beings.hot.creature_type[ni] != CreatureType::Fish as u8 {
             continue;
         }
-        let tp = beings.positions[ni];
+        let tp = beings.hot.positions[ni];
         let dx = tp[0] - pos[0];
         let dy = tp[1] - pos[1];
         let d2 = dx * dx + dy * dy;
@@ -933,10 +1090,10 @@ fn flock_centroid(
     let mut sum = [0.0f32; 2];
     let mut count = 0u32;
     for &ni in nearby {
-        if ni == being_index || beings.states[ni] == BeingState::Dead { continue; }
-        if beings.creature_type[ni] != ct { continue; }
-        sum[0] += beings.positions[ni][0];
-        sum[1] += beings.positions[ni][1];
+        if ni == being_index || beings.hot.states[ni] == BeingState::Dead { continue; }
+        if beings.hot.creature_type[ni] != ct { continue; }
+        sum[0] += beings.hot.positions[ni][0];
+        sum[1] += beings.hot.positions[ni][1];
         count += 1;
     }
     if count == 0 {
@@ -1148,11 +1305,11 @@ fn find_social_target(
     let mut best_score = f32::MIN;
 
     for &ni in nearby {
-        if ni == being_index || beings.states[ni] == BeingState::Dead {
+        if ni == being_index || beings.hot.states[ni] == BeingState::Dead {
             continue;
         }
 
-        let impression = beings.relationships[being_index].find(ni as u32);
+        let impression = beings.cold.relationships[being_index].find(ni as u32);
         let warmth = impression.map(|i| i.warmth).unwrap_or(0.0);
         let trust = impression.map(|i| i.trust).unwrap_or(0.0);
 
@@ -1166,15 +1323,15 @@ fn find_social_target(
                 }
             }
             Action::ShareFood => {
-                if warmth > 0.2 && beings.carry[being_index][0] > 0.1 {
+                if warmth > 0.2 && beings.hot.carry[being_index][0] > 0.1 {
                     warmth * 0.3
                 } else {
                     continue;
                 }
             }
             Action::TakeFood => {
-                if beings.carry[ni][0] > 0.1
-                    && (beings.states[ni] == BeingState::Sleeping || warmth < -0.2)
+                if beings.hot.carry[ni][0] > 0.1
+                    && (beings.hot.states[ni] == BeingState::Sleeping || warmth < -0.2)
                 {
                     -warmth * 0.2 + 0.2
                 } else {
@@ -1275,13 +1432,13 @@ fn find_nearest_same_species(
     let mut count = 0usize;
 
     for &ni in nearby {
-        if ni == being_index || beings.states[ni] == BeingState::Dead {
+        if ni == being_index || beings.hot.states[ni] == BeingState::Dead {
             continue;
         }
-        if beings.creature_type[ni] != creature_type {
+        if beings.hot.creature_type[ni] != creature_type {
             continue;
         }
-        let tp = beings.positions[ni];
+        let tp = beings.hot.positions[ni];
         let dx = tp[0] - pos[0];
         let dy = tp[1] - pos[1];
         let dist2 = dx * dx + dy * dy;
@@ -1315,14 +1472,14 @@ fn find_nearest_prey(
     let mut best_dist = radius * radius;
     let mut best = None;
     for &ni in nearby {
-        if ni == being_index || beings.states[ni] == BeingState::Dead {
+        if ni == being_index || beings.hot.states[ni] == BeingState::Dead {
             continue;
         }
-        let ct = CreatureType::from_u8(beings.creature_type[ni]);
+        let ct = CreatureType::from_u8(beings.hot.creature_type[ni]);
         if !ct.is_prey() {
             continue;
         }
-        let tp = beings.positions[ni];
+        let tp = beings.hot.positions[ni];
         let dx = tp[0] - pos[0];
         let dy = tp[1] - pos[1];
         let dist2 = dx * dx + dy * dy;
@@ -1394,17 +1551,17 @@ fn find_youth_target(
     nearby: &[usize],
 ) -> Option<usize> {
     for &ni in nearby {
-        if ni == being_index || beings.states[ni] == BeingState::Dead {
+        if ni == being_index || beings.hot.states[ni] == BeingState::Dead {
             continue;
         }
-        if beings.creature_type[ni] != crate::being::data::CreatureType::Human as u8 {
+        if beings.hot.creature_type[ni] != crate::being::data::CreatureType::Human as u8 {
             continue;
         }
         if beings.life_phase(ni) != LifePhase::Youth {
             continue;
         }
         // Check warmth (teach willing youth)
-        let warmth = beings.relationships[being_index]
+        let warmth = beings.cold.relationships[being_index]
             .find(ni as u32)
             .map(|imp| imp.warmth)
             .unwrap_or(0.0);
@@ -1422,15 +1579,15 @@ fn find_resource_need_target(
     nearby: &[usize],
 ) -> Option<usize> {
     for &ni in nearby {
-        if ni == being_index || beings.states[ni] == BeingState::Dead {
+        if ni == being_index || beings.hot.states[ni] == BeingState::Dead {
             continue;
         }
-        if beings.creature_type[ni] != crate::being::data::CreatureType::Human as u8 {
+        if beings.hot.creature_type[ni] != crate::being::data::CreatureType::Human as u8 {
             continue;
         }
         // Target should have low stone but positive warmth (won't share with enemies)
-        if beings.carry[ni][1] < 0.1 {
-            let warmth = beings.relationships[being_index]
+        if beings.hot.carry[ni][1] < 0.1 {
+            let warmth = beings.cold.relationships[being_index]
                 .find(ni as u32)
                 .map(|imp| imp.warmth)
                 .unwrap_or(0.0);
@@ -1519,7 +1676,7 @@ mod tests {
         beings.spawn(spawn_pos, personality, 100000, [u32::MAX, u32::MAX]);
 
         // Set hunger very low, all others high
-        beings.needs[0] = [0.2, 1.0, 1.0, 1.0, 1.0, 1.0];
+        beings.hot.needs[0] = [0.2, 1.0, 1.0, 1.0, 1.0, 1.0];
 
         // Deposit food trail signal nearby
         signals.deposit(SignalChannel::FoodTrail, spawn_pos[0] as u32 + 3, spawn_pos[1] as u32, 3.0);
@@ -1559,8 +1716,8 @@ mod tests {
         beings.spawn(spawn_pos, personality, 100000, [u32::MAX, u32::MAX]);
 
         // Set fear high, safety low
-        beings.emotions[0][EMO_FEAR] = 0.9;
-        beings.needs[0][NEED_SAFETY] = 0.1;
+        beings.hot.emotions[0][EMO_FEAR] = 0.9;
+        beings.hot.needs[0][NEED_SAFETY] = 0.1;
 
         // Deposit danger signal nearby
         signals.deposit(SignalChannel::Danger, spawn_pos[0] as u32 + 2, spawn_pos[1] as u32, 5.0);

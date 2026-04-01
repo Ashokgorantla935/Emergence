@@ -367,11 +367,11 @@ fn nearest_being(
     use emergence_core::being::data::BeingState;
     let mut best_dist = f32::MAX;
     let mut best_idx = None;
-    for i in 0..world.beings.count {
-        if world.beings.states[i] == BeingState::Dead {
+    for i in 0..world.beings.hot.count {
+        if world.beings.hot.states[i] == BeingState::Dead {
             continue;
         }
-        let p = world.beings.positions[i];
+        let p = world.beings.hot.positions[i];
         let dx = p[0] - cursor[0];
         let dy = p[1] - cursor[1];
         let d2 = dx * dx + dy * dy;
@@ -392,10 +392,10 @@ fn beings_in_region(
     use emergence_core::being::data::BeingState;
     let r = brush_radius(brush_size);
     let r2 = r * r;
-    (0..world.beings.count)
+    (0..world.beings.hot.count)
         .filter(|&i| {
-            if world.beings.states[i] == BeingState::Dead { return false; }
-            let p = world.beings.positions[i];
+            if world.beings.hot.states[i] == BeingState::Dead { return false; }
+            let p = world.beings.hot.positions[i];
             let dx = p[0] - cursor[0];
             let dy = p[1] - cursor[1];
             dx * dx + dy * dy <= r2
@@ -419,8 +419,8 @@ fn build_two_group_action(
         Some(_) => {
             let a_group = beings_in_region(
                 // cursor of first click — we don't store it, so use a single rep
-                [world.beings.positions[state.selection.a.unwrap()][0],
-                 world.beings.positions[state.selection.a.unwrap()][1]],
+                [world.beings.hot.positions[state.selection.a.unwrap()][0],
+                 world.beings.hot.positions[state.selection.a.unwrap()][1]],
                 state.brush_size,
                 world,
             );

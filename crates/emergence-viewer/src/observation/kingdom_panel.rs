@@ -121,13 +121,13 @@ impl KingdomPanel {
     ) {
         let leader_name = super::kingdom::leader_being_name(kingdom.leader_idx as u32);
 
-        let leader_age = if kingdom.leader_idx < beings.count {
-            beings.ages[kingdom.leader_idx]
+        let leader_age = if kingdom.leader_idx < beings.hot.count {
+            beings.hot.ages[kingdom.leader_idx]
         } else {
             0
         };
-        let leader_bold = if kingdom.leader_idx < beings.count {
-            beings.personalities[kingdom.leader_idx][0]
+        let leader_bold = if kingdom.leader_idx < beings.hot.count {
+            beings.hot.personalities[kingdom.leader_idx][0]
         } else {
             0.0
         };
@@ -183,9 +183,9 @@ impl KingdomPanel {
             .filter(|s| kingdom.settlements.contains(&s.id))
             .flat_map(|s| s.beings.iter())
             .filter(|&&bi| {
-                bi < beings.count
-                    && beings.personalities[bi][0] > 0.5
-                    && beings.needs[bi][3] < 0.3
+                bi < beings.hot.count
+                    && beings.hot.personalities[bi][0] > 0.5
+                    && beings.hot.needs[bi][3] < 0.3
             })
             .count();
         if rebellious_count > 0 {
@@ -214,8 +214,8 @@ impl KingdomPanel {
             settlement
                 .beings
                 .iter()
-                .filter(|&&bi| bi < beings.count)
-                .map(|&bi| (beings.needs[bi][1] + beings.needs[bi][3] + beings.needs[bi][4]) / 3.0)
+                .filter(|&&bi| bi < beings.hot.count)
+                .map(|&bi| (beings.hot.needs[bi][1] + beings.hot.needs[bi][3] + beings.hot.needs[bi][4]) / 3.0)
                 .sum::<f32>()
                 / settlement.beings.len() as f32
         };

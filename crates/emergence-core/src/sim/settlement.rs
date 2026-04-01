@@ -48,7 +48,7 @@ impl Settlement {
         let mut sx = 0.0f32;
         let mut sy = 0.0f32;
         for &i in &self.beings {
-            let pos = beings.positions[i];
+            let pos = beings.hot.positions[i];
             sx += pos[0];
             sy += pos[1];
         }
@@ -164,8 +164,8 @@ pub fn detect_settlements(
             .query_radius(center_x, center_y, radius)
             .into_iter()
             .filter(|&i| {
-                beings.states[i] != crate::being::data::BeingState::Dead
-                    && beings.creature_type[i] == crate::being::data::CreatureType::Human as u8
+                beings.hot.states[i] != crate::being::data::BeingState::Dead
+                    && beings.hot.creature_type[i] == crate::being::data::CreatureType::Human as u8
             })
             .collect();
 
@@ -199,7 +199,7 @@ pub fn detect_settlements(
 
         // Compute average warmth among members
         let warmth_sum: f32 = settlement.beings.iter().map(|&i| {
-            beings.needs[i][crate::being::data::NEED_BELONGING]
+            beings.hot.needs[i][crate::being::data::NEED_BELONGING]
         }).sum();
         settlement.average_warmth = warmth_sum / settlement.beings.len() as f32;
 

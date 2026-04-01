@@ -65,8 +65,8 @@ pub fn find_leader(
     let mut best = (0usize, 0.0f32);
 
     for &candidate in &settlement.beings {
-        if beings.states[candidate] == BeingState::Dead { continue; }
-        if beings.creature_type[candidate] != CreatureType::Human as u8 { continue; }
+        if beings.hot.states[candidate] == BeingState::Dead { continue; }
+        if beings.hot.creature_type[candidate] != CreatureType::Human as u8 { continue; }
         if beings.life_phase(candidate) == LifePhase::Youth { continue; }
 
         let mut trust_sum = 0.0f32;
@@ -75,14 +75,14 @@ pub fn find_leader(
             let voter_idx = rng.usize(..settlement.beings.len());
             let voter = settlement.beings[voter_idx];
             if voter == candidate { continue; }
-            if let Some(imp) = beings.relationships[voter].find(candidate as u32) {
+            if let Some(imp) = beings.cold.relationships[voter].find(candidate as u32) {
                 trust_sum += imp.trust;
                 samples += 1;
             }
         }
         let avg_trust = if samples > 0 { trust_sum / samples as f32 } else { 0.0 };
-        let bold = beings.personalities[candidate][TRAIT_BOLD].max(0.0);
-        let social = beings.personalities[candidate][TRAIT_SOCIAL].max(0.0);
+        let bold = beings.hot.personalities[candidate][TRAIT_BOLD].max(0.0);
+        let social = beings.hot.personalities[candidate][TRAIT_SOCIAL].max(0.0);
         let score = avg_trust * 0.7 + bold * 0.15 + social * 0.15;
 
         if score > best.1 { best = (candidate, score); }
@@ -95,10 +95,10 @@ pub fn find_leader(
 /// loyalty = belonging * 0.30 + warmth_to_leader * 0.35 + comfort * 0.15 + safety * 0.20
 pub fn compute_loyalty(being_idx: usize, leader_idx: usize, beings: &Beings) -> f32 {
     use crate::being::data::{NEED_BELONGING, NEED_SAFETY, NEED_WARMTH};
-    let belonging = beings.needs[being_idx][NEED_BELONGING];
-    let safety = beings.needs[being_idx][NEED_SAFETY];
-    let comfort = beings.needs[being_idx][NEED_WARMTH]; // warmth need as comfort proxy
-    let warmth_to_leader = beings.relationships[being_idx]
+    let belonging = beings.hot.needs[being_idx][NEED_BELONGING];
+    let safety = beings.hot.needs[being_idx][NEED_SAFETY];
+    let comfort = beings.hot.needs[being_idx][NEED_WARMTH]; // warmth need as comfort proxy
+    let warmth_to_leader = beings.cold.relationships[being_idx]
         .find(leader_idx as u32)
         .map(|imp| imp.warmth.max(0.0))
         .unwrap_or(0.0);
@@ -187,7 +187,7 @@ pub fn update_kingdoms(
 
     // Succession: handle dead leaders
     for k in &mut new_kingdoms {
-        if beings.states[k.leader_idx] == BeingState::Dead {
+        if beings.hot.states[k.leader_idx] == BeingState::Dead {
             // Find the settlement for this kingdom and re-elect
             let settlement_opt = settlements.iter().find(|s| k.settlements.contains(&s.id));
             if let Some(s) = settlement_opt {
@@ -222,7 +222,7 @@ pub fn update_kingdoms(
     }
 
     // Remove kingdoms whose leader died and no successor found (marked by invalid state check)
-    new_kingdoms.retain(|k| beings.states[k.leader_idx] != BeingState::Dead);
+    new_kingdoms.retain(|k| beings.hot.states[k.leader_idx] != BeingState::Dead);
 
     // Update war states: remove wars that have been at peace for 2000 ticks
     wars.retain(|war| {

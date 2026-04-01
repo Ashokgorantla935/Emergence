@@ -219,8 +219,63 @@ impl TerrainRenderer {
         );
 
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        // FIX 1: nearest-neighbor — keeps terrain crisp pixel art at all zoom levels
+        // Nearest-neighbor — keeps terrain crisp pixel art at all zoom levels
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        // Water mask texture: 1 channel (r=1.0 water, r=0.0 land), R8Unorm
+        // Using Rgba8Unorm for compatibility; only r channel used.
+        let mut water_pixels = vec![0u8; (tw * th * 4) as usize];
+        for y in 0..th_usize {
+            for x in 0..tw_usize {
+                let i = y * tw_usize + x;
+                let base = i * 4;
+                if terrain.biome[i] == Biome::Water {
+                    water_pixels[base]     = 255; // r = 1.0
+                    water_pixels[base + 1] = 0;
+                    water_pixels[base + 2] = 0;
+                    water_pixels[base + 3] = 255;
+                } else {
+                    water_pixels[base]     = 0;
+                    water_pixels[base + 1] = 0;
+                    water_pixels[base + 2] = 0;
+                    water_pixels[base + 3] = 255;
+                }
+            }
+        }
+
+        let water_mask_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Water Mask Texture"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &water_mask_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &water_pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * tw),
+                rows_per_image: Some(th),
+            },
+            texture_size,
+        );
+
+        let water_mask_view = water_mask_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let water_mask_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
@@ -237,6 +292,14 @@ impl TerrainRenderer {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&water_mask_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&water_mask_sampler),
                 },
             ],
         });

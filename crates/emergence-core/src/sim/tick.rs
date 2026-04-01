@@ -367,8 +367,12 @@ pub fn tick(world: &mut World) {
     // Rebuild creature-type partition indices every 600 ticks (Sawyer constraint 5)
     if world.tick % 600 == 0 {
         world.beings.rebuild_partition_indices();
+    }
 
-        // Settlement + Kingdom detection (Phase 5). Amortized ~0.002ms/tick.
+    // Settlement detection every 50 ticks (was 600). Amortized ~0.002ms/tick.
+    if world.tick % 50 == 0 {
+        let prev_ids: Vec<u32> = world.settlements.iter().map(|s| s.id).collect();
+
         crate::sim::settlement::detect_settlements(
             &world.signals,
             &world.spatial,
@@ -376,6 +380,49 @@ pub fn tick(world: &mut World) {
             world.tick,
             &mut world.settlements,
         );
+
+        // Emit SettlementFormed for newly appearing settlements
+        for s in &world.settlements {
+            if !prev_ids.contains(&s.id) && s.population >= 3 {
+                world.events.push(Event {
+                    tick: world.tick,
+                    actor_id: s.id,
+                    target_id: s.population,
+                    event_type: EventType::SettlementFormed,
+                    location: s.center,
+                });
+                // Strong comfort burst at new settlement center
+                let scx = (s.center[0] as u32).min(world.signals.width - 1);
+                let scy = (s.center[1] as u32).min(world.signals.height - 1);
+                world.signals.deposit(SignalChannel::Comfort, scx, scy, 1.0);
+                world.signals.deposit(SignalChannel::Celebration, scx, scy, 0.5);
+            }
+        }
+
+        // Construction update: place structures based on settlement age
+        if !world.laws.no_construction {
+            let built = crate::sim::settlement::update_settlement_construction(
+                &mut world.settlements,
+                &mut world.terrain,
+                50,
+            );
+            for (stype, bx, by, settlement_id) in built {
+                // Comfort signal at new structure
+                world.signals.deposit(
+                    SignalChannel::Comfort,
+                    bx.min(world.signals.width - 1),
+                    by.min(world.signals.height - 1),
+                    0.6,
+                );
+                world.events.push(Event {
+                    tick: world.tick,
+                    actor_id: settlement_id,
+                    target_id: stype as u32,
+                    event_type: EventType::BuildingComplete,
+                    location: [bx as f32, by as f32],
+                });
+            }
+        }
 
         if !world.laws.no_kingdoms {
             let settlements = world.settlements.clone();
@@ -389,6 +436,25 @@ pub fn tick(world: &mut World) {
                 &mut world.rng,
                 world.laws.no_kingdoms,
             );
+        }
+    }
+
+    // Food-based comfort signals every 100 ticks — helps beings cluster near food
+    if world.tick % 100 == 0 {
+        let tw = world.terrain.width;
+        let th = world.terrain.height;
+        for y in (0..th).step_by(4) {
+            for x in (0..tw).step_by(4) {
+                let idx = (y * tw + x) as usize;
+                let food = world.resources.food[idx];
+                let cap = world.resources.food_capacity[idx];
+                if cap > 2.0 && food > cap * 0.5 {
+                    // Rich food cell emits comfort, attracting beings to cluster
+                    let sx = x.min(world.signals.width - 1);
+                    let sy = y.min(world.signals.height - 1);
+                    world.signals.deposit(SignalChannel::Comfort, sx, sy, (food / cap) * 0.15);
+                }
+            }
         }
     }
 

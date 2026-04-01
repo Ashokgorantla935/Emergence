@@ -27,7 +27,7 @@ use emergence_viewer::screen_state::{
     SaveSlotInfo, ScenarioSelectAction, ScenarioSelectUi, ScreenState, SpeedControls,
     TopBar,
 };
-use emergence_viewer::god_tools::{GodToolState};
+use emergence_viewer::god_tools::{GodToolState, palette as god_palette};
 use emergence_viewer::ui::news_feed::NewsFeed;
 use emergence_viewer::ui::minimap::Minimap;
 use emergence_viewer::ui::statistics::{StatsHistory, StatisticsPanel};
@@ -119,6 +119,9 @@ struct App {
     left_mouse_held: bool,
     left_mouse_clicked: bool,
     shift_held: bool,
+
+    // Accumulated wall-clock time for water animation shader
+    elapsed_time: f32,
 }
 
 impl App {
@@ -172,6 +175,7 @@ impl App {
             left_mouse_held: false,
             left_mouse_clicked: false,
             shift_held: false,
+            elapsed_time: 0.0,
         }
     }
 
@@ -249,7 +253,7 @@ impl App {
                     &rs.queue,
                     w.config.size.0,
                     w.config.size.1,
-                    &rs.texture_bind_group_layout,
+                    &rs.simple_texture_bind_group_layout,
                 )
             };
             let mut object_renderer = ObjectRenderer::new(&rs.device);
@@ -308,7 +312,7 @@ impl App {
                             &rs.queue,
                             w_ref.config.size.0,
                             w_ref.config.size.1,
-                            &rs.texture_bind_group_layout,
+                            &rs.simple_texture_bind_group_layout,
                         )
                     };
                     let mut object_renderer = ObjectRenderer::new(&rs.device);
@@ -404,7 +408,7 @@ impl ApplicationHandler for App {
                 &render_state.queue,
                 world.config.size.0,
                 world.config.size.1,
-                &render_state.texture_bind_group_layout,
+                &render_state.simple_texture_bind_group_layout,
             ));
             let mut object_renderer = ObjectRenderer::new(&render_state.device);
             object_renderer.rebuild(&render_state.queue, &world.terrain, &world.resources);
@@ -736,6 +740,12 @@ impl ApplicationHandler for App {
         // Update camera
         self.camera.update(dt);
 
+        // Accumulate wall-clock time for water animation
+        self.elapsed_time += dt;
+        if let Some(ref rs) = self.render_state {
+            rs.update_water_time(self.elapsed_time);
+        }
+
         // Onboarding timer (only while Playing)
         if self.screen == ScreenState::Playing {
             self.onboarding.tick(dt, self.had_interaction);
@@ -951,6 +961,14 @@ impl ApplicationHandler for App {
 
                 TopBar::show(&self.egui_ctx, &mut self.speed, tick);
 
+                // God tool palette — left side panel, always rendered while Playing
+                egui::SidePanel::left("god_palette_panel")
+                    .exact_width(200.0)
+                    .resizable(false)
+                    .show(&self.egui_ctx, |ui| {
+                        god_palette::render_palette(ui, &mut self.god_tool_state);
+                    });
+
                 if let Some(ref world) = self.world {
                     let world = world.read().unwrap();
                     self.dashboard.update(
@@ -1077,6 +1095,7 @@ impl ApplicationHandler for App {
                         render_pass.set_pipeline(&rs.terrain_pipeline);
                         render_pass.set_bind_group(0, &rs.camera_bind_group, &[]);
                         render_pass.set_bind_group(1, &terrain_r.bind_group, &[]);
+                        render_pass.set_bind_group(2, &rs.water_time_bind_group, &[]);
                         render_pass.set_vertex_buffer(0, terrain_r.vertex_buffer.slice(..));
                         render_pass.set_index_buffer(
                             terrain_r.index_buffer.slice(..),

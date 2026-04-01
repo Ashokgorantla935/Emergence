@@ -336,10 +336,27 @@ pub fn score_actions(
                 }
             }
             Action::Cluster => {
-                // Use cached comfort gradient
-                let [gx, gy] = local.gradients[CH_COMFORT];
-                if gx.abs() > 0.01 || gy.abs() > 0.01 {
-                    target_pos = Some([pos[0] + gx * 3.0, pos[1] + gy * 3.0]);
+                let ct = CreatureType::from_u8(beings.creature_type[being_index]);
+                if ct.is_prey() {
+                    // Herbivores: herd toward nearest same-species neighbor
+                    if let Some(herd_pos) = find_nearest_same_species(
+                        pos, being_index, beings.creature_type[being_index], beings, &nearby
+                    ) {
+                        target_pos = Some(herd_pos);
+                        score *= 1.5; // herding boost so it competes with wandering
+                    } else {
+                        // No same-species visible: follow comfort gradient or wander outward to find herd
+                        let [gx, gy] = local.gradients[CH_COMFORT];
+                        if gx.abs() > 0.01 || gy.abs() > 0.01 {
+                            target_pos = Some([pos[0] + gx * 3.0, pos[1] + gy * 3.0]);
+                        }
+                    }
+                } else {
+                    // Humans and wolves: use cached comfort gradient
+                    let [gx, gy] = local.gradients[CH_COMFORT];
+                    if gx.abs() > 0.01 || gy.abs() > 0.01 {
+                        target_pos = Some([pos[0] + gx * 3.0, pos[1] + gy * 3.0]);
+                    }
                 }
             }
             Action::Mourn => {
@@ -748,6 +765,50 @@ fn find_food_biome_direction(pos: [f32; 2], terrain: &Terrain, scan_dist: f32) -
         }
     }
     None
+}
+
+/// Find the nearest same-species being for herding behavior.
+/// Used by prey fauna (Deer, Rabbit, Fish) to target their own kind when clustering.
+/// Returns position of nearest same-species neighbor, offset slightly toward center of visible group.
+fn find_nearest_same_species(
+    pos: [f32; 2],
+    being_index: usize,
+    creature_type: u8,
+    beings: &Beings,
+    nearby: &[usize],
+) -> Option<[f32; 2]> {
+    let mut best_dist = f32::MAX;
+    let mut best_pos = None;
+    let mut sum_x = 0.0f32;
+    let mut sum_y = 0.0f32;
+    let mut count = 0usize;
+
+    for &ni in nearby {
+        if ni == being_index || beings.states[ni] == BeingState::Dead {
+            continue;
+        }
+        if beings.creature_type[ni] != creature_type {
+            continue;
+        }
+        let tp = beings.positions[ni];
+        let dx = tp[0] - pos[0];
+        let dy = tp[1] - pos[1];
+        let dist2 = dx * dx + dy * dy;
+        if dist2 < best_dist {
+            best_dist = dist2;
+            best_pos = Some(tp);
+        }
+        sum_x += tp[0];
+        sum_y += tp[1];
+        count += 1;
+    }
+
+    if count >= 3 {
+        // Move toward centroid of visible herd (group cohesion)
+        Some([sum_x / count as f32, sum_y / count as f32])
+    } else {
+        best_pos
+    }
 }
 
 /// Find the nearest prey being within radius for a predator.

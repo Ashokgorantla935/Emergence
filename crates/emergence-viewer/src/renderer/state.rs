@@ -37,6 +37,14 @@ pub struct RenderState {
     pub camera_bind_group_layout: wgpu::BindGroupLayout,
     pub camera_bind_group: wgpu::BindGroup,
     pub texture_bind_group_layout: wgpu::BindGroupLayout,
+    /// Two-binding layout (texture + sampler) used by heatmap and other non-water renderers.
+    pub simple_texture_bind_group_layout: wgpu::BindGroupLayout,
+    /// Bind group layout for the water time uniform (group 2 in terrain shader).
+    pub water_time_bind_group_layout: wgpu::BindGroupLayout,
+    /// Buffer holding the time float (padded to 16 bytes).
+    pub water_time_buffer: wgpu::Buffer,
+    /// Bind group for the water time uniform.
+    pub water_time_bind_group: wgpu::BindGroup,
     pub terrain_pipeline: wgpu::RenderPipeline,
     /// Sprite pipeline (replaces old circle SDF being pipeline).
     pub sprite_pipeline: wgpu::RenderPipeline,
@@ -148,10 +156,10 @@ impl RenderState {
             }],
         });
 
-        // ── Texture bind group layout (terrain + heatmap) ─────────────────
-        let texture_bind_group_layout =
+        // ── Simple texture bind group layout (heatmap and other 2-binding users) ──
+        let simple_texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Texture BGL"),
+                label: Some("Simple Texture BGL"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -172,6 +180,83 @@ impl RenderState {
                 ],
             });
 
+        // ── Texture bind group layout (terrain + heatmap + water mask) ───────
+        // Bindings 0+1: terrain color texture + sampler (also used by heatmap).
+        // Bindings 2+3: water mask texture + sampler (terrain only; heatmap ignores extras).
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Texture BGL"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    // Water mask texture (binding 2) — used by terrain shader only
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // Water mask sampler (binding 3)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
+        // ── Water time uniform (group 2, terrain pipeline only) ───────────
+        let water_time_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Water Time BGL"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        // time f32 + 3 padding floats = 16 bytes
+        let water_time_data: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
+        let water_time_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Water Time Buffer"),
+            contents: bytemuck::cast_slice(&water_time_data),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let water_time_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Water Time BG"),
+            layout: &water_time_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: water_time_buffer.as_entire_binding(),
+            }],
+        });
+
         // ── Terrain pipeline ───────────────────────────────────────────────
         let terrain_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label:  Some("Terrain Shader"),
@@ -181,7 +266,11 @@ impl RenderState {
         let terrain_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Terrain Pipeline Layout"),
-                bind_group_layouts: &[&camera_bind_group_layout, &texture_bind_group_layout],
+                bind_group_layouts: &[
+                    &camera_bind_group_layout,
+                    &texture_bind_group_layout,
+                    &water_time_bind_group_layout,
+                ],
                 push_constant_ranges: &[],
             });
 
@@ -323,10 +412,18 @@ impl RenderState {
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/heatmap.wgsl").into()),
         });
 
+        // Heatmap uses only camera + simple 2-binding texture layout
+        let heatmap_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Heatmap Pipeline Layout"),
+                bind_group_layouts: &[&camera_bind_group_layout, &simple_texture_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
         let heatmap_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label:  Some("Heatmap Pipeline"),
-                layout: Some(&terrain_pipeline_layout),
+                layout: Some(&heatmap_pipeline_layout),
                 vertex: wgpu::VertexState {
                     module:      &heatmap_shader,
                     entry_point: Some("vs_main"),
@@ -518,6 +615,10 @@ impl RenderState {
             camera_bind_group_layout,
             camera_bind_group,
             texture_bind_group_layout,
+            simple_texture_bind_group_layout,
+            water_time_bind_group_layout,
+            water_time_buffer,
+            water_time_bind_group,
             terrain_pipeline,
             sprite_pipeline,
             heatmap_pipeline,
@@ -545,5 +646,10 @@ impl RenderState {
     pub fn update_camera(&self, uniform: &CameraUniform, pixels_per_unit: f32) {
         let ext = ExtCameraUniform::from_basic(uniform, pixels_per_unit);
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[ext]));
+    }
+
+    pub fn update_water_time(&self, time: f32) {
+        let data: [f32; 4] = [time, 0.0, 0.0, 0.0];
+        self.queue.write_buffer(&self.water_time_buffer, 0, bytemuck::cast_slice(&data));
     }
 }

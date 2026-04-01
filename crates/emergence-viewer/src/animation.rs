@@ -1,7 +1,7 @@
 //! Animation state machine for beings.
 //! Drives atlas UV selection from engine state without touching core.
 
-use emergence_core::being::data::{BeingState, Beings};
+use emergence_core::being::data::{BeingState, Beings, CreatureType};
 
 const ATLAS_CELL: f32 = 1.0 / 32.0;
 
@@ -168,9 +168,15 @@ impl AnimationManager {
     }
 
     /// Compute atlas UV for being `i`.
-    /// Body type = build (0-3) derived from personality, life phase (0-3).
-    /// Atlas cell = (body_type_row * 4 + phase_col) * GRID + anim_state * frame_offset
+    /// Fauna use rows 12-13, column base per species (4 frames each).
+    /// Humans use rows 0-11 (build x phase matrix).
     pub fn atlas_uv(&self, beings: &Beings, i: usize) -> [f32; 2] {
+        let ct = CreatureType::from_u8(beings.creature_type[i]);
+
+        if ct != CreatureType::Human {
+            return fauna_atlas_uv(ct, self.current_frames[i]);
+        }
+
         let state  = self.current_states[i];
         let frame  = self.current_frames[i] as u32;
         let phase  = life_phase_index(beings, i);
@@ -207,4 +213,30 @@ fn body_build_index(beings: &Beings, i: usize) -> u32 {
     } else {
         3 // default -> wiry
     }
+}
+
+/// Atlas UV for a fauna sprite.
+/// Fauna occupy rows 12-13 in the atlas (512x512, 32x32 cells).
+/// Column base per species (4 frames each, cycling on frame):
+///   col  0: hawk   (CreatureType 5)
+///   col  4: deer   (CreatureType 2)
+///   col  8: wolf   (CreatureType 1)
+///   col 12: bear   (CreatureType 6)
+///   col 16: rabbit (CreatureType 3)
+///   col 20: fish   (CreatureType 4)
+///   col 24: snake  (CreatureType 7)
+fn fauna_atlas_uv(ct: CreatureType, frame: u8) -> [f32; 2] {
+    let col_base: u32 = match ct {
+        CreatureType::Hawk   => 0,
+        CreatureType::Deer   => 4,
+        CreatureType::Wolf   => 8,
+        CreatureType::Bear   => 12,
+        CreatureType::Rabbit => 16,
+        CreatureType::Fish   => 20,
+        CreatureType::Snake  => 24,
+        CreatureType::Human  => 0, // fallback, shouldn't reach here
+    };
+    let atlas_row: u32 = 12;
+    let atlas_col = (col_base + (frame as u32 % 4)).min(31);
+    [atlas_col as f32 * ATLAS_CELL, atlas_row as f32 * ATLAS_CELL]
 }

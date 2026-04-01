@@ -415,20 +415,26 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     };
                     let consumed = stone_cost.min(world.beings.carry[being_index][1]);
                     world.beings.carry[being_index][1] -= consumed;
-                    world.terrain.place_structure(cx.min(world.terrain.width - 1),
-                        cy.min(world.terrain.height - 1),
-                        target_type,
-                        being_index as u32);
+                    let bx = cx.min(world.terrain.width - 1);
+                    let by = cy.min(world.terrain.height - 1);
+                    world.terrain.place_structure(bx, by, target_type, being_index as u32);
                     trigger_emotion(&mut world.beings, being_index, EMO_JOY, 0.3);
                     world.beings.needs[being_index][NEED_PURPOSE] =
                         (world.beings.needs[being_index][NEED_PURPOSE] + 0.1).min(1.0);
                     // Deposit comfort signal at build site
                     world.signals.deposit(
                         crate::world::signal::SignalChannel::Comfort,
-                        cx.min(world.signals.width - 1),
-                        cy.min(world.signals.height - 1),
+                        bx.min(world.signals.width - 1),
+                        by.min(world.signals.height - 1),
                         0.5,
                     );
+                    world.events.push(Event {
+                        tick: world.tick,
+                        actor_id: being_index as u32,
+                        target_id: target_type as u32,
+                        event_type: EventType::BuildingComplete,
+                        location: [bx as f32, by as f32],
+                    });
                 }
             } else {
                 // Repair: reset age if owned or warmth positive

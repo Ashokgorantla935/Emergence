@@ -488,7 +488,7 @@ pub struct TopBar;
 
 impl TopBar {
     /// Draw the top bar. Returns true if ESC/pause was toggled via the UI.
-    pub fn show(ctx: &egui::Context, controls: &mut SpeedControls, tick: u32) -> bool {
+    pub fn show(ctx: &egui::Context, controls: &mut SpeedControls, tick: u32, population: u32) -> bool {
         let esc_pressed = false;
 
         egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
@@ -514,7 +514,12 @@ impl TopBar {
                 ui.separator();
                 ui.label(format!("Tick: {tick}"));
                 ui.separator();
-                ui.label("WASD:pan  Scroll:zoom  Esc:menu  F1-F7:heatmaps  1-6:speed");
+                ui.colored_label(
+                    egui::Color32::from_rgb(100, 220, 100),
+                    format!("Pop: {population}"),
+                );
+                ui.separator();
+                ui.label("WASD:pan  Scroll:zoom  Esc:menu  S:stats  N:news  L:laws  1-6:speed");
             });
         });
 

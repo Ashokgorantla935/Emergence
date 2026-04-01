@@ -536,6 +536,9 @@ impl ApplicationHandler for App {
                                     }
                                 }
 
+                                // Audio: M key mute toggle
+                                emergence_viewer::audio::handle_key(&mut self.sound_engine, key);
+
                                 // Panel toggles
                                 match key {
                                     KeyCode::KeyS => self.stats_panel.toggle(),
@@ -684,6 +687,12 @@ impl ApplicationHandler for App {
                 if let Some(ref world) = self.world {
                     // Drain god tool actions into the engine queue before ticking
                     if !self.god_tool_state.action_queue.is_empty() {
+                        // Play god power sound for the first action this frame
+                        if let Some(pid) = self.god_tool_state.active_power {
+                            if let Some(sound) = emergence_viewer::audio::god_power_id_to_sound(pid) {
+                                self.sound_engine.play_god_power(sound);
+                            }
+                        }
                         let mut w = world.write().unwrap();
                         for action in self.god_tool_state.action_queue.drain(..) {
                             w.god_queue.push(action);
@@ -724,6 +733,45 @@ impl ApplicationHandler for App {
                     // News feed UI ingest
                     self.news_feed_ui.ingest_events(&world.events);
 
+                    // World event sounds: scan recent events (last `ticks` worth)
+                    // We sample at most one sound per category per frame to avoid spam.
+                    {
+                        use emergence_core::sim::world_state::EventType;
+                        use emergence_viewer::audio::WorldEventSound;
+                        let recent = world.events.events.iter()
+                            .filter(|e| e.tick + ticks >= world.tick);
+                        let mut had_birth = false;
+                        let mut had_death = false;
+                        let mut had_combat = false;
+                        let mut had_kingdom_rise = false;
+                        let mut had_kingdom_fall = false;
+                        for ev in recent {
+                            match ev.event_type {
+                                EventType::Born | EventType::Reproduced if !had_birth => {
+                                    self.sound_engine.play_world_event(WorldEventSound::Birth);
+                                    had_birth = true;
+                                }
+                                EventType::Died | EventType::Killed | EventType::MassDeath if !had_death => {
+                                    self.sound_engine.play_world_event(WorldEventSound::Death);
+                                    had_death = true;
+                                }
+                                EventType::WitnessedHarm if !had_combat => {
+                                    self.sound_engine.play_world_event(WorldEventSound::Combat);
+                                    had_combat = true;
+                                }
+                                EventType::KingdomFormed | EventType::AllianceFormed if !had_kingdom_rise => {
+                                    self.sound_engine.play_world_event(WorldEventSound::KingdomRise);
+                                    had_kingdom_rise = true;
+                                }
+                                EventType::KingdomFell | EventType::WarEnded if !had_kingdom_fall => {
+                                    self.sound_engine.play_world_event(WorldEventSound::KingdomFall);
+                                    had_kingdom_fall = true;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+
                     self.ticks_since_timer += ticks;
                 }
             }
@@ -740,10 +788,11 @@ impl ApplicationHandler for App {
         // Update camera
         self.camera.update(dt);
 
-        // Accumulate wall-clock time for water animation
+        // Accumulate wall-clock time for water animation and tree sway
         self.elapsed_time += dt;
         if let Some(ref rs) = self.render_state {
             rs.update_water_time(self.elapsed_time);
+            rs.update_object_time(self.elapsed_time);
         }
 
         // Onboarding timer (only while Playing)
@@ -839,8 +888,6 @@ impl ApplicationHandler for App {
         // World laws panel pulse tick
         self.world_laws_panel.tick_pulse();
 
-        // Minimap removed — main map is the primary navigation surface.
-
         // --- Render ---
         let rs = match self.render_state.as_ref() {
             Some(rs) => rs,
@@ -894,6 +941,9 @@ impl ApplicationHandler for App {
 
             // Particle system update
             if let Some(ref mut ps) = self.particle_system {
+                use emergence_viewer::renderer::particles::EmitterKind;
+                use emergence_core::sim::world_state::EventType;
+
                 // Emit weather particles
                 if let Some(ref weather) = world.climate.active_weather {
                     match weather.kind {
@@ -908,6 +958,43 @@ impl ApplicationHandler for App {
                         _ => {}
                     }
                 }
+
+                // Campfire ember particles: emit every 6 frames for each campfire.
+                // Campfire u8 value = 1. Scan at reduced rate using frame_tick modulo.
+                let frame_tick = world.tick;
+                if frame_tick % 6 == 0 {
+                    let tw = world.terrain.width as usize;
+                    let th = world.terrain.height as usize;
+                    for y in 0..th {
+                        for x in 0..tw {
+                            let idx = y * tw + x;
+                            if world.terrain.structure[idx] == 1 {
+                                // Campfire: emit 1-2 fire ember particles upward
+                                let pos = [x as f32 + 0.5, y as f32 + 0.3];
+                                ps.emit(EmitterKind::WorldEvent, pos, frame_tick);
+                                if (x + y) % 2 == 0 {
+                                    ps.emit(EmitterKind::WorldEvent, pos, frame_tick);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Birth sparkle + death soul: scan recent events this tick
+                for event in &world.events.events {
+                    if event.tick == world.tick {
+                        match event.event_type {
+                            EventType::Born => {
+                                ps.emit(EmitterKind::BirthSparkle, event.location, world.tick);
+                            }
+                            EventType::Died => {
+                                ps.emit(EmitterKind::DeathSoul, event.location, world.tick);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
                 ps.update(&rs.queue);
             }
 
@@ -955,11 +1042,17 @@ impl ApplicationHandler for App {
                 }
             }
             ScreenState::Playing => {
-                let tick = self.world.as_ref()
-                    .map(|w| w.read().unwrap().tick)
-                    .unwrap_or(0);
+                let (tick, population) = self.world.as_ref()
+                    .map(|w| {
+                        let w = w.read().unwrap();
+                        let pop = (0..w.beings.count)
+                            .filter(|&i| w.beings.states[i] != emergence_core::being::data::BeingState::Dead)
+                            .count() as u32;
+                        (w.tick, pop)
+                    })
+                    .unwrap_or((0, 0));
 
-                TopBar::show(&self.egui_ctx, &mut self.speed, tick);
+                TopBar::show(&self.egui_ctx, &mut self.speed, tick, population);
 
                 // God tool palette — left side panel, always rendered while Playing
                 egui::SidePanel::left("god_palette_panel")
@@ -1010,6 +1103,24 @@ impl ApplicationHandler for App {
                         );
                     }
 
+                }
+
+                // Minimap — always rendered while Playing, independent of world lock
+                if let Some(ref world) = self.world {
+                    let world = world.read().unwrap();
+                    self.minimap.update_beings(&world.beings);
+                    // Sync camera viewport into minimap
+                    self.minimap.camera_viewport = [
+                        self.camera.position[0] - self.camera.zoom * self.camera.aspect * 0.5,
+                        self.camera.position[1] - self.camera.zoom * 0.5,
+                        self.camera.zoom * self.camera.aspect,
+                        self.camera.zoom,
+                    ];
+                }
+                self.minimap.ui(&self.egui_ctx);
+                // Handle minimap camera jumps
+                if let Some(jump) = self.minimap.jump_target.take() {
+                    self.camera.position = jump;
                 }
 
                 self.onboarding.show(&self.egui_ctx);
@@ -1125,6 +1236,7 @@ impl ApplicationHandler for App {
                             render_pass.set_pipeline(&rs.object_pipeline);
                             render_pass.set_bind_group(0, &rs.camera_bind_group, &[]);
                             render_pass.set_bind_group(1, &rs.atlas.bind_group, &[]);
+                            render_pass.set_bind_group(2, &rs.object_time_bind_group, &[]);
                             render_pass.set_vertex_buffer(0, obj_r.vertex_buffer.slice(..));
                             render_pass.set_vertex_buffer(1, obj_r.instance_buffer.slice(..));
                             render_pass.set_index_buffer(

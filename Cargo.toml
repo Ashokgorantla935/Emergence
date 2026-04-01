@@ -25,3 +25,4 @@ pollster = "0.4"
 smallvec = "1"
 bitcode = "0.6"
 serde = { version = "1", features = ["derive"] }
+rodio = { version = "0.19", default-features = false, features = ["symphonia-wav"] }

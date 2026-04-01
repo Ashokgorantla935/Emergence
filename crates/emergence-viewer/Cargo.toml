@@ -13,3 +13,4 @@ winit = { workspace = true }
 bytemuck = { workspace = true }
 pollster = { workspace = true }
 fastrand = { workspace = true }
+rodio = { workspace = true }

@@ -158,7 +158,8 @@ impl ToolPalette {
                                         let btn = egui::Button::new(power.name)
                                             .selected(is_selected)
                                             .min_size(egui::vec2(110.0, 36.0));
-                                        let resp = ui.add_enabled(!on_cooldown, btn);
+                                        let resp = ui.add_enabled(!on_cooldown, btn)
+                                            .on_hover_text(power_tooltip(power.id));
                                         if resp.clicked() {
                                             self.selected_power = Some(pid);
                                         }
@@ -343,6 +344,98 @@ fn observation_powers() -> Vec<Power> {
         ("Show Paths",    false, 0),
     ];
     make_powers(defs, ToolTab::Observation, 68)
+}
+
+fn power_tooltip(id: PowerId) -> &'static str {
+    match id.0 {
+        // Creation
+        0  => "Place a single being at the clicked location.",
+        1  => "Place 10 beings at the clicked location.",
+        2  => "Place 100 beings (large burst). Long cooldown.",
+        3  => "Place an animal (non-being fauna).",
+        4  => "Plant a berry bush — beings gather food here.",
+        5  => "Plant a wheat patch — slow-growing food source.",
+        6  => "Place a stone deposit — building material.",
+        7  => "Create a fishing spot on water tiles.",
+        8  => "Place a campfire — warmth and social gathering point.",
+        9  => "Place a shelter — beings rest and bond here.",
+        // Terrain
+        10 => "Raise terrain height at the brush location.",
+        11 => "Lower terrain height at the brush location.",
+        12 => "Convert tiles to Grassland biome.",
+        13 => "Convert tiles to Forest biome.",
+        14 => "Convert tiles to Desert biome.",
+        15 => "Convert tiles to Snow biome.",
+        16 => "Flood tiles — creates water terrain.",
+        17 => "Flood individual tiles rapidly.",
+        18 => "Dry out water tiles.",
+        19 => "Make soil fertile — boosted food growth.",
+        20 => "Convert tiles to Rocky terrain.",
+        21 => "Convert tiles to Swamp biome.",
+        // Weather
+        22 => "Start a rain event — fills water sources.",
+        23 => "Trigger a thunderstorm — danger + lightning strikes.",
+        24 => "Cause a drought — food sources wither.",
+        25 => "Unleash a blizzard — cold damage, movement penalty.",
+        26 => "Spread fog — reduces perception radius.",
+        27 => "Start a heatwave — hunger rises faster.",
+        28 => "Gust of wind — scatters beings and signals.",
+        29 => "Clear active weather immediately.",
+        // Destruction
+        30 => "Strike a being with lightning — instant kill.",
+        31 => "Drop a meteor — kills all in a large radius.",
+        32 => "Trigger an earthquake — destroys structures.",
+        33 => "Erupt a volcano — permanent terrain change.",
+        34 => "Summon a tornado — sweeps beings across the map.",
+        35 => "Start a wildfire — spreads through forest tiles.",
+        36 => "Send a flood wave — pushes and drowns beings.",
+        37 => "Spread plague — kills beings over time.",
+        38 => "Cause famine — food sources vanish in area.",
+        39 => "Trigger a stampede — beings flee in panic.",
+        // Blessing
+        40 => "Burst of joy — nearby beings feel happy.",
+        41 => "Grant courage — suppresses fear, boosts action.",
+        42 => "Calm nearby beings — reduces anger and fear.",
+        43 => "Heal beings — restores health needs.",
+        44 => "Spark a bond between two nearby beings.",
+        45 => "Speed boost — beings move faster temporarily.",
+        46 => "Feast — fill hunger for all nearby beings.",
+        47 => "Inspire a being — raises curiosity and creativity.",
+        48 => "Protect an area — beings take no harm for a time.",
+        // Curse
+        49 => "Spread fear — beings flee and scatter.",
+        50 => "Induce rage — beings become aggressive.",
+        51 => "Inflict hunger — drains food need immediately.",
+        52 => "Drive a being mad — erratic behavior.",
+        53 => "Wipe a being's causal memory.",
+        54 => "Slow movement — beings struggle to move.",
+        55 => "Spread disease — contagious, reduces needs.",
+        56 => "Inflict despair — deep grief and inaction.",
+        57 => "Incite revolution — beings turn on their leader.",
+        // World Law
+        58 => "Forbid violence — beings cannot attack each other.",
+        59 => "Forbid migration — beings cannot leave the origin area.",
+        60 => "Accelerate aging — beings age and die faster.",
+        61 => "Slow aging — beings live much longer.",
+        62 => "Prevent all reproduction.",
+        63 => "Maximize reproduction rate.",
+        64 => "Boost bonding — relationships form faster.",
+        65 => "Boost grudges — slights are remembered longer.",
+        66 => "Enforce sharing — all food must be shared.",
+        67 => "Enforce hunting — beings prioritize meat.",
+        // Observation
+        68 => "Heatmap: color beings by hunger level.",
+        69 => "Heatmap: color beings by safety/danger.",
+        70 => "Heatmap: color beings by warmth need.",
+        71 => "Heatmap: color beings by dominant emotion.",
+        72 => "Show relationship lines between beings.",
+        73 => "Show kingdom territory overlays.",
+        74 => "Show signal grid channels.",
+        75 => "Heatmap: fear signal channel.",
+        76 => "Lock camera to follow a selected being.",
+        77 => "Show movement path trails.",
+        _  => "No description available.",
+    }
 }
 
 fn make_powers(defs: &[(&'static str, bool, u32)], tab: ToolTab, base_id: u8) -> Vec<Power> {

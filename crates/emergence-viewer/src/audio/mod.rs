@@ -1,12 +1,13 @@
-/// V6 — Sound Engine
+/// V7 — Sound Engine (rodio-backed, synthesized audio, no external files)
 ///
 /// Architecture: SoundEngine runs on its own thread via `std::thread::spawn`.
 /// The main tick loop sends commands through a `std::sync::mpsc` channel.
 /// Zero tick-loop impact — the audio thread sleeps between commands.
 ///
-/// NOTE: We do NOT ship actual .ogg/.wav files yet. This module builds the
-/// complete audio framework with placeholder silent buffers. Real audio assets
-/// are a separate task. All "playback" calls are no-ops until assets land.
+/// Audio synthesis:
+///   - All sounds are generated as raw f32 PCM buffers (44100 Hz, mono).
+///   - Ambient layers: looping low-frequency drones with filtered noise.
+///   - Event sounds: parameterized sine envelopes (birth, death, combat, god powers).
 ///
 /// Ambient layers (4):
 ///   0 — nature   (birds, wind, insects — always present)
@@ -15,8 +16,6 @@
 ///   3 — weather  (rain, thunder, wind — during weather events)
 ///
 /// Crossfade: 2-second linear blend when switching ambient layer.
-/// God power sounds: enum-mapped, placeholder silent buffers.
-/// UI click: placeholder.
 /// Volume: [master, music, sfx, ambient] as [f32; 4], 0.0-1.0.
 /// Mute toggle: M key.
 
@@ -85,6 +84,16 @@ pub enum UiSound {
     KingdomAlert,
 }
 
+/// World event sounds (birth, death, combat).
+#[derive(Clone, Copy, Debug)]
+pub enum WorldEventSound {
+    Birth,
+    Death,
+    Combat,
+    KingdomRise,
+    KingdomFall,
+}
+
 /// Commands sent from main thread to the audio thread.
 #[derive(Debug)]
 enum AudioCommand {
@@ -94,6 +103,8 @@ enum AudioCommand {
     PlayGodPower(GodPowerSound),
     /// Trigger a one-shot UI sound.
     PlayUi(UiSound),
+    /// Trigger a world event sound.
+    PlayWorldEvent(WorldEventSound),
     /// Set volume levels: [master, music, sfx, ambient].
     SetVolumes([f32; 4]),
     /// Toggle global mute.
@@ -134,6 +145,102 @@ impl VolumeSettings {
 }
 
 // ---------------------------------------------------------------------------
+// PCM synthesis helpers
+// ---------------------------------------------------------------------------
+
+const SAMPLE_RATE: u32 = 44100;
+
+/// Generate a sine tone with a linear attack/decay envelope.
+/// Returns f32 mono samples at 44100 Hz.
+fn synth_sine_envelope(
+    freq_start: f32,
+    freq_end: f32,
+    duration_secs: f32,
+    amplitude: f32,
+    attack_frac: f32,  // 0..1 — fraction of duration used for attack
+    decay_frac: f32,   // 0..1 — fraction of duration used for decay
+) -> Vec<f32> {
+    let n = (SAMPLE_RATE as f32 * duration_secs) as usize;
+    let mut samples = Vec::with_capacity(n);
+    let mut phase: f32 = 0.0;
+
+    for i in 0..n {
+        let t = i as f32 / n as f32;
+        let freq = freq_start + (freq_end - freq_start) * t;
+
+        // Envelope
+        let env = if t < attack_frac {
+            t / attack_frac.max(1e-6)
+        } else if t > 1.0 - decay_frac {
+            (1.0 - t) / decay_frac.max(1e-6)
+        } else {
+            1.0
+        };
+
+        let sample = (phase * std::f32::consts::TAU).sin() * env * amplitude;
+        samples.push(sample);
+
+        phase += freq / SAMPLE_RATE as f32;
+        if phase >= 1.0 { phase -= 1.0; }
+    }
+
+    samples
+}
+
+/// White noise burst with exponential decay.
+fn synth_noise_burst(duration_secs: f32, amplitude: f32) -> Vec<f32> {
+    let n = (SAMPLE_RATE as f32 * duration_secs) as usize;
+    let mut samples = Vec::with_capacity(n);
+    let mut seed: u64 = 0x517cc1b727220a95;
+
+    for i in 0..n {
+        // xorshift64
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        let noise = (seed as i64 as f32) / i64::MAX as f32;
+
+        let t = i as f32 / n as f32;
+        let env = (-t * 6.0_f32).exp(); // exponential decay
+        samples.push(noise * env * amplitude);
+    }
+
+    samples
+}
+
+/// Low-frequency ambient drone: slow sine wave with added harmonic texture.
+fn synth_ambient_drone(freq: f32, duration_secs: f32, amplitude: f32) -> Vec<f32> {
+    let n = (SAMPLE_RATE as f32 * duration_secs) as usize;
+    let mut samples = Vec::with_capacity(n);
+    let mut phase1: f32 = 0.0;
+    let mut phase2: f32 = 0.0;
+    let mut phase3: f32 = 0.0;
+
+    for _ in 0..n {
+        // Fundamental + 2 overtones at lower amplitude
+        let s = (phase1 * std::f32::consts::TAU).sin() * 0.6
+            + (phase2 * std::f32::consts::TAU).sin() * 0.25
+            + (phase3 * std::f32::consts::TAU).sin() * 0.15;
+        samples.push(s * amplitude);
+
+        phase1 += freq / SAMPLE_RATE as f32;
+        phase2 += (freq * 2.0) / SAMPLE_RATE as f32;
+        phase3 += (freq * 3.0) / SAMPLE_RATE as f32;
+        if phase1 >= 1.0 { phase1 -= 1.0; }
+        if phase2 >= 1.0 { phase2 -= 1.0; }
+        if phase3 >= 1.0 { phase3 -= 1.0; }
+    }
+
+    samples
+}
+
+/// Convert f32 mono sample buffer to a rodio-compatible source using SamplesBuffer.
+fn to_rodio_source(samples: Vec<f32>, volume: f32) -> rodio::buffer::SamplesBuffer<f32> {
+    let scaled: Vec<f32> = samples.iter().map(|s| s * volume).collect();
+    rodio::buffer::SamplesBuffer::new(1, SAMPLE_RATE, scaled)
+}
+
+// ---------------------------------------------------------------------------
 // Ambient layer definition
 // ---------------------------------------------------------------------------
 
@@ -146,13 +253,11 @@ struct AmbientLayer {
     weight:      f32,
     /// Weight from last frame (for crossfade)
     prev_weight: f32,
-    /// Whether this layer has actual audio loaded (false = silent placeholder)
-    loaded:      bool,
 }
 
 impl AmbientLayer {
     fn new(label: &'static str) -> Self {
-        AmbientLayer { label, weight: 0.0, prev_weight: 0.0, loaded: false }
+        AmbientLayer { label, weight: 0.0, prev_weight: 0.0 }
     }
 }
 
@@ -166,12 +271,19 @@ struct AudioThreadState {
     layers:     [AmbientLayer; 4],
     /// Crossfade timer: ticks down from CROSSFADE_TICKS
     fade_timer: u32,
+    /// Rodio output stream sink for one-shot sounds
+    sink:       Option<rodio::Sink>,
+    /// Ambient sink (looping)
+    ambient_sink: Option<rodio::Sink>,
+    /// Ambient loop counter — triggers a new ambient drone every N ms
+    ambient_timer: std::time::Instant,
+    ambient_interval_secs: f32,
 }
 
 const CROSSFADE_TICKS: u32 = 120; // ~2 seconds at 60fps
 
 impl AudioThreadState {
-    fn new() -> Self {
+    fn new(sink: Option<rodio::Sink>, ambient_sink: Option<rodio::Sink>) -> Self {
         AudioThreadState {
             volumes: VolumeSettings::default(),
             layers: [
@@ -181,11 +293,14 @@ impl AudioThreadState {
                 AmbientLayer::new("weather"),
             ],
             fade_timer: 0,
+            sink,
+            ambient_sink,
+            ambient_timer: std::time::Instant::now(),
+            ambient_interval_secs: 4.0,
         }
     }
 
     fn apply_context(&mut self, ctx: AudioContext) {
-        // Determine target weights based on context
         let is_night = ctx.time_of_day < 0.15 || ctx.time_of_day > 0.85;
 
         let nature_w     = if ctx.weather_active { 0.3 } else { 1.0 };
@@ -200,17 +315,68 @@ impl AudioThreadState {
                 self.fade_timer = CROSSFADE_TICKS;
             }
         }
+
+        // Tick ambient loop
+        if self.ambient_timer.elapsed().as_secs_f32() >= self.ambient_interval_secs {
+            self.ambient_timer = std::time::Instant::now();
+            self.play_ambient_tick();
+        }
+    }
+
+    fn play_ambient_tick(&self) {
+        let Some(ref sink) = self.ambient_sink else { return; };
+        if sink.len() > 2 { return; } // Don't queue up too many
+
+        let master = self.volumes.effective_master();
+        let amb_vol = self.volumes.ambient() * master;
+        if amb_vol < 0.01 { return; }
+
+        // Determine dominant layer
+        let nature_w = self.layers[0].weight;
+        let night_w  = self.layers[1].weight;
+        let weather_w = self.layers[3].weight;
+
+        let base_vol = amb_vol * 0.3; // quiet ambient background
+
+        if weather_w > 0.5 {
+            // Rain/storm: broadband noise
+            let samples = synth_noise_burst(2.0, base_vol * weather_w);
+            let source = to_rodio_source(samples, 1.0);
+            sink.append(source);
+        } else if night_w > 0.5 {
+            // Night: higher freq crickets-like tone
+            let samples = synth_sine_envelope(800.0, 820.0, 1.5, base_vol * night_w, 0.1, 0.3);
+            let source = to_rodio_source(samples, 1.0);
+            sink.append(source);
+        } else if nature_w > 0.3 {
+            // Nature: soft low drone
+            let samples = synth_ambient_drone(55.0, 3.0, base_vol * nature_w);
+            let source = to_rodio_source(samples, 1.0);
+            sink.append(source);
+        }
     }
 
     fn apply_volumes(&mut self, v: [f32; 4]) {
         self.volumes.levels = v;
+        self.update_sink_volumes();
     }
 
     fn set_muted(&mut self, muted: bool) {
         self.volumes.muted = muted;
+        self.update_sink_volumes();
     }
 
-    /// Advance crossfade timer. Returns current blended weights.
+    fn update_sink_volumes(&self) {
+        let effective = self.volumes.effective_master();
+        if let Some(ref sink) = self.sink {
+            sink.set_volume(effective * self.volumes.sfx());
+        }
+        if let Some(ref sink) = self.ambient_sink {
+            sink.set_volume(effective * self.volumes.ambient());
+        }
+    }
+
+    /// Advance crossfade timer.
     fn tick_fade(&mut self) -> [f32; 4] {
         let t = if self.fade_timer > 0 {
             self.fade_timer = self.fade_timer.saturating_sub(1);
@@ -226,16 +392,130 @@ impl AudioThreadState {
         })
     }
 
-    /// Play a god power sound. Placeholder: logs only, no actual audio.
     fn play_god_power(&self, sound: GodPowerSound) {
-        // Real implementation: select audio asset, pitch-shift, apply sfx volume, submit to rodio sink.
-        // For now: no-op (silent placeholder framework).
-        let _ = sound; // suppress unused warning
+        let Some(ref sink) = self.sink else { return; };
+        let vol = self.volumes.effective_master() * self.volumes.sfx();
+        if vol < 0.01 { return; }
+
+        let samples = match sound {
+            GodPowerSound::Lightning => {
+                // Sharp crack: noise burst
+                synth_noise_burst(0.12, vol * 0.9)
+            }
+            GodPowerSound::Meteor => {
+                // Deep falling rumble: descending tone + noise
+                let mut s = synth_sine_envelope(200.0, 60.0, 0.8, vol * 0.8, 0.05, 0.3);
+                let noise = synth_noise_burst(0.8, vol * 0.4);
+                for (a, b) in s.iter_mut().zip(noise.iter()) { *a += b; }
+                s
+            }
+            GodPowerSound::Earthquake => {
+                // Low rumble
+                let mut s = synth_ambient_drone(30.0, 1.0, vol * 0.7);
+                let noise = synth_noise_burst(1.0, vol * 0.3);
+                for (a, b) in s.iter_mut().zip(noise.iter()) { *a += b; }
+                s
+            }
+            GodPowerSound::Tornado => {
+                // Rising whoosh noise
+                synth_noise_burst(0.5, vol * 0.6)
+            }
+            GodPowerSound::Volcano => {
+                // Deep boom
+                synth_sine_envelope(80.0, 40.0, 1.2, vol * 0.9, 0.02, 0.6)
+            }
+            GodPowerSound::RainStart => {
+                synth_noise_burst(1.0, vol * 0.4)
+            }
+            GodPowerSound::RainStop => {
+                // Short descending tone
+                synth_sine_envelope(300.0, 200.0, 0.4, vol * 0.3, 0.1, 0.5)
+            }
+            GodPowerSound::BlessingJoy => {
+                // Bright rising chord-like tones
+                let mut s = synth_sine_envelope(440.0, 880.0, 0.4, vol * 0.5, 0.1, 0.4);
+                let s2 = synth_sine_envelope(660.0, 1320.0, 0.4, vol * 0.3, 0.1, 0.4);
+                for (a, b) in s.iter_mut().zip(s2.iter()) { *a += b; }
+                s
+            }
+            GodPowerSound::CurseAnger => {
+                // Dissonant descending tone
+                synth_sine_envelope(440.0, 110.0, 0.5, vol * 0.6, 0.05, 0.4)
+            }
+            GodPowerSound::PlaceBeing => {
+                // Soft chime (birth-like)
+                synth_sine_envelope(440.0, 880.0, 0.2, vol * 0.4, 0.05, 0.5)
+            }
+            GodPowerSound::RemoveBeing => {
+                // Short descending note
+                synth_sine_envelope(440.0, 220.0, 0.2, vol * 0.4, 0.02, 0.6)
+            }
+        };
+
+        let source = to_rodio_source(samples, 1.0);
+        sink.append(source);
     }
 
-    /// Play a UI sound. Placeholder.
+    fn play_world_event(&self, sound: WorldEventSound) {
+        let Some(ref sink) = self.sink else { return; };
+        let vol = self.volumes.effective_master() * self.volumes.sfx();
+        if vol < 0.01 { return; }
+
+        let samples = match sound {
+            WorldEventSound::Birth => {
+                // Rising tone: 440→880 Hz, 200ms
+                synth_sine_envelope(440.0, 880.0, 0.2, vol * 0.35, 0.1, 0.5)
+            }
+            WorldEventSound::Death => {
+                // Falling tone: 440→220 Hz, 300ms
+                synth_sine_envelope(440.0, 220.0, 0.3, vol * 0.3, 0.05, 0.6)
+            }
+            WorldEventSound::Combat => {
+                // Short white noise burst: 100ms
+                synth_noise_burst(0.1, vol * 0.45)
+            }
+            WorldEventSound::KingdomRise => {
+                // Triumphant rising arpeggio-like sweep
+                let mut s = synth_sine_envelope(261.0, 523.0, 0.6, vol * 0.5, 0.1, 0.4);
+                let s2 = synth_sine_envelope(330.0, 660.0, 0.6, vol * 0.3, 0.15, 0.4);
+                for (a, b) in s.iter_mut().zip(s2.iter()) { *a += b; }
+                s
+            }
+            WorldEventSound::KingdomFall => {
+                // Dark descending tone
+                synth_sine_envelope(220.0, 55.0, 0.8, vol * 0.5, 0.05, 0.5)
+            }
+        };
+
+        let source = to_rodio_source(samples, 1.0);
+        sink.append(source);
+    }
+
     fn play_ui(&self, sound: UiSound) {
-        let _ = sound;
+        let Some(ref sink) = self.sink else { return; };
+        let vol = self.volumes.effective_master() * self.volumes.sfx();
+        if vol < 0.01 { return; }
+
+        let samples = match sound {
+            UiSound::ButtonClick => synth_sine_envelope(600.0, 600.0, 0.05, vol * 0.25, 0.01, 0.5),
+            UiSound::PanelOpen   => synth_sine_envelope(400.0, 600.0, 0.1, vol * 0.2, 0.05, 0.5),
+            UiSound::PanelClose  => synth_sine_envelope(600.0, 400.0, 0.1, vol * 0.2, 0.05, 0.5),
+            UiSound::SpeedChange => synth_sine_envelope(500.0, 500.0, 0.08, vol * 0.2, 0.02, 0.5),
+            UiSound::InspectorOpen => synth_sine_envelope(450.0, 650.0, 0.12, vol * 0.2, 0.05, 0.4),
+            UiSound::Notification  => synth_sine_envelope(880.0, 660.0, 0.15, vol * 0.3, 0.05, 0.5),
+            UiSound::KingdomAlert  => {
+                let mut s = synth_sine_envelope(660.0, 880.0, 0.2, vol * 0.35, 0.05, 0.4);
+                let s2 = synth_sine_envelope(660.0, 880.0, 0.2, vol * 0.2, 0.05, 0.4);
+                // Second pulse after a gap
+                let gap = vec![0.0f32; (SAMPLE_RATE as f32 * 0.1) as usize];
+                s.extend(gap);
+                s.extend(s2);
+                s
+            }
+        };
+
+        let source = to_rodio_source(samples, 1.0);
+        sink.append(source);
     }
 }
 
@@ -244,7 +524,6 @@ impl AudioThreadState {
 // ---------------------------------------------------------------------------
 
 /// Main-thread handle to the audio subsystem.
-/// Cheap to clone or pass around — just wraps an mpsc Sender.
 pub struct SoundEngine {
     sender: Sender<AudioCommand>,
     /// Volume settings mirrored on the main thread for UI display
@@ -259,28 +538,47 @@ impl SoundEngine {
         thread::Builder::new()
             .name("emergence-audio".to_string())
             .spawn(move || {
-                let mut state = AudioThreadState::new();
+                // Try to open the default output device.
+                let audio_result = rodio::OutputStream::try_default();
+                let (sink, ambient_sink) = match audio_result {
+                    Ok((_stream, stream_handle)) => {
+                        let sfx = rodio::Sink::try_new(&stream_handle).ok();
+                        let amb = rodio::Sink::try_new(&stream_handle).ok();
+                        // Stream must stay alive for the duration — leak it onto the heap.
+                        // Safe: we never free it intentionally; it lives for the process lifetime.
+                        std::mem::forget(_stream);
+                        (sfx, amb)
+                    }
+                    Err(e) => {
+                        eprintln!("[audio] No output device: {e}");
+                        (None, None)
+                    }
+                };
+
+                let mut state = AudioThreadState::new(sink, ambient_sink);
+
+                // Prime ambient on start
+                // Set nature layer active immediately so first tick plays sound
+                state.layers[0].weight = 1.0;
 
                 loop {
-                    // Block waiting for commands, process all queued
                     match rx.recv() {
                         Ok(cmd) => {
                             if !Self::handle_command(&mut state, cmd) {
-                                break; // Shutdown received
+                                break;
                             }
                         }
-                        Err(_) => break, // Sender dropped
+                        Err(_) => break,
                     }
 
-                    // Drain any queued commands without blocking
+                    // Drain queued commands without blocking
                     while let Ok(cmd) = rx.try_recv() {
                         if !Self::handle_command(&mut state, cmd) {
                             return;
                         }
                     }
 
-                    // Advance crossfade (result used when real audio is wired up)
-                    let _blended = state.tick_fade();
+                    state.tick_fade();
                 }
             })
             .expect("Failed to spawn audio thread");
@@ -293,12 +591,13 @@ impl SoundEngine {
 
     fn handle_command(state: &mut AudioThreadState, cmd: AudioCommand) -> bool {
         match cmd {
-            AudioCommand::UpdateContext(ctx)   => state.apply_context(ctx),
-            AudioCommand::PlayGodPower(sound)  => state.play_god_power(sound),
-            AudioCommand::PlayUi(sound)        => state.play_ui(sound),
-            AudioCommand::SetVolumes(v)        => state.apply_volumes(v),
-            AudioCommand::SetMuted(m)          => state.set_muted(m),
-            AudioCommand::Shutdown             => return false,
+            AudioCommand::UpdateContext(ctx)    => state.apply_context(ctx),
+            AudioCommand::PlayGodPower(sound)   => state.play_god_power(sound),
+            AudioCommand::PlayUi(sound)         => state.play_ui(sound),
+            AudioCommand::PlayWorldEvent(sound) => state.play_world_event(sound),
+            AudioCommand::SetVolumes(v)         => state.apply_volumes(v),
+            AudioCommand::SetMuted(m)           => state.set_muted(m),
+            AudioCommand::Shutdown              => return false,
         }
         true
     }
@@ -314,6 +613,11 @@ impl SoundEngine {
     /// Trigger a god power sound effect.
     pub fn play_god_power(&self, sound: GodPowerSound) {
         let _ = self.sender.send(AudioCommand::PlayGodPower(sound));
+    }
+
+    /// Trigger a world event sound.
+    pub fn play_world_event(&self, sound: WorldEventSound) {
+        let _ = self.sender.send(AudioCommand::PlayWorldEvent(sound));
     }
 
     /// Trigger a UI click/interaction sound.
@@ -381,7 +685,6 @@ impl Drop for SoundEngine {
 
 impl SoundEngine {
     /// Render volume slider controls in an egui window.
-    /// Call from the main game UI loop.
     pub fn show_volume_ui(&mut self, ctx: &egui::Context) {
         egui::Window::new("Audio")
             .collapsible(true)
@@ -443,7 +746,6 @@ impl SoundEngine {
 // ---------------------------------------------------------------------------
 
 /// Returns true if the key was consumed by the audio system.
-/// Call from the application key handler.
 pub fn handle_key(engine: &mut SoundEngine, key: winit::keyboard::KeyCode) -> bool {
     use winit::keyboard::KeyCode;
     match key {
@@ -452,5 +754,33 @@ pub fn handle_key(engine: &mut SoundEngine, key: winit::keyboard::KeyCode) -> bo
             true
         }
         _ => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// God power ID → sound mapping
+// ---------------------------------------------------------------------------
+
+/// Map a god power ID (from power_catalog) to an optional GodPowerSound.
+pub fn god_power_id_to_sound(pid: u8) -> Option<GodPowerSound> {
+    match pid {
+        // Creation
+        0..=11 => Some(GodPowerSound::PlaceBeing),
+        // Terrain brush (12-21): no sound needed
+        12..=21 => None,
+        // Weather
+        22 => Some(GodPowerSound::RainStart),
+        24 => Some(GodPowerSound::RainStart), // Storm
+        // Destruction
+        30 => Some(GodPowerSound::Lightning),
+        31 => Some(GodPowerSound::Meteor),
+        32 => Some(GodPowerSound::Earthquake),
+        37 => Some(GodPowerSound::Tornado),
+        38 | 39 | 40 | 41 => Some(GodPowerSound::RemoveBeing),
+        // Blessing
+        42..=51 => Some(GodPowerSound::BlessingJoy),
+        // Curse
+        52..=61 => Some(GodPowerSound::CurseAnger),
+        _ => None,
     }
 }

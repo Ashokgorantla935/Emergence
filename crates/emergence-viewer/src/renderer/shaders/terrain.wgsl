@@ -47,13 +47,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if is_water {
         // Sine-wave UV distortion for animated waves
         var water_uv = in.uv;
-        water_uv.x += sin(in.uv.y * 20.0 + t * 2.0) * 0.003;
-        water_uv.y += sin(in.uv.x * 20.0 + t * 1.7) * 0.003;
+        water_uv.x += sin(in.uv.y * 20.0 + t * 2.0) * 0.007;
+        water_uv.y += sin(in.uv.x * 20.0 + t * 1.7) * 0.007;
 
         var color = textureSample(terrain_texture, terrain_sampler, water_uv);
 
         // Shore foam: check neighbors in water mask; if near land, add white fringe
-        let texel = vec2<f32>(1.0 / 512.0, 1.0 / 512.0); // approximate texel size
+        // Texel size matches world grid (256 cells)
+        let texel = vec2<f32>(1.0 / 256.0, 1.0 / 256.0);
         let n  = textureSample(water_mask, water_mask_sampler, in.uv + vec2<f32>(0.0,  texel.y)).r;
         let s  = textureSample(water_mask, water_mask_sampler, in.uv + vec2<f32>(0.0, -texel.y)).r;
         let e  = textureSample(water_mask, water_mask_sampler, in.uv + vec2<f32>( texel.x, 0.0)).r;
@@ -65,6 +66,27 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let foam_alpha = 0.4 + 0.6 * (0.5 + 0.5 * sin(t * 3.0 + in.uv.x * 40.0 + in.uv.y * 40.0));
             color = mix(color, vec4<f32>(1.0, 1.0, 1.0, 1.0), foam_alpha * 0.6);
         }
+
+        // Depth gradient: sample water mask at increasing radii (1–5 texels).
+        // Each ring that is still water increments depth. Deep = darker blue.
+        let step2 = texel * 2.0;
+        let step3 = texel * 3.0;
+        let step4 = texel * 4.0;
+        let step5 = texel * 5.0;
+        var depth_count = 0.0;
+        if textureSample(water_mask, water_mask_sampler, in.uv + vec2<f32>(0.0,  step2.y)).r > 0.5 { depth_count += 1.0; }
+        if textureSample(water_mask, water_mask_sampler, in.uv + vec2<f32>(0.0, -step2.y)).r > 0.5 { depth_count += 1.0; }
+        if textureSample(water_mask, water_mask_sampler, in.uv + vec2<f32>( step2.x, 0.0)).r > 0.5 { depth_count += 1.0; }
+        if textureSample(water_mask, water_mask_sampler, in.uv + vec2<f32>(-step2.x, 0.0)).r > 0.5 { depth_count += 1.0; }
+        if textureSample(water_mask, water_mask_sampler, in.uv + vec2<f32>(0.0,  step5.y)).r > 0.5 { depth_count += 1.0; }
+        if textureSample(water_mask, water_mask_sampler, in.uv + vec2<f32>(0.0, -step5.y)).r > 0.5 { depth_count += 1.0; }
+        if textureSample(water_mask, water_mask_sampler, in.uv + vec2<f32>( step5.x, 0.0)).r > 0.5 { depth_count += 1.0; }
+        if textureSample(water_mask, water_mask_sampler, in.uv + vec2<f32>(-step5.x, 0.0)).r > 0.5 { depth_count += 1.0; }
+        // depth_t in [0,1]: 0 = shallow (near shore), 1 = deep
+        let depth_t = clamp(depth_count / 8.0, 0.0, 1.0);
+        let shallow_blue = vec4<f32>(24.0/255.0, 120.0/255.0, 220.0/255.0, 1.0);
+        let deep_blue    = vec4<f32>(15.0/255.0,  60.0/255.0, 150.0/255.0, 1.0);
+        color = mix(color, mix(shallow_blue, deep_blue, depth_t), depth_t * 0.5);
 
         return color;
     } else {

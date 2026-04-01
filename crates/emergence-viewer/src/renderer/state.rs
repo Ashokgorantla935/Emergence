@@ -45,6 +45,12 @@ pub struct RenderState {
     pub water_time_buffer: wgpu::Buffer,
     /// Bind group for the water time uniform.
     pub water_time_bind_group: wgpu::BindGroup,
+    /// Bind group layout for the object time uniform (group 2 in object_sprite shader).
+    pub object_time_bind_group_layout: wgpu::BindGroupLayout,
+    /// Buffer holding elapsed time for tree sway (padded to 16 bytes).
+    pub object_time_buffer: wgpu::Buffer,
+    /// Bind group for the object time uniform.
+    pub object_time_bind_group: wgpu::BindGroup,
     pub terrain_pipeline: wgpu::RenderPipeline,
     /// Sprite pipeline (replaces old circle SDF being pipeline).
     pub sprite_pipeline: wgpu::RenderPipeline,
@@ -254,6 +260,38 @@ impl RenderState {
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: water_time_buffer.as_entire_binding(),
+            }],
+        });
+
+        // ── Object time uniform (group 2, object_sprite pipeline) ─────────
+        let object_time_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Object Time BGL"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let object_time_data: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
+        let object_time_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Object Time Buffer"),
+            contents: bytemuck::cast_slice(&object_time_data),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let object_time_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Object Time BG"),
+            layout: &object_time_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: object_time_buffer.as_entire_binding(),
             }],
         });
 
@@ -496,7 +534,11 @@ impl RenderState {
         let object_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Object Pipeline Layout"),
-                bind_group_layouts: &[&camera_bind_group_layout, &atlas.bind_group_layout],
+                bind_group_layouts: &[
+                    &camera_bind_group_layout,
+                    &atlas.bind_group_layout,
+                    &object_time_bind_group_layout,
+                ],
                 push_constant_ranges: &[],
             });
 
@@ -564,10 +606,18 @@ impl RenderState {
             ],
         };
 
+        // Separate 2-binding layout for particles (no time uniform needed).
+        let particle_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Particle Pipeline Layout"),
+                bind_group_layouts: &[&camera_bind_group_layout, &atlas.bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
         let particle_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label:  Some("Particle Pipeline"),
-                layout: Some(&object_pipeline_layout), // same layout as objects
+                layout: Some(&particle_pipeline_layout),
                 vertex: wgpu::VertexState {
                     module:      &particle_shader,
                     entry_point: Some("vs_main"),
@@ -619,6 +669,9 @@ impl RenderState {
             water_time_bind_group_layout,
             water_time_buffer,
             water_time_bind_group,
+            object_time_bind_group_layout,
+            object_time_buffer,
+            object_time_bind_group,
             terrain_pipeline,
             sprite_pipeline,
             heatmap_pipeline,
@@ -651,5 +704,10 @@ impl RenderState {
     pub fn update_water_time(&self, time: f32) {
         let data: [f32; 4] = [time, 0.0, 0.0, 0.0];
         self.queue.write_buffer(&self.water_time_buffer, 0, bytemuck::cast_slice(&data));
+    }
+
+    pub fn update_object_time(&self, time: f32) {
+        let data: [f32; 4] = [time, 0.0, 0.0, 0.0];
+        self.queue.write_buffer(&self.object_time_buffer, 0, bytemuck::cast_slice(&data));
     }
 }

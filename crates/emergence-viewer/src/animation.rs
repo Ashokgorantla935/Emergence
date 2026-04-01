@@ -1,6 +1,7 @@
 //! Animation state machine for beings.
 //! Drives atlas UV selection from engine state without touching core.
 
+use emergence_core::being::actions::Action;
 use emergence_core::being::data::{BeingState, Beings, CreatureType};
 
 const ATLAS_CELL: f32 = 1.0 / 32.0;
@@ -152,7 +153,58 @@ impl AnimationManager {
             BeingState::Dead     => AnimState::Die,
             BeingState::Sleeping => AnimState::Sleep,
             BeingState::Awake    => {
-                // Derive from velocity magnitude
+                // Map pending_action (u8) to anim state; 255 = no pending action.
+                let action_u8 = beings.pending_action[i];
+                if action_u8 != 255 {
+                    // Safe: Action is repr(u8) with values 0-21; anything outside falls through.
+                    let action = match action_u8 {
+                        0  => Some(Action::Wander),
+                        1  => Some(Action::SeekFood),
+                        2  => Some(Action::SeekShelter),
+                        3  => Some(Action::Flee),
+                        4  => Some(Action::ApproachBeing),
+                        5  => Some(Action::Bond),
+                        6  => Some(Action::ShareFood),
+                        7  => Some(Action::TakeFood),
+                        8  => Some(Action::Explore),
+                        9  => Some(Action::Sleep),
+                        10 => Some(Action::Cluster),
+                        11 => Some(Action::Mourn),
+                        12 => Some(Action::AvoidBeing),
+                        13 => Some(Action::PickUpFood),
+                        14 => Some(Action::Hunt),
+                        15 => Some(Action::Teach),
+                        16 => Some(Action::Build),
+                        17 => Some(Action::Craft),
+                        18 => Some(Action::Memorialize),
+                        19 => Some(Action::CreateMark),
+                        20 => Some(Action::ShareResource),
+                        21 => Some(Action::PickUpStone),
+                        _  => None,
+                    };
+                    if let Some(action) = action {
+                        let mapped = match action {
+                            Action::Hunt | Action::TakeFood               => Some(AnimState::Fight),
+                            Action::ShareFood | Action::ShareResource      => Some(AnimState::Share),
+                            Action::Teach | Action::Bond                   => Some(AnimState::Share),
+                            Action::Mourn | Action::Memorialize             => Some(AnimState::Mourn),
+                            Action::Explore                                 => Some(AnimState::Explore),
+                            Action::Sleep                                   => Some(AnimState::Sleep),
+                            Action::SeekFood | Action::PickUpFood
+                            | Action::PickUpStone | Action::Build
+                            | Action::Craft | Action::CreateMark            => {
+                                // Active tasks: use velocity to pick Walk or Idle
+                                None
+                            }
+                            _ => None,
+                        };
+                        if let Some(state) = mapped {
+                            return state;
+                        }
+                    }
+                }
+
+                // Fallback: derive from velocity magnitude
                 let prev = self.prev_positions[i];
                 let curr = beings.positions[i];
                 let dx = curr[0] - prev[0];

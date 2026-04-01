@@ -148,6 +148,27 @@ impl TerrainRenderer {
             }
         }
 
+        // Pass 2b: desert dune variation — sine-wave pattern over desert cells for sand ridges
+        for y in 0..th_usize {
+            for x in 0..tw_usize {
+                let i = y * tw_usize + x;
+                if terrain.biome[i] != Biome::Desert {
+                    continue;
+                }
+                // Two sine waves at different angles simulate wind-blown dune ridges
+                let fx = x as f32;
+                let fy = y as f32;
+                let dune = (((fx * 0.18 + fy * 0.07).sin() + (fx * 0.05 - fy * 0.22).sin()) * 0.5)
+                    .clamp(-1.0, 1.0);
+                // dune in [-1,1]; map to a brightness shift of ±12
+                let shift = (dune * 12.0) as i16;
+                let base = i * 4;
+                pixels[base]     = (pixels[base]     as i16 + shift).clamp(0, 255) as u8;
+                pixels[base + 1] = (pixels[base + 1] as i16 + (shift / 2)).clamp(0, 255) as u8;
+                // blue channel unchanged — keeps warm desert tone
+            }
+        }
+
         // Pass 3: directional shadow — sun from northwest
         // Copy pixels to read from while writing to original
         let shadow_src = pixels.clone();
@@ -181,6 +202,88 @@ impl TerrainRenderer {
                         pixels[base + 1] = (shadow_src[base + 1] as f32 * 1.05).min(255.0) as u8;
                         pixels[base + 2] = (shadow_src[base + 2] as f32 * 1.05).min(255.0) as u8;
                     }
+                }
+            }
+        }
+
+        // Pass 4: water depth — BFS-style neighbor count to darken deep water cells
+        // shallow=(24,120,220), deep=(15,60,150); lerp by depth 0–5
+        let depth_src = pixels.clone();
+        for y in 0..th_usize {
+            for x in 0..tw_usize {
+                let i = y * tw_usize + x;
+                if terrain.biome[i] != Biome::Water {
+                    continue;
+                }
+                // Count how many of 8 neighbors (up to radius 5) are also water
+                // Simplified: check orthogonal neighbors at distance 1–5
+                let mut water_neighbors = 0u32;
+                for dist in 1usize..=5 {
+                    for &(dx, dy) in &[(0isize, dist as isize), (0, -(dist as isize)),
+                                       (dist as isize, 0), (-(dist as isize), 0)] {
+                        let nx = x as isize + dx;
+                        let ny = y as isize + dy;
+                        if nx >= 0 && nx < tw_usize as isize && ny >= 0 && ny < th_usize as isize {
+                            let ni = ny as usize * tw_usize + nx as usize;
+                            if terrain.biome[ni] == Biome::Water {
+                                water_neighbors += 1;
+                            }
+                        }
+                    }
+                }
+                // 20 total neighbor samples (5 dists × 4 dirs); depth_t in [0,1]
+                let depth_t = (water_neighbors as f32 / 20.0).min(1.0);
+                let base = i * 4;
+                let sr = depth_src[base]     as f32;
+                let sg = depth_src[base + 1] as f32;
+                let sb = depth_src[base + 2] as f32;
+                // Lerp toward deep blue (15,60,150)
+                pixels[base]     = (sr + (15.0  - sr) * depth_t).clamp(0.0, 255.0) as u8;
+                pixels[base + 1] = (sg + (60.0  - sg) * depth_t).clamp(0.0, 255.0) as u8;
+                pixels[base + 2] = (sb + (150.0 - sb) * depth_t).clamp(0.0, 255.0) as u8;
+            }
+        }
+
+        // Pass 5: biome-edge blend — soften harsh biome transitions
+        // For each land cell with a neighbor of a different biome, lerp 30% toward neighbor color
+        let edge_src = pixels.clone();
+        for y in 0..th_usize {
+            for x in 0..tw_usize {
+                let i = y * tw_usize + x;
+                if terrain.biome[i] == Biome::Water {
+                    continue;
+                }
+                let neighbors = [
+                    (x.wrapping_sub(1), y),
+                    (x + 1, y),
+                    (x, y.wrapping_sub(1)),
+                    (x, y + 1),
+                ];
+                let mut blend_r = 0.0f32;
+                let mut blend_g = 0.0f32;
+                let mut blend_b = 0.0f32;
+                let mut mismatch_count = 0u32;
+                for &(nx, ny) in &neighbors {
+                    if nx >= tw_usize || ny >= th_usize {
+                        continue;
+                    }
+                    let ni = ny * tw_usize + nx;
+                    if terrain.biome[ni] != terrain.biome[i] && terrain.biome[ni] != Biome::Water {
+                        blend_r += edge_src[ni * 4]     as f32;
+                        blend_g += edge_src[ni * 4 + 1] as f32;
+                        blend_b += edge_src[ni * 4 + 2] as f32;
+                        mismatch_count += 1;
+                    }
+                }
+                if mismatch_count > 0 {
+                    let inv = 1.0 / mismatch_count as f32;
+                    let base = i * 4;
+                    let cr = edge_src[base]     as f32;
+                    let cg = edge_src[base + 1] as f32;
+                    let cb = edge_src[base + 2] as f32;
+                    pixels[base]     = (cr + (blend_r * inv - cr) * 0.3).clamp(0.0, 255.0) as u8;
+                    pixels[base + 1] = (cg + (blend_g * inv - cg) * 0.3).clamp(0.0, 255.0) as u8;
+                    pixels[base + 2] = (cb + (blend_b * inv - cb) * 0.3).clamp(0.0, 255.0) as u8;
                 }
             }
         }

@@ -1356,6 +1356,152 @@ impl ApplicationHandler for App {
                         });
                 }
 
+                // ── Floating emotion icon above selected being ─────────────────
+                if let Some(sel_idx) = self.inspector.selected_being {
+                    if let Some(ref world) = self.world {
+                        let world = world.read().unwrap();
+                        if sel_idx < world.beings.count
+                            && world.beings.states[sel_idx]
+                                != emergence_core::being::data::BeingState::Dead
+                        {
+                            let pos = world.beings.positions[sel_idx];
+                            let emos = &world.beings.emotions[sel_idx];
+                            // Find dominant emotion
+                            let (dom_idx, dom_val) = {
+                                let mut bi = 0usize;
+                                let mut bv = 0.0f32;
+                                for e in 0..6 {
+                                    if emos[e] > bv {
+                                        bv = emos[e];
+                                        bi = e;
+                                    }
+                                }
+                                (bi, bv)
+                            };
+                            let emo_label = match dom_idx {
+                                0 => "Fear",
+                                1 => "Joy",
+                                2 => "Curiosity",
+                                3 => "Anger",
+                                4 => "Grief",
+                                5 => "Content",
+                                _ => "",
+                            };
+                            let emo_color = match dom_idx {
+                                0 => egui::Color32::from_rgb(160, 80, 230),  // purple
+                                1 => egui::Color32::from_rgb(255, 220, 30),  // yellow
+                                2 => egui::Color32::from_rgb(255, 145, 30),  // orange
+                                3 => egui::Color32::from_rgb(230, 50, 50),   // red
+                                4 => egui::Color32::from_rgb(70, 100, 240),  // blue
+                                5 => egui::Color32::from_rgb(60, 210, 80),   // green
+                                _ => egui::Color32::WHITE,
+                            };
+
+                            let screen_w = rs.surface_config.width as f32;
+                            let screen_h = rs.surface_config.height as f32;
+
+                            if let Some([sx, sy]) = self.camera.world_to_screen(
+                                pos[0], pos[1], screen_w, screen_h,
+                            ) {
+                                let label_text = if dom_val > 0.05 {
+                                    format!("{} {:.0}%", emo_label, dom_val * 100.0)
+                                } else {
+                                    "Neutral".to_string()
+                                };
+                                let label_color = if dom_val > 0.05 {
+                                    emo_color
+                                } else {
+                                    egui::Color32::from_rgba_unmultiplied(200, 200, 200, 180)
+                                };
+
+                                // Float label above being sprite (offset up by ~30px)
+                                let label_pos = egui::pos2(sx, sy - 28.0);
+
+                                egui::Area::new(egui::Id::new("selected_being_emotion"))
+                                    .fixed_pos(egui::pos2(0.0, 0.0))
+                                    .order(egui::Order::Foreground)
+                                    .interactable(false)
+                                    .show(&self.egui_ctx, |ui| {
+                                        let painter = ui.painter();
+                                        // Shadow
+                                        painter.text(
+                                            label_pos + egui::Vec2::new(1.0, 1.0),
+                                            egui::Align2::CENTER_BOTTOM,
+                                            &label_text,
+                                            egui::FontId::proportional(13.0),
+                                            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 200),
+                                        );
+                                        // Label
+                                        painter.text(
+                                            label_pos,
+                                            egui::Align2::CENTER_BOTTOM,
+                                            &label_text,
+                                            egui::FontId::proportional(13.0),
+                                            label_color,
+                                        );
+                                        // Selection ring around being
+                                        let pixels_per_unit = screen_h / self.camera.zoom;
+                                        let ring_r = 1.3 * pixels_per_unit;
+                                        if ring_r > 2.0 {
+                                            painter.circle_stroke(
+                                                egui::pos2(sx, sy),
+                                                ring_r,
+                                                egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 180)),
+                                            );
+                                        }
+                                    });
+                            }
+                        }
+                    }
+                }
+
+                // ── Heatmap channel legend ─────────────────────────────────────
+                if let Some(ref hm) = self.heatmap_renderer {
+                    if let Some(channel) = hm.active_channel {
+                        let (channel_name, channel_desc, channel_color) = match channel {
+                            emergence_core::world::signal::SignalChannel::Danger =>
+                                ("DANGER", "F1 — Fear/threat signals. High = fleeing beings.", egui::Color32::from_rgb(220, 50, 50)),
+                            emergence_core::world::signal::SignalChannel::FoodTrail =>
+                                ("FOOD TRAIL", "F2 — Food scent. Beings follow to find resources.", egui::Color32::from_rgb(80, 200, 80)),
+                            emergence_core::world::signal::SignalChannel::Comfort =>
+                                ("COMFORT", "F3 — Safe/home signal. Beings cluster in high areas.", egui::Color32::from_rgb(120, 180, 255)),
+                            emergence_core::world::signal::SignalChannel::Grief =>
+                                ("GRIEF", "F4 — Grief signals. Accumulates near death sites.", egui::Color32::from_rgb(70, 100, 240)),
+                            emergence_core::world::signal::SignalChannel::Celebration =>
+                                ("CELEBRATION", "F5 — Joy/celebration. Spreads during births and bonds.", egui::Color32::from_rgb(255, 220, 30)),
+                            emergence_core::world::signal::SignalChannel::Anger =>
+                                ("ANGER", "F6 — Anger/conflict. High near fights and theft.", egui::Color32::from_rgb(220, 80, 30)),
+                            emergence_core::world::signal::SignalChannel::Scent =>
+                                ("SCENT", "F7 — Cultural identity. Beings recognize group members.", egui::Color32::from_rgb(200, 120, 220)),
+                        };
+
+                        egui::Area::new(egui::Id::new("heatmap_legend"))
+                            .fixed_pos(egui::pos2(12.0, 60.0))
+                            .order(egui::Order::Foreground)
+                            .interactable(false)
+                            .show(&self.egui_ctx, |ui| {
+                                egui::Frame::new()
+                                    .fill(egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160))
+                                    .inner_margin(egui::Margin::symmetric(8, 6))
+                                    .corner_radius(egui::CornerRadius::same(4))
+                                    .show(ui, |ui| {
+                                        ui.colored_label(channel_color, channel_name);
+                                        ui.label(
+                                            egui::RichText::new(channel_desc)
+                                                .small()
+                                                .color(egui::Color32::from_rgba_unmultiplied(210, 210, 210, 220)),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new("Press same key again to hide")
+                                                .small()
+                                                .italics()
+                                                .color(egui::Color32::from_rgba_unmultiplied(160, 160, 160, 180)),
+                                        );
+                                    });
+                            });
+                    }
+                }
+
                 self.onboarding.show(&self.egui_ctx);
             }
             ScreenState::PauseMenu => {

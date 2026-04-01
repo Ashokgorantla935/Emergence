@@ -11,7 +11,7 @@ use wgpu::util::DeviceExt;
 use crate::animation::AnimationManager;
 use crate::atlas::generator::SKIN_TONES;
 
-/// Instance data per being (60 bytes, matches being_sprite.wgsl layout).
+/// Instance data per being (64 bytes, matches being_sprite.wgsl layout).
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct BeingInstance {
@@ -23,7 +23,9 @@ pub struct BeingInstance {
     pub size:         f32,      // 4B  -- world units
     pub brightness:   f32,      // 4B  -- 1.5 when need < 0.3
     pub alpha:        f32,      // 4B  -- 0.5 sleeping, 0.3 dying, 1.0 normal
-    pub _pad:         f32,      // 4B  -- pad to 64 bytes for alignment
+    /// Encoded: sign = facing direction (+1.0 right, -1.0 left = flip UV).
+    /// Magnitude = per-being bob phase offset (radians). Zero when idle (no bob).
+    pub bob_flip:     f32,      // 4B  -- sign(flip_x) * bob_phase; 0.0 = idle/no-flip
 }
 // 64 bytes. 11,500 instances = 736KB.
 
@@ -81,12 +83,14 @@ impl BeingRenderer {
 
     /// Update instance buffer from engine state. Called every frame.
     /// `frame_frac` is the fractional progress into the current tick (0..1) for interpolation.
+    /// `game_tick` is the current simulation tick (for bob phase).
     pub fn update(
         &mut self,
         queue:      &wgpu::Queue,
         beings:     &Beings,
         anim:       &AnimationManager,
         frame_frac: f32,
+        game_tick:  u32,
     ) {
         // Grow prev_positions buffer to cover all being slots
         if self.prev_positions.len() < beings.count {
@@ -132,6 +136,25 @@ impl BeingRenderer {
                 prev[1] + (cur[1] - prev[1]) * t,
             ];
 
+            // Bob + flip: check if moving by comparing velocity magnitude.
+            // Encode both into one f32: sign = facing dir, magnitude = bob phase.
+            let vel = beings.velocities[i];
+            let speed_sq = vel[0] * vel[0] + vel[1] * vel[1];
+            let is_walking = speed_sq > 0.0001;
+            // flip_sign: +1.0 = face right (default), -1.0 = face left
+            let flip_sign = if vel[0] < -0.01 { -1.0f32 } else { 1.0f32 };
+            let bob_flip = if is_walking {
+                // Bob phase: game_tick * 0.18 + being_id * 0.72
+                let phase = game_tick as f32 * 0.18 + i as f32 * 0.72;
+                // Encode: sign = facing, magnitude = phase (never exactly 0 when walking)
+                // Use phase offset so it's never 0: add pi/4 minimum
+                flip_sign * (phase + std::f32::consts::FRAC_PI_4)
+            } else {
+                // Idle: no bob, but preserve facing from last known velocity (default right)
+                // Use 0.0 to signal idle; shader will detect abs < 0.001 as idle
+                0.0
+            };
+
             instances.push(BeingInstance {
                 position,
                 atlas_uv,
@@ -141,7 +164,7 @@ impl BeingRenderer {
                 size,
                 brightness,
                 alpha,
-                _pad: 0.0,
+                bob_flip,
             });
         }
 

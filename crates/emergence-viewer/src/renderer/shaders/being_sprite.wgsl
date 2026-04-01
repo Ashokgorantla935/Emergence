@@ -1,8 +1,9 @@
 // Sprite shader for being instances.
 // Renders instanced billboard quads sampling the 512x512 pixel-art atlas.
 // Enforces 8px minimum screen size so beings are never invisible dots.
-// Idle bob: subtle sine-wave Y offset per being (max 1.5% of size).
-// Shadow: bottom 15% of sprite darkened as a fake ground shadow.
+// Walking bob: sine-wave Y offset only when moving (bob_flip != 0).
+// Outline: 1px black border sampled from neighboring texels.
+// Shadow: elliptical oval beneath each sprite.
 
 struct CameraUniform {
     view_proj:            mat4x4<f32>,
@@ -39,7 +40,9 @@ struct InstanceInput {
     @location(6) size:         f32,        // world-unit size
     @location(7) brightness:   f32,        // multiplier (1.5 when urgent)
     @location(8) alpha:        f32,        // opacity
-    @location(9) _pad:         f32,        // alignment pad
+    /// Encoded: sign = facing dir (+1 right, -1 left). Magnitude = bob phase.
+    /// Exactly 0.0 means idle (no bob, no flip needed — default face right).
+    @location(9) bob_flip:     f32,
 };
 
 // ── Vertex output ────────────────────────────────────────────────────────────
@@ -52,6 +55,9 @@ struct VertexOutput {
     @location(3) brightness:   f32,
     @location(4) alpha:        f32,
     @location(5) local_v:      f32,   // vertex V in [0,1]: 0=top, 1=bottom
+    @location(6) local_u:      f32,   // vertex U in [0,1]: 0=left, 1=right
+    @location(7) atlas_uv:     vec2<f32>,  // passed through for outline sampling
+    @location(8) atlas_size:   vec2<f32>,  // passed through for outline sampling
 };
 
 // ── Vertex shader ────────────────────────────────────────────────────────────
@@ -60,15 +66,22 @@ struct VertexOutput {
 fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
 
-    // FIX 6: 8px minimum — smaller beings feel more numerous (WorldBox aesthetic)
+    // 8px minimum — smaller beings feel more numerous (WorldBox aesthetic)
     let screen_size = max(instance.size * camera.pixels_per_unit, 8.0);
     let final_size  = screen_size / camera.pixels_per_unit;
 
-    // Idle bob: per-being sine offset on Y.
-    // Use world_pos.x as a unique-enough per-being phase seed.
-    // Max offset = 1.5% of final_size, frequency 2 rad/s.
-    let phase      = instance.world_pos.x * 1.7 + instance.world_pos.y * 0.9;
-    let bob_offset = sin(time_u.time * 2.0 + phase) * 0.015 * final_size;
+    // Walking bob: only when bob_flip != 0 (moving).
+    // bob_flip encodes: sign = facing direction, magnitude = phase (game_tick * 0.18 + id * 0.72).
+    // Amplitude 1.25 world pixels = 1.25 / pixels_per_unit world units.
+    let bob_amplitude = 1.25 / max(camera.pixels_per_unit, 1.0);
+    var bob_offset = 0.0;
+    if (abs(instance.bob_flip) > 0.001) {
+        let phase = abs(instance.bob_flip);
+        bob_offset = sin(phase) * bob_amplitude;
+    }
+
+    // Horizontal flip: if bob_flip < 0, facing left — mirror UV horizontally.
+    let flip_sign = select(1.0, -1.0, instance.bob_flip < -0.001);
 
     // Billboard quad centred on world_pos, shifted up by bob.
     var pos = instance.world_pos;
@@ -77,13 +90,21 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     out.clip_position = camera.view_proj * vec4<f32>(world_xy, 0.0, 1.0);
 
     // Map vertex [-0.5,0.5] to atlas UV within the cell.
-    out.uv           = instance.atlas_uv + (vertex.vertex_pos + vec2<f32>(0.5, 0.5)) * instance.atlas_size;
+    // Apply horizontal flip by mirroring the U component around cell center.
+    let local_uv = vertex.vertex_pos + vec2<f32>(0.5, 0.5); // [0,1]
+    // Flip U: if flip_sign = -1, u becomes 1 - u within cell
+    let flipped_u = select(local_uv.x, 1.0 - local_uv.x, flip_sign < 0.0);
+    let cell_uv   = vec2<f32>(flipped_u, local_uv.y);
+    out.uv           = instance.atlas_uv + cell_uv * instance.atlas_size;
+    out.atlas_uv     = instance.atlas_uv;
+    out.atlas_size   = instance.atlas_size;
     out.emotion_tint = instance.emotion_tint;
     out.skin_tone    = instance.skin_tone;
     out.brightness   = instance.brightness;
     out.alpha        = instance.alpha;
     // vertex_pos.y = -0.5 at bottom, +0.5 at top → local_v 1.0 at bottom, 0.0 at top
     out.local_v      = 0.5 - vertex.vertex_pos.y;
+    out.local_u      = local_uv.x;
     return out;
 }
 
@@ -92,23 +113,41 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let atlas_color = textureSample(sprite_atlas, atlas_sampler, in.uv);
+    let alpha = atlas_color.a;
 
-    // Discard transparent pixels (alpha threshold 0.1 = nearly transparent).
-    if atlas_color.a < 0.1 {
+    // Pixel size in atlas UV space (atlas is 512x512)
+    let px = 1.0 / 512.0;
+
+    // Transparent pixel: check for outline or shadow before discarding.
+    if (alpha < 0.1) {
+        // 1px black outline: sample 4 adjacent texels in atlas space.
+        let n = textureSample(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(0.0,  -px)).a;
+        let s = textureSample(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(0.0,   px)).a;
+        let e = textureSample(sprite_atlas, atlas_sampler, in.uv + vec2<f32>( px,  0.0)).a;
+        let w = textureSample(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(-px,  0.0)).a;
+        if (n > 0.5 || s > 0.5 || e > 0.5 || w > 0.5) {
+            return vec4<f32>(0.05, 0.03, 0.02, 0.9);
+        }
+
+        // Elliptical ground shadow: bottom 15% of quad, oval shape.
+        // local_v: 0=top, 1=bottom. local_u: 0=left, 1=right.
+        let shadow_y = (in.local_v - 0.85) / 0.15; // ramps 0→1 in bottom 15%
+        if (shadow_y > 0.0 && shadow_y < 1.0) {
+            let shadow_x = (in.local_u - 0.5) * 2.0; // -1 to 1
+            let dist = shadow_x * shadow_x + shadow_y * shadow_y;
+            if (dist < 1.0) {
+                return vec4<f32>(0.0, 0.0, 0.0, 0.4 * (1.0 - dist));
+            }
+        }
+
         discard;
     }
 
-    // FIX 3: two-tone sprite — atlas encodes skin pixels as near-white (r>0.7),
-    // cloth pixels as mid-gray (r~0.5). Threshold selects skin_tone vs emotion_tint.
+    // Opaque/semi-opaque pixel: two-tone sprite coloring.
+    // Atlas encodes skin pixels as near-white (r>0.7), cloth as mid-gray (r~0.5).
     let is_skin = atlas_color.r > 0.7;
     let pixel_color = select(in.emotion_tint, in.skin_tone, is_skin);
-    var final_rgb = pixel_color * in.brightness;
+    let final_rgb = pixel_color * in.brightness;
 
-    // Shadow: darken the bottom 15% of the sprite quad.
-    // local_v goes from 0 (top) to 1 (bottom).
-    // smoothstep gives a soft gradient from 0.85→1.0 (15% band).
-    let shadow_strength = smoothstep(0.82, 1.0, in.local_v) * 0.55;
-    final_rgb = final_rgb * (1.0 - shadow_strength);
-
-    return vec4<f32>(final_rgb, atlas_color.a * in.alpha);
+    return vec4<f32>(final_rgb, alpha * in.alpha);
 }

@@ -66,7 +66,7 @@ impl Default for Particle {
     }
 }
 
-/// 15 emitter types — 12 original + 3 emotion event emitters.
+/// 18 emitter types — 12 original + 3 emotion event emitters + 3 juice emitters.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EmitterKind {
     BirthSparkle,
@@ -85,6 +85,9 @@ pub enum EmitterKind {
     EmotionJoy,    // yellow sparkle upward
     EmotionAnger,  // red flash burst
     EmotionGrief,  // blue teardrop floating up
+    // Juice effects
+    PlopDust,      // white→grey dust puff on god-tool spawn (spec exact)
+    TalkBubble,    // single emoji sprite above being head (60-tick lifetime)
 }
 
 pub struct ParticleSystem {
@@ -333,8 +336,52 @@ impl ParticleSystem {
                     alive:        true,
                 });
             }
+            EmitterKind::PlopDust => {
+                // Spec-exact: 6-8 radial dust particles, white→grey, quadratic alpha decay.
+                let count = 6 + (fastrand::f32() * 2.5) as usize; // 6 or 7
+                for i in 0..count {
+                    let angle = (i as f32) * std::f32::consts::TAU / (count as f32)
+                        + fastrand::f32() * 0.4;
+                    let speed = 0.5 + fastrand::f32() * 1.0; // 0.5-1.5 px/frame
+                    let lifetime = 12.0 + fastrand::f32() * 8.0; // 12-20 frames
+                    // Grey level interpolated: white (1.0) base, light grey (0.8) tint
+                    let grey = 0.8 + fastrand::f32() * 0.2;
+                    self.spawn(Particle {
+                        position:     origin,
+                        velocity:     [angle.cos() * speed, angle.sin() * speed],
+                        color:        [grey, grey, grey, 0.8],
+                        lifetime,
+                        max_lifetime: lifetime,
+                        size:         0.2, // starts ~2px, shrinks linearly via life_frac
+                        sprite_uv:    UV_SPARKLE,
+                        alive:        true,
+                    });
+                }
+            }
+            EmitterKind::TalkBubble => {
+                // 1% chance per tick, 60-tick lifetime, 5 emoji types cycling by tick.
+                // Single non-moving particle above the being.
+                let emoji_row = (tick % 5) as f32; // 0=heart, 1=soul, 2=sparkle, 3=flash, 4=zzz
+                let sprite_uv = match tick % 5 {
+                    0 => UV_HEART,
+                    1 => UV_SOUL,
+                    2 => UV_SPARKLE,
+                    3 => UV_FLASH,
+                    _ => UV_ZZZ,
+                };
+                let _ = emoji_row;
+                self.spawn(Particle {
+                    position:     [origin[0], origin[1] - 1.2], // above head
+                    velocity:     [0.0, 0.0],                    // stationary
+                    color:        [1.0, 1.0, 1.0, 1.0],
+                    lifetime:     60.0,
+                    max_lifetime: 60.0,
+                    size:         0.4,
+                    sprite_uv,
+                    alive:        true,
+                });
+            }
         }
-        let _ = tick; // reserved for future seeding
     }
 
     /// Advance all particles one tick and upload to GPU.

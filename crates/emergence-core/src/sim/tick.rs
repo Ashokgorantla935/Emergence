@@ -580,14 +580,14 @@ fn process_births(world: &mut World) {
             continue;
         }
 
-        // Birth cooldown: 1000 ticks (~2 min at 8t/s) per parent
-        if i < world.beings.last_birth_tick.len() && tick.saturating_sub(world.beings.last_birth_tick[i]) < 1000 {
+        // Birth cooldown: 400 ticks (~50s at 8t/s) per parent
+        if i < world.beings.last_birth_tick.len() && tick.saturating_sub(world.beings.last_birth_tick[i]) < 400 {
             continue;
         }
 
-        // Find any adult partner nearby within 8 cells (no relationship required)
+        // Find any adult partner nearby within 10 cells (no relationship required)
         let pos = world.beings.positions[i];
-        let nearby = world.spatial.query_radius_with_positions(pos[0], pos[1], 8.0, &world.beings.positions);
+        let nearby = world.spatial.query_radius_with_positions(pos[0], pos[1], 10.0, &world.beings.positions);
         for partner in nearby {
             // Only check from the lower index to prevent both parents triggering birth
             if partner <= i {
@@ -602,7 +602,7 @@ fn process_births(world: &mut World) {
             }
 
             // Partner cooldown check
-            if partner < world.beings.last_birth_tick.len() && tick.saturating_sub(world.beings.last_birth_tick[partner]) < 1000 {
+            if partner < world.beings.last_birth_tick.len() && tick.saturating_sub(world.beings.last_birth_tick[partner]) < 400 {
                 continue;
             }
 
@@ -621,9 +621,9 @@ fn process_births(world: &mut World) {
             // Carrying capacity = map_size / 40. Uses human-only count so fauna don't inflate the cap.
             // At low population: near full rate. Near capacity: rate drops to near zero.
             let human_alive = world.beings.human_count as f32;
-            let carrying_capacity = (world.config.size.0 * world.config.size.1) as f32 / 40.0;
+            let carrying_capacity = (world.config.size.0 * world.config.size.1) as f32 / 25.0;
             let density_factor = (1.0 - human_alive / carrying_capacity).max(0.0);
-            let birth_prob = 0.0008 * density_factor;
+            let birth_prob = 0.003 * density_factor;
             if world.rng.f32() > birth_prob {
                 continue;
             }

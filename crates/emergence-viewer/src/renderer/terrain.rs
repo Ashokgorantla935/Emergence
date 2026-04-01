@@ -15,6 +15,43 @@ struct TerrainVertex {
     uv: [f32; 2],
 }
 
+/// Non-power-of-two hash — avoids the visible grid pattern from linear multipliers.
+/// Knuth multiplicative hash with XOR fold; produces no visible banding.
+fn cell_hash(x: usize, y: usize) -> usize {
+    let h = x.wrapping_mul(2654435761) ^ y.wrapping_mul(2246822519);
+    ((h >> 16) ^ h) % 5
+}
+
+/// Struct holding sampled RGBA rows from a loaded tileset image.
+struct Tileset {
+    pixels: Vec<u8>, // RGBA row-major
+    width: u32,
+    height: u32,
+}
+
+impl Tileset {
+    fn load(path: &str) -> Option<Self> {
+        let img = image::open(path).ok()?.into_rgba8();
+        let (width, height) = img.dimensions();
+        let pixels = img.into_raw();
+        Some(Tileset { pixels, width, height })
+    }
+
+    /// Sample a single pixel from (px, py), clamping to image bounds.
+    fn pixel(&self, px: u32, py: u32) -> [u8; 3] {
+        let px = px.min(self.width - 1);
+        let py = py.min(self.height - 1);
+        let base = ((py * self.width + px) * 4) as usize;
+        [self.pixels[base], self.pixels[base + 1], self.pixels[base + 2]]
+    }
+
+    /// Sample pixel from a 16×16 tile at grid position (tile_x, tile_y),
+    /// using (local_x, local_y) within that tile.
+    fn tile_pixel(&self, tile_x: u32, tile_y: u32, local_x: u32, local_y: u32) -> [u8; 3] {
+        self.pixel(tile_x * 16 + local_x, tile_y * 16 + local_y)
+    }
+}
+
 impl TerrainRenderer {
     pub fn new(
         device: &wgpu::Device,
@@ -46,6 +83,37 @@ impl TerrainRenderer {
             usage: wgpu::BufferUsages::INDEX,
         });
 
+        // Load Sunnyside 16px tileset for natural terrain variation.
+        // Tile grid coordinates (tx, ty) identified from the 1024×1024 atlas:
+        //   Grassland : (2,3)  — R100 G199 B77   bright grass
+        //   Wetland   : (6,7)  — R94  G189 B89   darker grass w/ variation
+        //   Forest    : (20,19)— R72  G122 B64   dark forest floor
+        //   Desert    : (5,1)  — R228 G213 B114  warm sand
+        //   Mountain  : (19,10)— R159 G158 B147  stone grey
+        //   Water     : (12,19)— R1   G154 B219  clear blue water
+        let tileset_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/sprites/packs/",
+            "Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/",
+            "Sunnyside_World_Assets/Tileset/spr_tileset_sunnysideworld_16px.png"
+        );
+        let tileset = Tileset::load(tileset_path);
+
+        // Biome tile origins in the atlas (tile_x, tile_y).
+        // Each biome has a primary tile and 2 alternate tiles for variation.
+        // Grass variants: (2,3) (3,3) (4,3) — all natural grass
+        // Desert variants: (5,1) (7,1) (8,1)
+        // Forest variants: (20,19) (28,19) (30,19)
+        // Mountain variants: (19,10) (21,12) (27,12)
+        // Water variants: (12,19) (13,19) (14,19)
+        // Wetland variants: (6,7) (8,7) (17,7)
+        const GRASS_TILES:    [(u32,u32);3] = [(2,3),(3,3),(4,3)];
+        const DESERT_TILES:   [(u32,u32);3] = [(5,1),(7,1),(8,1)];
+        const FOREST_TILES:   [(u32,u32);3] = [(20,19),(28,19),(30,19)];
+        const MOUNTAIN_TILES: [(u32,u32);3] = [(19,10),(21,12),(27,12)];
+        const WATER_TILES:    [(u32,u32);3] = [(12,19),(13,19),(14,19)];
+        const WETLAND_TILES:  [(u32,u32);3] = [(6,7),(8,7),(17,7)];
+
         // Create biome color texture
         let tw = terrain.width;
         let th = terrain.height;
@@ -53,46 +121,49 @@ impl TerrainRenderer {
         let th_usize = th as usize;
         let mut pixels = vec![0u8; (tw * th * 4) as usize];
 
-        // Pass 1: base biome color + noise variants + snow caps + elevation shading
+        // Pass 1: base biome color — tileset-sampled or fallback solid color.
         for y in 0..th_usize {
             for x in 0..tw_usize {
                 let i = y * tw_usize + x;
                 let elev = terrain.elevation[i];
 
-                // Per-biome 3-variant noise using cell hash
-                let variant = ((x as u32).wrapping_mul(7).wrapping_add((y as u32).wrapping_mul(13)) % 3) as usize;
+                // 5-variant hash — no visible grid pattern
+                let variant = cell_hash(x, y);
+                // Local position within a 16×16 tile
+                let lx = (x % 16) as u32;
+                let ly = (y % 16) as u32;
 
-                let (r, g, b) = match terrain.biome[i] {
-                    Biome::Water => [
-                        (24u8, 120u8, 220u8),
-                        (18,   110,   210),
-                        (30,   130,   235),
-                    ][variant],
-                    Biome::Grassland => [
-                        (80u8, 190u8, 50u8),
-                        (70,   180,   45),
-                        (90,   200,   55),
-                    ][variant],
-                    Biome::Forest => [
-                        (20u8, 110u8, 20u8),
-                        (15,   100,   15),
-                        (25,   120,   25),
-                    ][variant],
-                    Biome::Desert => [
-                        (230u8, 195u8, 110u8),
-                        (220,   185,   100),
-                        (240,   205,   120),
-                    ][variant],
-                    Biome::Mountain => [
-                        (140u8, 135u8, 130u8),
-                        (130,   125,   120),
-                        (150,   145,   140),
-                    ][variant],
-                    Biome::Wetland => [
-                        (40u8, 150u8, 110u8),
-                        (35,   140,   100),
-                        (45,   160,   120),
-                    ][variant],
+                let (r, g, b) = if let Some(ts) = &tileset {
+                    let tiles = match terrain.biome[i] {
+                        Biome::Grassland => &GRASS_TILES,
+                        Biome::Forest    => &FOREST_TILES,
+                        Biome::Desert    => &DESERT_TILES,
+                        Biome::Mountain  => &MOUNTAIN_TILES,
+                        Biome::Water     => &WATER_TILES,
+                        Biome::Wetland   => &WETLAND_TILES,
+                    };
+                    let (tx, ty) = tiles[variant % 3];
+                    let [r, g, b] = ts.tile_pixel(tx, ty, lx, ly);
+                    (r, g, b)
+                } else {
+                    // Fallback: WorldBox palette — 5 variants with ±8 brightness variation.
+                    // Base colors from WORLDBOX_REPLICATION_SPEC.md exact hex values.
+                    let tweak = variant as i16 * 4 - 8; // -8..+8 (5 steps, no checkerboard)
+                    let tw = |v: u8| (v as i16 + tweak).clamp(0, 255) as u8;
+                    match terrain.biome[i] {
+                        // Shallow water: #0078f1 (deep handled by Pass 4)
+                        Biome::Water     => (tw(0),   tw(120), tw(241)),
+                        // Grassland: #aabd3d — the KEY WorldBox green
+                        Biome::Grassland => (tw(170), tw(189), tw(61)),
+                        // Forest: #507805
+                        Biome::Forest    => (tw(80),  tw(120), tw(5)),
+                        // Sand: #f8d878
+                        Biome::Desert    => (tw(248), tw(216), tw(120)),
+                        // Mountain: #70543b
+                        Biome::Mountain  => (tw(112), tw(84),  tw(59)),
+                        // Fertile Soil/Wetland: #678b00
+                        Biome::Wetland   => (tw(103), tw(139), tw(0)),
+                    }
                 };
 
                 // Elevation shading: tight range preserves saturation
@@ -140,9 +211,10 @@ impl TerrainRenderer {
                 });
                 if is_beach {
                     let base = i * 4;
-                    pixels[base]     = 210;
-                    pixels[base + 1] = 190;
-                    pixels[base + 2] = 130;
+                    // WorldBox sand: #f8d878
+                    pixels[base]     = 248;
+                    pixels[base + 1] = 216;
+                    pixels[base + 2] = 120;
                     // pixels[base + 3] already 255
                 }
             }
@@ -166,6 +238,38 @@ impl TerrainRenderer {
                 pixels[base]     = (pixels[base]     as i16 + shift).clamp(0, 255) as u8;
                 pixels[base + 1] = (pixels[base + 1] as i16 + (shift / 2)).clamp(0, 255) as u8;
                 // blue channel unchanged — keeps warm desert tone
+            }
+        }
+
+        // Pass 2c: elevation edge shadow — WorldBox "plateau" effect.
+        // When a cell is higher than its south or east neighbor by > 0.05,
+        // darken that neighbor's top edge (30% darkening) to create a ledge line.
+        for y in 0..th_usize {
+            for x in 0..tw_usize {
+                let i = y * tw_usize + x;
+                let elev = terrain.elevation[i];
+
+                // South neighbor
+                if y + 1 < th_usize {
+                    let si = (y + 1) * tw_usize + x;
+                    let neighbor_elev = terrain.elevation[si];
+                    if elev > neighbor_elev + 0.05 {
+                        pixels[si * 4]     = (pixels[si * 4]     as f32 * 0.70) as u8;
+                        pixels[si * 4 + 1] = (pixels[si * 4 + 1] as f32 * 0.70) as u8;
+                        pixels[si * 4 + 2] = (pixels[si * 4 + 2] as f32 * 0.70) as u8;
+                    }
+                }
+
+                // East neighbor
+                if x + 1 < tw_usize {
+                    let ei = y * tw_usize + (x + 1);
+                    let neighbor_elev = terrain.elevation[ei];
+                    if elev > neighbor_elev + 0.05 {
+                        pixels[ei * 4]     = (pixels[ei * 4]     as f32 * 0.70) as u8;
+                        pixels[ei * 4 + 1] = (pixels[ei * 4 + 1] as f32 * 0.70) as u8;
+                        pixels[ei * 4 + 2] = (pixels[ei * 4 + 2] as f32 * 0.70) as u8;
+                    }
+                }
             }
         }
 
@@ -237,10 +341,10 @@ impl TerrainRenderer {
                 let sr = depth_src[base]     as f32;
                 let sg = depth_src[base + 1] as f32;
                 let sb = depth_src[base + 2] as f32;
-                // Lerp toward deep blue (15,60,150)
-                pixels[base]     = (sr + (15.0  - sr) * depth_t).clamp(0.0, 255.0) as u8;
-                pixels[base + 1] = (sg + (60.0  - sg) * depth_t).clamp(0.0, 255.0) as u8;
-                pixels[base + 2] = (sb + (150.0 - sb) * depth_t).clamp(0.0, 255.0) as u8;
+                // Lerp toward WorldBox deep water #0048a1 (0, 72, 161)
+                pixels[base]     = (sr + (0.0   - sr) * depth_t).clamp(0.0, 255.0) as u8;
+                pixels[base + 1] = (sg + (72.0  - sg) * depth_t).clamp(0.0, 255.0) as u8;
+                pixels[base + 2] = (sb + (161.0 - sb) * depth_t).clamp(0.0, 255.0) as u8;
             }
         }
 
@@ -281,9 +385,10 @@ impl TerrainRenderer {
                     let cr = edge_src[base]     as f32;
                     let cg = edge_src[base + 1] as f32;
                     let cb = edge_src[base + 2] as f32;
-                    pixels[base]     = (cr + (blend_r * inv - cr) * 0.3).clamp(0.0, 255.0) as u8;
-                    pixels[base + 1] = (cg + (blend_g * inv - cg) * 0.3).clamp(0.0, 255.0) as u8;
-                    pixels[base + 2] = (cb + (blend_b * inv - cb) * 0.3).clamp(0.0, 255.0) as u8;
+                    // WorldBox spec: 20% neighbor color bleed at biome boundaries
+                    pixels[base]     = (cr + (blend_r * inv - cr) * 0.20).clamp(0.0, 255.0) as u8;
+                    pixels[base + 1] = (cg + (blend_g * inv - cg) * 0.20).clamp(0.0, 255.0) as u8;
+                    pixels[base + 2] = (cb + (blend_b * inv - cb) * 0.20).clamp(0.0, 255.0) as u8;
                 }
             }
         }

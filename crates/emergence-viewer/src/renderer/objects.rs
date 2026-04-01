@@ -255,9 +255,10 @@ impl ObjectRenderer {
                         continue;
                     }
 
-                    // Full 0.0–1.0 sub-cell jitter using different hash bits per axis/seed.
-                    let jitter_x = ((hash >> (4 + seed * 3)) % 100) as f32 * 0.01 - 0.5;
-                    let jitter_y = ((hash >> (10 + seed * 3)) % 100) as f32 * 0.01 - 0.5;
+                    // ±2px offset (±0.125 world units) — WorldBox tree scatter spec.
+                    // Uses independent hash bits per axis and seed to avoid correlation.
+                    let jitter_x = ((hash >> (4 + seed * 3)) % 5) as f32 * 0.05 - 0.10;
+                    let jitter_y = ((hash >> (10 + seed * 3)) % 5) as f32 * 0.05 - 0.10;
 
                     // Biome + seed -> sprite type, tint, size.
                     let (atlas_uv, tint, size) = match biome {

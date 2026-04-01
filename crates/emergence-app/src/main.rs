@@ -777,6 +777,28 @@ impl ApplicationHandler for App {
                                 _ => {}
                             }
                         }
+                        // Collect spawn positions for dust puff particles before draining
+                        let mut spawn_positions: Vec<[f32; 2]> = Vec::new();
+                        {
+                            use emergence_core::god_action::GodAction;
+                            for action in &self.god_tool_state.action_queue {
+                                match action {
+                                    GodAction::SpawnBeing { pos, .. }
+                                    | GodAction::SpawnBeingPreset { pos, .. } => {
+                                        spawn_positions.push(*pos);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        // Emit plop dust puffs at each spawn site
+                        if let Some(ref mut ps) = self.particle_system {
+                            use emergence_viewer::renderer::particles::EmitterKind;
+                            for pos in spawn_positions {
+                                ps.emit(EmitterKind::PlopDust, pos, 0);
+                            }
+                        }
+
                         let mut w = world.write().unwrap();
                         for action in self.god_tool_state.action_queue.drain(..) {
                             w.god_queue.push(action);
@@ -1113,7 +1135,7 @@ impl ApplicationHandler for App {
                 // At high speeds (many ticks/frame) we always render at 1.0.
                 // At Speed1x the tick runs at end of each frame so frac = 1.0.
                 let frame_frac = 1.0f32;
-                br.update(&rs.queue, &world.beings, &self.anim, frame_frac);
+                br.update(&rs.queue, &world.beings, &self.anim, frame_frac, world.tick as u32);
             }
             if let Some(ref hm) = self.heatmap_renderer {
                 hm.update(&rs.queue, &world.signals);
@@ -1206,6 +1228,24 @@ impl ApplicationHandler for App {
                         // Grief spike
                         if emos[EMO_GRIEF] > 0.55 {
                             ps.emit(EmitterKind::EmotionGrief, pos, world.tick);
+                        }
+                    }
+                }
+
+                // Talk bubbles: 1% chance per being per tick bucket (amortised over 100 ticks).
+                // Each tick checks bucket = tick % 100, stepping by 100 across all beings.
+                // Uses being ID hash for determinism (no RNG dependency in emergence-app).
+                {
+                    let bucket = (world.tick % 100) as usize;
+                    let beings = &world.beings;
+                    for i in (bucket..beings.count).step_by(100) {
+                        if beings.states[i] != emergence_core::being::data::BeingState::Dead {
+                            // ~1% hit rate: fire when (tick * being_id) hashes into low slot
+                            let hash = (world.tick.wrapping_mul(i as u32 + 1).wrapping_add(i as u32 * 2654435761)) % 100;
+                            if hash == 0 {
+                                let pos = beings.positions[i];
+                                ps.emit(EmitterKind::TalkBubble, pos, world.tick);
+                            }
                         }
                     }
                 }

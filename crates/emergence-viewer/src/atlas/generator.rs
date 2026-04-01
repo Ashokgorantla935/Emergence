@@ -2143,6 +2143,647 @@ pub fn compose_from_assets(packs_root: &str) -> (Vec<u8>, Vec<String>) {
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // PACK: overworld-pack-free_version
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // ── Overworld autotiles: Row 24 (terrain variety) ─────────────────────
+    // RPGMaker 48x80 autotile format: row 4 (y=64) = solid base tile 16x16
+    {
+        let ow_root = format!("{}/overworld-pack-free_version/autotiles", packs_root);
+        // free autotiles: grass(0), water(2), sand(7), snow(26)
+        let autotiles: &[(&str, usize, &str)] = &[
+            ("free_autotile_0.png",  0, "ow-grass"),
+            ("free_autotile_2.png",  1, "ow-water"),
+            ("free_autotile_7.png",  2, "ow-sand"),
+            ("free_autotile_26.png", 3, "ow-snow"),
+            ("autotile_1.png",       4, "ow-dirt"),
+            ("autotile_4.png",       5, "ow-rock"),
+            ("autotile_5.png",       6, "ow-forest"),
+            ("autotile_6.png",       7, "ow-swamp"),
+        ];
+        let mut mapped = 0usize;
+        for &(fname, atlas_col, name) in autotiles {
+            let path = format!("{}/{}", ow_root, fname);
+            if let Some(sheet) = load_png(&path) {
+                // RPGMaker autotile: 48x80. Row 4 (y=64) has the solid base tile.
+                // Each row is 16px tall, full tile is at (0,64,48,16) but the
+                // actual single tile we want is the center 16x16 block at (16,64).
+                if sheet.width() >= 48 && sheet.height() >= 80 {
+                    let tile = crop_and_scale(&sheet, 16, 64, 16, 16);
+                    blit_cell(&mut pixels, 24, atlas_col, &tile);
+                    mapped += 1;
+                    report.push(format!("MAPPED   row 24 col {:2} ({}): autotile base tile native 16x16", atlas_col, name));
+                }
+            } else {
+                report.push(format!("FALLBACK row 24 col {:2} ({}): not found", atlas_col, name));
+            }
+        }
+        let _ = mapped;
+    }
+
+    // ── Overworld chests: Row 24 cols 8-15 ───────────────────────────────
+    // free_chests.png = 216x256 — a sheet of chest sprites at varying sizes
+    {
+        let path = format!("{}/overworld-pack-free_version/sprite/free_chests.png", packs_root);
+        if let Some(sheet) = load_png(&path) {
+            // Treat as 16px grid — 13 cols x 16 rows. Sample first 8 cols row 0.
+            let mut mapped = 0usize;
+            for col in 0..8usize {
+                let sx = (col as u32) * 27; // ~27px per chest icon
+                let sw = 27u32.min(sheet.width().saturating_sub(sx));
+                if sw > 0 && 27 <= sheet.height() {
+                    let tile = crop_and_scale(&sheet, sx, 0, sw, 27);
+                    blit_cell(&mut pixels, 24, 8 + col, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 24 col 8-{} (ow-chests): {} cells from {}", 8 + mapped - 1, mapped, path));
+        } else {
+            report.push(format!("FALLBACK row 24 col 8-15 (ow-chests): not found"));
+        }
+    }
+
+    // ── Overworld icons1: Row 24 cols 16-18 ──────────────────────────────
+    // free_icons1.png = 48x64 = 3x4 of 16x16
+    {
+        let path = format!("{}/overworld-pack-free_version/sprite/free_icons1.png", packs_root);
+        if let Some(sheet) = load_png(&path) {
+            let mut mapped = 0usize;
+            for col in 0..3usize {
+                let sx = (col as u32) * 16;
+                if sx + 16 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 16, 16);
+                    blit_cell(&mut pixels, 24, 16 + col, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 24 col 16-{} (ow-icons1): {} cells from {}", 16 + mapped - 1, mapped, path));
+        } else {
+            report.push(format!("FALLBACK row 24 col 16-18 (ow-icons1): not found"));
+        }
+    }
+
+    // ── Overworld campfire: Row 24 cols 19-21 (48x128 = 3x8, 48px→16px) ─
+    {
+        let path = format!("{}/overworld-pack-free_version/sprite/free_campfire.png", packs_root);
+        if let Some(sheet) = load_png(&path) {
+            // 48x128 = 3 cols x 8 rows, each frame is 48x16 but downscale to 16x16
+            for frame in 0..3usize {
+                let sy = (frame as u32) * 16;
+                if sy + 16 <= sheet.height() {
+                    let tile = crop_and_scale(&sheet, 0, sy, 48, 16);
+                    blit_cell(&mut pixels, 24, 19 + frame, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 24 col 19-21 (ow-campfire): 3 frames from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 24 col 19-21 (ow-campfire): not found"));
+        }
+    }
+
+    // ── Overworld main atlas: Row 24 cols 22-31 ───────────────────────────
+    // atlas.png = 1024x256 = 64 cols x 16 rows of 16x16 — pick 10 diverse cells
+    {
+        let path = format!("{}/overworld-pack-free_version/atlas.png", packs_root);
+        if let Some(sheet) = load_png(&path) {
+            // Sample 10 evenly spaced tiles from the atlas (row 0 = terrain variety)
+            let sample_cols: &[u32] = &[0, 4, 8, 16, 24, 32, 40, 48, 56, 60];
+            let mut mapped = 0usize;
+            for (i, &sc) in sample_cols.iter().enumerate() {
+                let sx = sc * 16;
+                if sx + 16 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 16, 16);
+                    blit_cell(&mut pixels, 24, 22 + i, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 24 col 22-{} (ow-atlas-sample): {} cells from {}", 22 + mapped - 1, mapped, path));
+        } else {
+            report.push(format!("FALLBACK row 24 col 22-31 (ow-atlas): not found"));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // PACK: demo-character-idle (6 separate layer PNGs, 256x256 each)
+    // Each is a 16x16 grid at 16px. Use them for character overlay sprites.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // ── Demo character layers: Row 25 ─────────────────────────────────────
+    // 256x256 = 16x16 grid of 16x16 tiles (single idle frame at cell 0,0)
+    {
+        let demo_root = format!("{}/demo-character-idle", packs_root);
+        let layers: &[(&str, usize, &str)] = &[
+            ("head-idle.png",   0, "demo-head"),
+            ("hair-idle.png",   4, "demo-hair"),
+            ("eyes-idle.png",   8, "demo-eyes"),
+            ("torso-idle.png", 12, "demo-torso"),
+            ("shirt-idle.png", 16, "demo-shirt"),
+            ("legs-idle.png",  20, "demo-legs"),
+        ];
+        for &(fname, atlas_col, name) in layers {
+            let path = format!("{}/{}", demo_root, fname);
+            if let Some(sheet) = load_png(&path) {
+                // 256x256 sheet — each frame is likely 32x32 (8x8 grid).
+                // First 4 frames across row 0 → 4 cols in atlas
+                for frame in 0..4usize {
+                    let sx = (frame as u32) * 32;
+                    if sx + 32 <= sheet.width() && 32 <= sheet.height() {
+                        let tile = crop_and_scale(&sheet, sx, 0, 32, 32);
+                        blit_cell(&mut pixels, 25, atlas_col + frame, &tile);
+                    }
+                }
+                report.push(format!("MAPPED   row 25 col {}-{} ({}): 4 frames 32->16 from {}", atlas_col, atlas_col+3, name, path));
+            } else {
+                report.push(format!("FALLBACK row 25 col {} ({}): not found", atlas_col, name));
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // PACK: Sunnyside — characters (goblin, skeleton), plants, crops
+    // ═══════════════════════════════════════════════════════════════════════
+
+    let sunny_root = format!(
+        "{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets",
+        packs_root
+    );
+
+    // ── Sunnyside Goblin: Row 26 cols 0-7 ────────────────────────────────
+    // spr_idle_strip9.png = 768x64. Cell width = 768/9 = 85.3px → round to 85.
+    // spr_walk_strip8.png = 768x64. Cell width = 768/8 = 96px.
+    // We downscale each 64x64 (approx) frame to 16x16.
+    {
+        let idle_path = format!("{}/Characters/Goblin/PNG/spr_idle_strip9.png", sunny_root);
+        let walk_path = format!("{}/Characters/Goblin/PNG/spr_walk_strip8.png", sunny_root);
+        let mut col = 0usize;
+        if let Some(sheet) = load_png(&idle_path) {
+            let fw = sheet.width() / 9;
+            for frame in 0..4usize {
+                let sx = (frame as u32) * fw;
+                if sx + fw <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, fw, sheet.height());
+                    blit_cell(&mut pixels, 26, col, &tile);
+                    col += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 26 col 0-3 (goblin-idle): 4 frames from {}", idle_path));
+        } else {
+            report.push(format!("FALLBACK row 26 col 0-3 (goblin-idle): not found"));
+        }
+        if let Some(sheet) = load_png(&walk_path) {
+            let fw = sheet.width() / 8;
+            for frame in 0..4usize {
+                let sx = (frame as u32) * fw;
+                if sx + fw <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, fw, sheet.height());
+                    blit_cell(&mut pixels, 26, 4 + frame, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 26 col 4-7 (goblin-walk): 4 frames from {}", walk_path));
+        } else {
+            report.push(format!("FALLBACK row 26 col 4-7 (goblin-walk): not found"));
+        }
+    }
+
+    // ── Sunnyside Skeleton: Row 26 cols 8-15 ─────────────────────────────
+    // skeleton_idle_strip6.png = 576x64 → fw=96px
+    // skeleton_walk_strip8.png = 768x64 → fw=96px
+    {
+        let idle_path = format!("{}/Characters/Skeleton/PNG/skeleton_idle_strip6.png", sunny_root);
+        let walk_path = format!("{}/Characters/Skeleton/PNG/skeleton_walk_strip8.png", sunny_root);
+        if let Some(sheet) = load_png(&idle_path) {
+            let fw = sheet.width() / 6;
+            for frame in 0..4usize {
+                let sx = (frame as u32) * fw;
+                if sx + fw <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, fw, sheet.height());
+                    blit_cell(&mut pixels, 26, 8 + frame, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 26 col 8-11 (skeleton-idle): 4 frames from {}", idle_path));
+        } else {
+            report.push(format!("FALLBACK row 26 col 8-11 (skeleton-idle): not found"));
+        }
+        if let Some(sheet) = load_png(&walk_path) {
+            let fw = sheet.width() / 8;
+            for frame in 0..4usize {
+                let sx = (frame as u32) * fw;
+                if sx + fw <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, fw, sheet.height());
+                    blit_cell(&mut pixels, 26, 12 + frame, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 26 col 12-15 (skeleton-walk): 4 frames from {}", walk_path));
+        } else {
+            report.push(format!("FALLBACK row 26 col 12-15 (skeleton-walk): not found"));
+        }
+    }
+
+    // ── Sunnyside mushrooms + trees: Row 26 cols 16-27 ───────────────────
+    // spr_deco_mushroom_*_strip4.png = 64x16 = 4 frames x 16x16 (native!)
+    // spr_deco_tree_01_strip4.png = 128x34 → crop to 32x34, downscale
+    {
+        let shroom_files: &[(&str, usize, &str)] = &[
+            ("Elements/Plants/spr_deco_mushroom_blue_01_strip4.png", 16, "mushroom-blue1"),
+            ("Elements/Plants/spr_deco_mushroom_blue_02_strip4.png", 20, "mushroom-blue2"),
+            ("Elements/Plants/spr_deco_mushroom_red_01_strip4.png",  24, "mushroom-red"),
+        ];
+        for &(rel, start_col, name) in shroom_files {
+            let path = format!("{}/{}", sunny_root, rel);
+            if let Some(sheet) = load_png(&path) {
+                // 64x16 = 4 native 16x16 frames
+                let fw = sheet.width() / 4;
+                for frame in 0..4usize {
+                    let sx = (frame as u32) * fw;
+                    if sx + fw <= sheet.width() {
+                        let tile = crop_and_scale(&sheet, sx, 0, fw, sheet.height());
+                        blit_cell(&mut pixels, 26, start_col + frame, &tile);
+                    }
+                }
+                report.push(format!("MAPPED   row 26 col {}-{} ({}): 4 frames from {}", start_col, start_col+3, name, path));
+            } else {
+                report.push(format!("FALLBACK row 26 col {}-{} ({}): not found", start_col, start_col+3, name));
+            }
+        }
+    }
+
+    // ── Sunnyside crops: Row 27 — individual crop PNGs (tiny, centered) ──
+    // Each crop_XY.png is 5-16px. Blit centered into 16x16 cell.
+    // We use the ripest stage (highest number suffix) of each crop.
+    {
+        let crop_dir = format!("{}/Elements/Crops", sunny_root);
+        // (filename, atlas_col, label)
+        let crops: &[(&str, usize, &str)] = &[
+            ("wheat_05.png",       0, "wheat"),
+            ("carrot_05.png",      1, "carrot"),
+            ("cabbage_05.png",     2, "cabbage"),
+            ("beetroot_05.png",    3, "beetroot"),
+            ("kale_05.png",        4, "kale"),
+            ("sunflower_05.png",   5, "sunflower"),
+            ("potato_05.png",      6, "potato"),
+            ("pumpkin_05.png",     7, "pumpkin"),
+            ("parsnip_05.png",     8, "parsnip"),
+            ("radish_05.png",      9, "radish"),
+            ("cauliflower_05.png", 10, "cauliflower"),
+            ("crate_base.png",     11, "crate"),
+            ("seeds_generic.png",  12, "seeds"),
+            ("rock.png",           13, "rock-item"),
+            ("wood.png",           14, "wood-item"),
+            ("milk.png",           15, "milk"),
+            ("egg.png",            16, "egg"),
+            ("fish.png",           17, "fish-item"),
+            ("soil_01.png",        18, "soil"),
+            // Early growth stages for visual variety
+            ("wheat_00.png",       19, "wheat-seed"),
+            ("carrot_00.png",      20, "carrot-seed"),
+            ("cabbage_00.png",     21, "cabbage-seed"),
+        ];
+        let mut mapped = 0usize;
+        for &(fname, atlas_col, name) in crops {
+            let path = format!("{}/{}", crop_dir, fname);
+            if let Some(img) = load_png(&path) {
+                blit_cell_centered(&mut pixels, 27, atlas_col, &img);
+                mapped += 1;
+                report.push(format!("MAPPED   row 27 col {:2} (crop-{}): {}x{} centered from {}", atlas_col, name, img.width(), img.height(), fname));
+            } else {
+                report.push(format!("FALLBACK row 27 col {:2} (crop-{}): not found", atlas_col, name));
+            }
+        }
+        let _ = mapped;
+    }
+
+    // ── Sunnyside tileset: Row 28 — comprehensive 1024x1024 16px sheet ───
+    // Sample rows 1-2 (terrain variety not already covered)
+    {
+        let path = format!(
+            "{}/Tileset/spr_tileset_sunnysideworld_16px.png",
+            sunny_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            // Row 2 (y=32) — pick 32 tiles for full row coverage
+            let mut mapped = 0usize;
+            for col in 0..32usize {
+                let sx = (col as u32) * 16;
+                let sy = 32u32; // row 2 of tileset
+                if sx + 16 <= sheet.width() && sy + 16 <= sheet.height() {
+                    let tile = crop_and_scale(&sheet, sx, sy, 16, 16);
+                    blit_cell(&mut pixels, 28, col, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 28 col 0-{} (sunnyside-tileset-row2): {} native 16x16", mapped - 1, mapped));
+        } else {
+            report.push(format!("FALLBACK row 28 col 0-31 (sunnyside-tileset): not found"));
+        }
+    }
+
+    // ── Sunnyside tileset: Row 29 — row 4 (more terrain) ─────────────────
+    {
+        let path = format!(
+            "{}/Tileset/spr_tileset_sunnysideworld_16px.png",
+            sunny_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            let mut mapped = 0usize;
+            for col in 0..32usize {
+                let sx = (col as u32) * 16;
+                let sy = 64u32; // row 4
+                if sx + 16 <= sheet.width() && sy + 16 <= sheet.height() {
+                    let tile = crop_and_scale(&sheet, sx, sy, 16, 16);
+                    blit_cell(&mut pixels, 29, col, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 29 col 0-{} (sunnyside-tileset-row4): {} native 16x16", mapped - 1, mapped));
+        } else {
+            report.push(format!("FALLBACK row 29 col 0-31 (sunnyside-tileset row4): not found"));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // PACK: Fan-tasy — individual prop PNGs + flowers + road + rock slopes
+    // ═══════════════════════════════════════════════════════════════════════
+
+    let ft_root = format!(
+        "{}/The Fan-tasy Tileset (Free) 1.5.7/The Fan-tasy Tileset (Free)/Art",
+        packs_root
+    );
+
+    // ── Fan-tasy individual props: Row 30 cols 0-11 ───────────────────────
+    // These are small individual PNGs (16-32px) — blit centered
+    {
+        let prop_files: &[(&str, usize, &str)] = &[
+            ("Props/Barrel_Small_Empty.png",  0, "barrel"),
+            ("Props/Sack_3.png",              1, "sack"),
+            ("Props/Sign_1.png",              2, "sign1"),
+            ("Props/Sign_2.png",              3, "sign2"),
+            ("Props/Basket_Empty.png",        4, "basket"),
+            ("Props/HayStack_2.png",          5, "haystack"),
+            ("Props/Chopped_Tree_1.png",      6, "chopped-tree"),
+            ("Props/Plant_2.png",             7, "plant"),
+            ("Props/BulletinBoard_1.png",     8, "bulletin"),
+            ("Props/LampPost_3.png",          9, "lamppost"),
+            ("Props/Bench_1.png",            10, "bench"),
+            ("Props/Crate_Medium_Closed.png",11, "crate"),
+        ];
+        for &(rel, atlas_col, name) in prop_files {
+            let path = format!("{}/{}", ft_root, rel);
+            if let Some(img) = load_png(&path) {
+                blit_cell_centered(&mut pixels, 30, atlas_col, &img);
+                report.push(format!("MAPPED   row 30 col {:2} (ft-{}): {}x{} from {}", atlas_col, name, img.width(), img.height(), rel));
+            } else {
+                report.push(format!("FALLBACK row 30 col {:2} (ft-{}): not found", atlas_col, name));
+            }
+        }
+    }
+
+    // ── Fan-tasy buildings (individual): Row 30 cols 12-15 ────────────────
+    // House_Hay_1 = 88x103, Well_Hay_1 = 56x75 — downscale to 16x16
+    {
+        let bldg_files: &[(&str, usize, &str)] = &[
+            ("Buildings/House_Hay_1.png", 12, "house1"),
+            ("Buildings/House_Hay_2.png", 13, "house2"),
+            ("Buildings/House_Hay_3.png", 14, "house3"),
+            ("Buildings/Well_Hay_1.png",  15, "well"),
+        ];
+        for &(rel, atlas_col, name) in bldg_files {
+            let path = format!("{}/{}", ft_root, rel);
+            if let Some(img) = load_png(&path) {
+                let tile = crop_and_scale(&img, 0, 0, img.width(), img.height());
+                blit_cell(&mut pixels, 30, atlas_col, &tile);
+                report.push(format!("MAPPED   row 30 col {:2} (ft-{}): {}x{}->16x16 from {}", atlas_col, name, img.width(), img.height(), rel));
+            } else {
+                report.push(format!("FALLBACK row 30 col {:2} (ft-{}): not found", atlas_col, name));
+            }
+        }
+    }
+
+    // ── Fan-tasy flowers: Row 30 cols 16-23 ──────────────────────────────
+    // Flowers_Red.png = 768x32 = 48 frames x 16x16 (native! — animated flowers)
+    // Flowers_White.png = 768x32 = same
+    {
+        let flower_files: &[(&str, usize, &str)] = &[
+            ("Props/Animation/Flowers_Red.png",   16, "flower-red"),
+            ("Props/Animation/Flowers_White.png", 20, "flower-white"),
+        ];
+        for &(rel, start_col, name) in flower_files {
+            let path = format!("{}/{}", ft_root, rel);
+            if let Some(sheet) = load_png(&path) {
+                // 768x32 = 48 frames x 16x16. Use first 4 frames.
+                let fw = 16u32;
+                let fh = sheet.height().min(16);
+                for frame in 0..4usize {
+                    let sx = (frame as u32) * fw;
+                    if sx + fw <= sheet.width() {
+                        let tile = crop_and_scale(&sheet, sx, 0, fw, fh);
+                        blit_cell(&mut pixels, 30, start_col + frame, &tile);
+                    }
+                }
+                report.push(format!("MAPPED   row 30 col {}-{} ({}): 4 frames native 16x16 from {}", start_col, start_col+3, name, rel));
+            } else {
+                report.push(format!("FALLBACK row 30 col {}-{} ({}): not found", start_col, start_col+3, name));
+            }
+        }
+    }
+
+    // ── Fan-tasy road tiles: Row 30 cols 24-31 ───────────────────────────
+    // Tileset_Road.png = 96x224 = 6 cols x 14 rows of 16x16 (native)
+    {
+        let path = format!("{}/Ground Tileset/Tileset_Road.png", ft_root);
+        if let Some(sheet) = load_png(&path) {
+            let mut mapped = 0usize;
+            for col in 0..6usize {
+                let sx = (col as u32) * 16;
+                if sx + 16 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 16, 16);
+                    blit_cell(&mut pixels, 30, 24 + col, &tile);
+                    mapped += 1;
+                }
+            }
+            // Row 1 of road → cols 30-31 (2 more)
+            for col in 0..2usize {
+                let sx = (col as u32) * 16;
+                if sx + 16 <= sheet.width() && 32 <= sheet.height() {
+                    let tile = crop_and_scale(&sheet, sx, 16, 16, 16);
+                    blit_cell(&mut pixels, 30, 30 + col, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 30 col 24-31 (ft-road): {} native 16x16 from {}", mapped, path));
+        } else {
+            report.push(format!("FALLBACK row 30 col 24-31 (ft-road): not found"));
+        }
+    }
+
+    // ── Fan-tasy rock slopes: Row 31 cols 0-7 ────────────────────────────
+    // Tileset_RockSlope.png = 96x144 = 6 cols x 9 rows of 16x16 (native)
+    {
+        let path = format!("{}/Rock Slopes/Tileset_RockSlope.png", ft_root);
+        if let Some(sheet) = load_png(&path) {
+            let mut mapped = 0usize;
+            for col in 0..6usize {
+                let sx = (col as u32) * 16;
+                if sx + 16 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 16, 16);
+                    blit_cell(&mut pixels, 31, col, &tile);
+                    mapped += 1;
+                }
+            }
+            // Row 1 of rock slope → cols 6-7
+            for col in 0..2usize {
+                let sx = (col as u32) * 16;
+                if sx + 16 <= sheet.width() && 32 <= sheet.height() {
+                    let tile = crop_and_scale(&sheet, sx, 16, 16, 16);
+                    blit_cell(&mut pixels, 31, 6 + col, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 31 col 0-{} (ft-rock-slopes): {} native 16x16 from {}", mapped - 1, mapped, path));
+        } else {
+            report.push(format!("FALLBACK row 31 col 0-7 (ft-rock-slopes): not found"));
+        }
+    }
+
+    // ── Fan-tasy rock slopes simple: Row 31 cols 8-13 ────────────────────
+    {
+        let path = format!("{}/Rock Slopes/Tileset_RockSlope_Simple.png", ft_root);
+        if let Some(sheet) = load_png(&path) {
+            let mut mapped = 0usize;
+            for col in 0..6usize {
+                let sx = (col as u32) * 16;
+                if sx + 16 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 16, 16);
+                    blit_cell(&mut pixels, 31, 8 + col, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 31 col 8-{} (ft-rock-slope-simple): {} native 16x16", 8 + mapped - 1, mapped));
+        } else {
+            report.push(format!("FALLBACK row 31 col 8-13 (ft-rock-slope-simple): not found"));
+        }
+    }
+
+    // ── Fan-tasy Fan-tasy character (idle): Row 31 cols 14-17 ─────────────
+    // Character_Idle.png = 160x192 = 5 cols x 6 rows at 32px
+    {
+        let path = format!("{}/Characters/Main Character/Character_Idle.png", ft_root);
+        if let Some(sheet) = load_png(&path) {
+            for frame in 0..4usize {
+                let sx = (frame as u32) * 32;
+                if sx + 32 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 32, 32);
+                    blit_cell(&mut pixels, 31, 14 + frame, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 31 col 14-17 (ft-char-idle): 4 frames 32->16 from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 31 col 14-17 (ft-char-idle): not found"));
+        }
+    }
+
+    // ── Fan-tasy character (walk): Row 31 cols 18-21 ──────────────────────
+    {
+        let path = format!("{}/Characters/Main Character/Character_Walk.png", ft_root);
+        if let Some(sheet) = load_png(&path) {
+            for frame in 0..4usize {
+                let sx = (frame as u32) * 32;
+                if sx + 32 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 32, 32);
+                    blit_cell(&mut pixels, 31, 18 + frame, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 31 col 18-21 (ft-char-walk): 4 frames 32->16 from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 31 col 18-21 (ft-char-walk): not found"));
+        }
+    }
+
+    // ── Fan-tasy individual rocks: Row 31 cols 22-25 ─────────────────────
+    // Rock_Brown_1.png = 28x13, Rock_Brown_2.png, Rock_Brown_4.png, Rock_Brown_6.png
+    {
+        let rock_files: &[(&str, usize, &str)] = &[
+            ("Rocks/Rock_Brown_1.png", 22, "rock-brown1"),
+            ("Rocks/Rock_Brown_2.png", 23, "rock-brown2"),
+            ("Rocks/Rock_Brown_4.png", 24, "rock-brown4"),
+            ("Rocks/Rock_Brown_6.png", 25, "rock-brown6"),
+        ];
+        for &(rel, atlas_col, name) in rock_files {
+            let path = format!("{}/{}", ft_root, rel);
+            if let Some(img) = load_png(&path) {
+                blit_cell_centered(&mut pixels, 31, atlas_col, &img);
+                report.push(format!("MAPPED   row 31 col {:2} (ft-{}): {}x{} centered", atlas_col, name, img.width(), img.height()));
+            } else {
+                report.push(format!("FALLBACK row 31 col {:2} (ft-{}): not found", atlas_col, name));
+            }
+        }
+    }
+
+    // ── Fan-tasy Sprout Lands: Furniture + Chest + Grass: Row 31 cols 26-31
+    {
+        let sl_root = format!("{}/Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack", packs_root);
+        // Chest.png = 240x96 = 15x6 grid of 16x16
+        let chest_path = format!("{}/Objects/Chest.png", sl_root);
+        let furn_path  = format!("{}/Objects/Basic Furniture.png", sl_root);
+        if let Some(sheet) = load_png(&chest_path) {
+            for col in 0..3usize {
+                let sx = (col as u32) * 16;
+                if sx + 16 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 16, 16);
+                    blit_cell(&mut pixels, 31, 26 + col, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 31 col 26-28 (sl-chest): 3 cells native 16x16"));
+        } else {
+            report.push(format!("FALLBACK row 31 col 26-28 (sl-chest): not found"));
+        }
+        if let Some(sheet) = load_png(&furn_path) {
+            // 144x96 = 9 cols x 6 rows, use first 3 tiles
+            for col in 0..3usize {
+                let sx = (col as u32) * 16;
+                if sx + 16 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 16, 16);
+                    blit_cell(&mut pixels, 31, 29 + col, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 31 col 29-31 (sl-furniture): 3 cells native 16x16"));
+        } else {
+            report.push(format!("FALLBACK row 31 col 29-31 (sl-furniture): not found"));
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // EXTRA: Sprout Lands Grass + Water tilesets → fill row 20 col 30 slot
+    // ─────────────────────────────────────────────────────────────────────
+    {
+        let sl_root = format!("{}/Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack", packs_root);
+        // Grass.png = 176x112 = 11 cols x 7 rows — sample row 1 cols 0-3 for variety
+        let grass_path = format!("{}/Tilesets/Grass.png", sl_root);
+        if let Some(sheet) = load_png(&grass_path) {
+            // Row 1 (y=16) grass tiles → Row 20 cols 30-31 (remaining slots)
+            for col in 0..2usize {
+                let sx = (col as u32) * 16;
+                if sx + 16 <= sheet.width() && 32 <= sheet.height() {
+                    let tile = crop_and_scale(&sheet, sx, 16, 16, 16);
+                    blit_cell(&mut pixels, 20, 30 + col, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 20 col 30-31 (sl-grass): overwrite with grass tiles from {}", grass_path));
+        }
+        // sl_water.png = 64x16 = 4 tiles native — use row 15 cols 4-7
+        let water_path = format!("{}/Tilesets/Water.png", sl_root);
+        if let Some(sheet) = load_png(&water_path) {
+            for col in 0..4usize {
+                let sx = (col as u32) * 16;
+                if sx + 16 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 16, 16);
+                    blit_cell(&mut pixels, 15, 4 + col, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 15 col 4-7 (sl-water): 4 native 16x16 from {}", water_path));
+        }
+    }
+
     // ── Summary ───────────────────────────────────────────────────────────
     let mapped_count = report.iter().filter(|s| s.starts_with("MAPPED")).count();
     let fallback_count = report.iter().filter(|s| s.starts_with("FALLBACK")).count();

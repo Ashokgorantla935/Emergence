@@ -1,0 +1,15 @@
+[package]
+name = "swarm-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+swarm-core = { workspace = true }
+swarm-viewer = { workspace = true }
+swarm-worlds = { workspace = true }
+pollster = { workspace = true }
+winit = { workspace = true }
+wgpu = { workspace = true }
+egui = { workspace = true }
+egui-wgpu = { workspace = true }
+egui-winit = { workspace = true }

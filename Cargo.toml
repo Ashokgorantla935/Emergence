@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/swarm-core",
+    "crates/swarm-viewer",
+    "crates/swarm-worlds",
+    "crates/swarm-app",
+]
+
+[workspace.dependencies]
+swarm-core = { path = "crates/swarm-core" }
+swarm-viewer = { path = "crates/swarm-viewer" }
+swarm-worlds = { path = "crates/swarm-worlds" }
+noise = "0.9"
+rayon = "1.10"
+fastrand = "2.3"
+wgpu = "24.0"
+egui = "0.31"
+egui-wgpu = "0.31"
+egui-winit = "0.31"
+winit = "0.30"
+bytemuck = "1.21"
+half = "2.4"
+pollster = "0.4"

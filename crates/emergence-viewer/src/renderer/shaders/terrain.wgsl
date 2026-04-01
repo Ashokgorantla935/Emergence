@@ -44,25 +44,21 @@ struct VertexOutput {
 fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
 
+    // Integer grid positions — no floating-point drift
     let world = vec2<f32>(
         inst.world_pos.x + vertex.position.x,
         inst.world_pos.y + vertex.position.y,
     );
 
-    var clip = camera.view_proj * vec4<f32>(world, 0.0, 1.0);
-
-    // Integer snap to prevent subpixel gaps between tiles
-    let resolution = vec2<f32>(1920.0, 1080.0);
-    let snapped_x = floor(clip.x / clip.w * resolution.x * 0.5 + 0.5) / (resolution.x * 0.5) * clip.w;
-    let snapped_y = floor(clip.y / clip.w * resolution.y * 0.5 + 0.5) / (resolution.y * 0.5) * clip.w;
-    clip.x = snapped_x;
-    clip.y = snapped_y;
-
-    out.clip_position = clip;
+    out.clip_position = camera.view_proj * vec4<f32>(world, 0.0, 1.0);
 
     // Map the quad's 0-1 UV to the specific tile region in the atlas
+    // Apply 0.5px inset (0.01 in UV space for 16px tile in 512px atlas) to prevent bleeding
     let tile_size = 1.0 / 32.0; // 16px / 512px atlas
-    out.atlas_uv = inst.tile_uv + vertex.uv * tile_size;
+    let inset = 0.001; // ~0.5px inset at 512px atlas
+    let uv_min = inst.tile_uv + vec2<f32>(inset, inset);
+    let uv_range = tile_size - 2.0 * inset;
+    out.atlas_uv = uv_min + vertex.uv * uv_range;
     out.flags = inst.flags;
     out.world_uv = world / 256.0; // normalized world coords for water effects
 
@@ -72,9 +68,31 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let t = water_time.time;
-    let is_water = in.flags > 0.5;
+    let is_water = (u32(in.flags + 0.5) == 1u);
 
-    var color = textureSample(t_atlas, s_atlas, in.atlas_uv);
+    // Solid WorldBox palette base color per biome (flags: 0=grass, 1=water, 2=forest, 3=desert, 4=mountain, 5=wetland)
+    let biome_id = u32(in.flags + 0.5);
+    var base: vec3<f32>;
+    switch biome_id {
+        case 0u: { base = vec3<f32>(0.667, 0.741, 0.239); } // #aabd3d grassland
+        case 1u: { base = vec3<f32>(0.0, 0.471, 0.945); }   // #0078f1 water
+        case 2u: { base = vec3<f32>(0.314, 0.471, 0.020); } // #507805 forest
+        case 3u: { base = vec3<f32>(0.973, 0.847, 0.471); } // #f8d878 desert
+        case 4u: { base = vec3<f32>(0.439, 0.329, 0.231); } // #70543b mountain
+        case 5u: { base = vec3<f32>(0.404, 0.545, 0.0); }   // #678b00 wetland
+        default: { base = vec3<f32>(0.667, 0.741, 0.239); }
+    }
+
+    // Add subtle per-cell noise variation (±5% brightness from world position)
+    let noise = fract(sin(dot(in.world_uv * 256.0, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+    let brightness = 0.95 + noise * 0.10; // 0.95 to 1.05
+    var color = vec4<f32>(base * brightness, 1.0);
+
+    // Overlay atlas tile on top — only where tile pixels are fully opaque
+    let tile_color = textureSample(t_atlas, s_atlas, in.atlas_uv);
+    if (tile_color.a > 0.9) {
+        color = vec4<f32>(mix(color.rgb, tile_color.rgb, 0.7), 1.0); // blend 70% tile, 30% base
+    }
 
     if is_water {
         // Subtle animated UV distortion for water shimmer

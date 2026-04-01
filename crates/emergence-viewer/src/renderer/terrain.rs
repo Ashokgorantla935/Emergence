@@ -36,13 +36,14 @@ const fn tile_uv(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * ATLAS_CELL, row as f32 * ATLAS_CELL]
 }
 
-// Biome tile variant tables — each biome gets 4-6 tile variants from rows 28-29.
-// Row 28 = Sunnyside tileset row 2 (grass, paths, dirt).
-// Row 29 = Sunnyside tileset row 4 (water, stone, more grass).
+// Biome tile variant tables.
+// Sunnyside 1024x1024 tileset was loaded into atlas rows 28-29 (row 2 and row 4 of the tileset).
+// These are SOLID terrain tiles (fully opaque, no transparency).
+// The shader also has a fallback: if a tile pixel is transparent, fill with WorldBox palette color.
 //
-// These coordinates were identified from the atlas composition:
-//   Row 28 col 0-31: Sunnyside tileset row 2 (green grass variants, dirt, paths)
-//   Row 29 col 0-31: Sunnyside tileset row 4 (water tiles, stone, mixed terrain)
+// Row 28 = Sunnyside tileset row 2 (various terrain: grass, paths, dirt, etc.)
+// Row 29 = Sunnyside tileset row 4 (water, more terrain)
+// All biomes use row 28 with different column ranges for variety.
 
 const GRASS_TILES: &[[f32; 2]] = &[
     tile_uv(0, 28), tile_uv(1, 28), tile_uv(2, 28),
@@ -91,13 +92,16 @@ impl TerrainRenderer {
         terrain: &Terrain,
     ) -> Self {
         // Unit quad: 4 vertices, 6 indices
+        // Mathematically perfect 1.0x1.0 world-unit quad. No oversizing hack.
+        // Each terrain cell = 1 world unit. Instance world_pos = integer grid coord.
         let vertices = [
-            TerrainVertex { position: [0.0, 0.0], uv: [0.0, 0.0] },
-            TerrainVertex { position: [1.0, 0.0], uv: [1.0, 0.0] },
-            TerrainVertex { position: [1.0, 1.0], uv: [1.0, 1.0] },
-            TerrainVertex { position: [0.0, 1.0], uv: [0.0, 1.0] },
+            TerrainVertex { position: [0.0, 0.0], uv: [0.0, 0.0] }, // 0 = BL
+            TerrainVertex { position: [1.0, 0.0], uv: [1.0, 0.0] }, // 1 = BR
+            TerrainVertex { position: [1.0, 1.0], uv: [1.0, 1.0] }, // 2 = TR
+            TerrainVertex { position: [0.0, 1.0], uv: [0.0, 1.0] }, // 3 = TL
         ];
-        let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
+        // Two triangles: (BL,BR,TR) + (TR,TL,BL)
+        let indices: [u16; 6] = [0, 1, 2, 2, 3, 0];
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Terrain Vertices"),
@@ -153,10 +157,14 @@ impl TerrainRenderer {
         let y_max = ((cam_y + half_h).ceil() as usize + 1).min(h);
 
         let capacity = (x_max - x_min) * (y_max - y_min);
+        if capacity > MAX_INSTANCES {
+            eprintln!("TERRAIN WARNING: viewport has {} cells but MAX_INSTANCES={}", capacity, MAX_INSTANCES);
+        }
         let mut instances = Vec::with_capacity(capacity.min(MAX_INSTANCES));
 
-        for y in y_min..y_max {
+        'outer: for y in y_min..y_max {
             for x in x_min..x_max {
+                if instances.len() >= MAX_INSTANCES { break 'outer; }
                 let idx = y * w + x;
                 let biome = terrain.biome[idx];
                 let hash = cell_hash(x, y);
@@ -173,12 +181,21 @@ impl TerrainRenderer {
 
                 let variant = hash % tiles.len();
                 let tile_uv = tiles[variant];
+                // Encode biome type in flags: 0=grass, 1=water, 2=forest, 3=desert, 4=mountain, 5=wetland
+                let biome_flag = match biome {
+                    Biome::Grassland => 0.0f32,
+                    Biome::Water     => 1.0,
+                    Biome::Forest    => 2.0,
+                    Biome::Desert    => 3.0,
+                    Biome::Mountain  => 4.0,
+                    Biome::Wetland   => 5.0,
+                };
                 let is_water = biome == Biome::Water;
 
                 instances.push(TerrainInstance {
                     world_pos: [x as f32, y as f32],
                     tile_uv,
-                    flags: if is_water { 1.0 } else { 0.0 },
+                    flags: biome_flag,
                     _pad: 0.0,
                 });
             }

@@ -74,6 +74,32 @@ impl Inspector {
         // Current action
         let action_str = action_name(beings.pending_action[idx]);
         ui.colored_label(egui::Color32::from_rgb(100, 200, 255), format!("Action: {action_str}"));
+
+        // Dominant emotion badge — visible at a glance without opening emotion bars
+        let emo_names_short = ["Fear", "Joy", "Curiosity", "Anger", "Grief", "Content"];
+        let emo_colors_badge = [
+            egui::Color32::from_rgb(140, 60, 210),  // Fear — purple
+            egui::Color32::from_rgb(255, 220, 30),  // Joy — yellow
+            egui::Color32::from_rgb(255, 140, 20),  // Curiosity — orange
+            egui::Color32::from_rgb(220, 40, 40),   // Anger — red
+            egui::Color32::from_rgb(60, 90, 220),   // Grief — blue
+            egui::Color32::from_rgb(50, 200, 70),   // Contentment — green
+        ];
+        let emos = &beings.emotions[idx];
+        let (dom_emo_idx, dom_emo_val) = {
+            let mut bi = 0usize;
+            let mut bv = 0.0f32;
+            for e in 0..6 { if emos[e] > bv { bv = emos[e]; bi = e; } }
+            (bi, bv)
+        };
+        if dom_emo_val > 0.05 {
+            ui.colored_label(
+                emo_colors_badge[dom_emo_idx],
+                format!("Feeling: {} ({:.0}%)", emo_names_short[dom_emo_idx], dom_emo_val * 100.0),
+            );
+        } else {
+            ui.label("Feeling: Neutral");
+        }
         if self.follow {
             if ui.button("Unfollow").clicked() {
                 self.follow = false;
@@ -135,25 +161,29 @@ impl Inspector {
 
         ui.separator();
 
-        // Emotions
+        // Emotions — all 6 bars, always visible
         ui.label("Emotions");
         let emo_names = ["Fear", "Joy", "Curiosity", "Anger", "Grief", "Content"];
         let emo_colors = [
-            egui::Color32::from_rgb(150, 50, 200),
-            egui::Color32::YELLOW,
-            egui::Color32::from_rgb(50, 230, 230),
-            egui::Color32::RED,
-            egui::Color32::from_rgb(70, 70, 220),
-            egui::Color32::GREEN,
+            egui::Color32::from_rgb(140, 60, 210),  // Fear — purple
+            egui::Color32::from_rgb(255, 220, 30),  // Joy — yellow
+            egui::Color32::from_rgb(255, 140, 20),  // Curiosity — orange
+            egui::Color32::from_rgb(220, 40, 40),   // Anger — red
+            egui::Color32::from_rgb(60, 90, 220),   // Grief — blue
+            egui::Color32::from_rgb(50, 200, 70),   // Contentment — green
         ];
         for (i, name) in emo_names.iter().enumerate() {
             let val = beings.emotions[idx][i];
-            if val > 0.01 {
-                ui.horizontal(|ui| {
-                    ui.colored_label(emo_colors[i], format!("{name}: {val:.2}"));
-                    ui.add(egui::ProgressBar::new(val));
-                });
-            }
+            let is_dominant = i == dom_emo_idx && dom_emo_val > 0.1;
+            let label = if is_dominant {
+                format!("{name}: {val:.2} *")
+            } else {
+                format!("{name}: {val:.2}")
+            };
+            ui.horizontal(|ui| {
+                ui.colored_label(emo_colors[i], label);
+                ui.add(egui::ProgressBar::new(val));
+            });
         }
 
         ui.separator();

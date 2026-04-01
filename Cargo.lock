@@ -743,6 +743,7 @@ dependencies = [
  "egui-winit",
  "emergence-core",
  "fastrand",
+ "image",
  "pollster",
  "rodio",
  "wgpu",

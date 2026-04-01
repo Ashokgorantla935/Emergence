@@ -1,3 +1,4 @@
+use image::GenericImageView;
 use wgpu::util::DeviceExt;
 
 pub mod generator;
@@ -33,9 +34,12 @@ pub struct Atlas {
 }
 
 impl Atlas {
-    /// Generate the procedural 512x512 atlas and upload it to the GPU.
+    /// Load the 512x512 atlas from the embedded PNG, falling back to the procedural generator.
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
-        let pixels = generator::generate();
+        let pixels = Self::load_png_pixels().unwrap_or_else(|| {
+            eprintln!("[atlas] PNG decode failed — falling back to procedural generator");
+            generator::generate()
+        });
 
         let texture = device.create_texture_with_data(
             queue,
@@ -110,5 +114,18 @@ impl Atlas {
         });
 
         Atlas { texture, view, sampler, bind_group_layout, bind_group }
+    }
+
+    /// Decode the embedded atlas PNG and return raw RGBA8 pixels (512*512*4 bytes).
+    /// Returns None if the PNG is not 512x512 or cannot be decoded.
+    fn load_png_pixels() -> Option<Vec<u8>> {
+        const PNG_BYTES: &[u8] =
+            include_bytes!("../../../../assets/sprites/atlas.png");
+        let img = image::load_from_memory(PNG_BYTES).ok()?;
+        let (w, h) = img.dimensions();
+        if w != 512 || h != 512 {
+            return None;
+        }
+        Some(img.into_rgba8().into_raw())
     }
 }

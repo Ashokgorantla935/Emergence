@@ -110,30 +110,29 @@ fn dot(pixels: &mut [u8], cx: usize, cy: usize, lx: usize, ly: usize, r: u8, g: 
 // Row 0 = top of cell.
 
 /// Standard adult humanoid facing front, idle stance.
-/// Rows 0-1:   head (4px wide, centered at cols 6-9)
-/// Rows 2-3:   head continued
-/// Row  4:     neck (col 7-8) + shoulders (cols 5,10)
-/// Rows 5-7:   torso (cols 5-10, 6px wide)
-/// Rows 8-9:   waist (cols 6-9, 4px)
-/// Rows 10-12: legs (cols 6-7 left, 8-9 right with gap)
-/// Rows 13-15: feet (slightly wider)
+/// Head: 3x3 circle at top center (cols 6-8, rows 1-3)
+/// Neck: 1px col 7, row 4
+/// Body: 4x4 torso (cols 5-8, rows 4-8)
+/// Arms: 1px wide on sides rows 5-7
+/// Legs: 2 cols each with 1px gap, rows 9-14
+/// Feet: slightly wider row 15
 const ADULT_SKIN: [u16; 16] = [
-    0b0000011110000000, // row  0: head
-    0b0000011110000000, // row  1: head
-    0b0000011110000000, // row  2: head
-    0b0000011110000000, // row  3: head
-    0b0000101001000000, // row  4: neck + shoulder hints
-    0b0000100000100000, // row  5: arms
-    0b0000100000100000, // row  6: arms
-    0b0000100000100000, // row  7: arms
+    0b0000000000000000, // row  0: empty above head
+    0b0000011100000000, // row  1: head top (3px circle)
+    0b0000111110000000, // row  2: head wide (5px for face)
+    0b0000011100000000, // row  3: head bottom
+    0b0000001000000000, // row  4: neck (1px col 6)
+    0b0000100000010000, // row  5: arm stubs at sides
+    0b0001000000001000, // row  6: arms extended
+    0b0000100000010000, // row  7: arm ends
     0b0000000000000000, // row  8: (cloth covers waist)
-    0b0000000000000000, // row  9:
-    0b0000110001100000, // row 10: thighs
-    0b0000110001100000, // row 11: thighs
+    0b0000000000000000, // row  9: (cloth)
+    0b0000110001100000, // row 10: upper legs
+    0b0000110001100000, // row 11: legs
     0b0000110001100000, // row 12: legs
-    0b0000110001100000, // row 13: legs
+    0b0000110001100000, // row 13: lower legs
     0b0000111001110000, // row 14: feet
-    0b0000111001110000, // row 15: feet
+    0b0000111001110000, // row 15: feet wide
 ];
 
 const ADULT_CLOTH: [u16; 16] = [
@@ -141,13 +140,13 @@ const ADULT_CLOTH: [u16; 16] = [
     0b0000000000000000, // row  1
     0b0000000000000000, // row  2
     0b0000000000000000, // row  3
-    0b0000011110000000, // row  4: collar/shoulder
+    0b0000011110000000, // row  4: collar/shoulder (4px)
     0b0000011110000000, // row  5: torso
     0b0000011110000000, // row  6: torso
     0b0000011110000000, // row  7: torso
     0b0000011110000000, // row  8: waist
-    0b0000011110000000, // row  9: waist
-    0b0000000000000000, // row 10:
+    0b0000011110000000, // row  9: waist/hips
+    0b0000000000000000, // row 10: legs (skin)
     0b0000000000000000, // row 11:
     0b0000000000000000, // row 12:
     0b0000000000000000, // row 13:
@@ -156,21 +155,22 @@ const ADULT_CLOTH: [u16; 16] = [
 ];
 
 /// Youth: smaller, head-heavy — sits in bottom 12px of cell.
+/// Big head (4px wide) relative to compact body
 const YOUTH_SKIN: [u16; 16] = [
-    0b0000000000000000, // row  0: empty (youth is shorter)
+    0b0000000000000000, // row  0: empty
     0b0000000000000000, // row  1:
     0b0000000000000000, // row  2:
-    0b0000001111000000, // row  3: head (3px wide, centered)
-    0b0000001111000000, // row  4: head
-    0b0000001111000000, // row  5: head
-    0b0000000110000000, // row  6: neck
-    0b0000001001000000, // row  7: arms
-    0b0000001001000000, // row  8: arms
+    0b0000011100000000, // row  3: head top 3px
+    0b0000111110000000, // row  4: head wide 5px (big head)
+    0b0000011100000000, // row  5: head bottom
+    0b0000001000000000, // row  6: neck
+    0b0000010000100000, // row  7: small arm stubs
+    0b0000000000000000, // row  8: (cloth body)
     0b0000000000000000, // row  9: (cloth)
-    0b0000001001000000, // row 10: legs
-    0b0000001001000000, // row 11: legs
-    0b0000001001000000, // row 12: legs
-    0b0000001111000000, // row 13: feet
+    0b0000011001100000, // row 10: legs
+    0b0000011001100000, // row 11: legs
+    0b0000011001100000, // row 12: lower legs
+    0b0000011101110000, // row 13: feet
     0b0000000000000000, // row 14:
     0b0000000000000000, // row 15:
 ];
@@ -183,9 +183,9 @@ const YOUTH_CLOTH: [u16; 16] = [
     0b0000000000000000,
     0b0000000000000000,
     0b0000000000000000,
-    0b0000000110000000, // row  7: torso
-    0b0000000110000000, // row  8: torso
-    0b0000000110000000, // row  9: torso
+    0b0000001110000000, // row  7: torso (3px)
+    0b0000001110000000, // row  8: torso
+    0b0000001110000000, // row  9: waist
     0b0000000000000000,
     0b0000000000000000,
     0b0000000000000000,
@@ -194,16 +194,16 @@ const YOUTH_CLOTH: [u16; 16] = [
     0b0000000000000000,
 ];
 
-/// Elder: slightly hunched — torso lower, head forward.
+/// Elder: slightly hunched — head offset left, stooped posture.
 const ELDER_SKIN: [u16; 16] = [
     0b0000000000000000, // row  0:
-    0b0000001111000000, // row  1: head
-    0b0000001111000000, // row  2: head
-    0b0000001111000000, // row  3: head
-    0b0000010010000000, // row  4: neck + bent shoulders
-    0b0000100001000000, // row  5: arms (hunched out)
-    0b0000100001000000, // row  6: arms
-    0b0000100001000000, // row  7: arms
+    0b0000111000000000, // row  1: head (shifted left = hunched fwd)
+    0b0001111100000000, // row  2: head wide
+    0b0000111000000000, // row  3: head bottom
+    0b0000010000000000, // row  4: neck
+    0b0001000000010000, // row  5: arms wide (hunched shoulders)
+    0b0010000000001000, // row  6: arms reaching
+    0b0001000000010000, // row  7: arm ends
     0b0000000000000000, // row  8: (cloth)
     0b0000000000000000, // row  9:
     0b0000011001100000, // row 10: legs
@@ -219,12 +219,12 @@ const ELDER_CLOTH: [u16; 16] = [
     0b0000000000000000,
     0b0000000000000000,
     0b0000000000000000,
-    0b0000001100000000, // row  4: collar
-    0b0000001100000000, // row  5: torso
-    0b0000001100000000, // row  6: torso
-    0b0000001100000000, // row  7: torso
-    0b0000001100000000, // row  8: waist
-    0b0000001100000000, // row  9: waist
+    0b0000001100000000, // row  4: collar (2px, offset for hunch)
+    0b0000011110000000, // row  5: torso (4px)
+    0b0000011110000000, // row  6: torso
+    0b0000011110000000, // row  7: torso
+    0b0000011110000000, // row  8: waist
+    0b0000001100000000, // row  9: lower waist
     0b0000000000000000,
     0b0000000000000000,
     0b0000000000000000,
@@ -740,30 +740,59 @@ fn draw_world_object(pixels: &mut [u8], cx: usize, cy: usize, kind: usize) {
 // These sprites are white/neutral — tint color is applied at render time.
 
 fn draw_decor_tree(pixels: &mut [u8], cx: usize, cy: usize) {
-    // Trunk
-    fill_rect(pixels, cx, cy, 7, 10, 2, 5, 200, 200, 200, 255);
-    // Canopy — three overlapping circles drawn as filled rects
-    fill_rect(pixels, cx, cy, 4,  3, 8, 7, 255, 255, 255, 255);
-    fill_rect(pixels, cx, cy, 3,  5, 4, 4, 255, 255, 255, 255);
-    fill_rect(pixels, cx, cy, 9,  5, 4, 4, 255, 255, 255, 255);
-    // Shadow fringe
-    fill_rect(pixels, cx, cy, 5, 10, 6, 2, 180, 180, 180, 200);
+    // Brown trunk: 2px wide, 4px tall at bottom center
+    fill_rect(pixels, cx, cy, 7, 11, 2, 4, 101,  67,  33, 255);
+    // Triangle canopy: widest at base (row 10), narrows to 1px tip (row 2)
+    // Row 10: 8px wide (cols 4-11)
+    fill_rect(pixels, cx, cy,  4, 10,  8, 1,  34, 139,  34, 255);
+    // Row 9: 8px
+    fill_rect(pixels, cx, cy,  4,  9,  8, 1,  34, 139,  34, 255);
+    // Row 8: 6px (cols 5-10)
+    fill_rect(pixels, cx, cy,  5,  8,  6, 1,  34, 139,  34, 255);
+    // Row 7: 6px
+    fill_rect(pixels, cx, cy,  5,  7,  6, 1,  45, 160,  45, 255);
+    // Row 6: 4px (cols 6-9)
+    fill_rect(pixels, cx, cy,  6,  6,  4, 1,  45, 160,  45, 255);
+    // Row 5: 4px
+    fill_rect(pixels, cx, cy,  6,  5,  4, 1,  60, 180,  60, 255);
+    // Row 4: 2px (cols 7-8)
+    fill_rect(pixels, cx, cy,  7,  4,  2, 1,  60, 180,  60, 255);
+    // Row 3: tip 2px
+    fill_rect(pixels, cx, cy,  7,  3,  2, 1,  80, 200,  80, 255);
+    // Darker shadow on right side of canopy
+    set_pixel(pixels, cx + 11, cy + 10, 20, 100, 20, 255);
+    set_pixel(pixels, cx + 10, cy +  9, 20, 100, 20, 255);
 }
 
 fn draw_decor_bush(pixels: &mut [u8], cx: usize, cy: usize) {
-    fill_rect(pixels, cx, cy, 3,  7, 10, 6, 255, 255, 255, 255);
-    fill_rect(pixels, cx, cy, 5,  5,  6, 4, 255, 255, 255, 255);
-    fill_rect(pixels, cx, cy, 2,  9,  3, 3, 220, 220, 220, 200);
-    fill_rect(pixels, cx, cy, 11, 9,  3, 3, 220, 220, 220, 200);
+    // Round green blob, darker shade than tree to differentiate
+    // Core (4x3 center mass)
+    fill_rect(pixels, cx, cy, 5,  8,  6, 4,  85, 160,  50, 255);
+    // Widest row
+    fill_rect(pixels, cx, cy, 4,  9,  8, 2,  85, 160,  50, 255);
+    // Top bump
+    fill_rect(pixels, cx, cy, 6,  7,  4, 2, 110, 185,  70, 255);
+    // Side lobes for roundness
+    fill_rect(pixels, cx, cy, 3, 10,  2, 2,  75, 140,  40, 255);
+    fill_rect(pixels, cx, cy, 11,10,  2, 2,  75, 140,  40, 255);
+    // Bottom (sits on ground)
+    fill_rect(pixels, cx, cy, 5, 12,  6, 1,  60, 120,  30, 255);
 }
 
 fn draw_decor_rock(pixels: &mut [u8], cx: usize, cy: usize) {
-    // Main rock body
-    fill_rect(pixels, cx, cy, 4,  6, 8, 6, 255, 255, 255, 255);
-    fill_rect(pixels, cx, cy, 3,  8, 2, 2, 200, 200, 200, 200);
-    fill_rect(pixels, cx, cy, 11, 8, 2, 2, 200, 200, 200, 200);
-    // Highlight
-    fill_rect(pixels, cx, cy, 5,  7, 2, 2, 255, 255, 255, 255);
+    // Irregular gray blob: wider than tall (5x4)
+    // Base row (widest)
+    fill_rect(pixels, cx, cy, 4, 10, 8, 2, 130, 130, 140, 255);
+    // Mid row
+    fill_rect(pixels, cx, cy, 3,  8, 9, 3, 140, 140, 150, 255);
+    // Top row (narrower, irregular)
+    fill_rect(pixels, cx, cy, 5,  7, 6, 2, 150, 150, 160, 255);
+    fill_rect(pixels, cx, cy, 6,  6, 3, 1, 155, 155, 165, 255);
+    // Highlight pixels (lighter top-left)
+    set_pixel(pixels, cx + 5, cy + 7, 190, 190, 200, 255);
+    set_pixel(pixels, cx + 6, cy + 7, 185, 185, 195, 255);
+    // Shadow pixels (darker right side)
+    fill_rect(pixels, cx, cy, 11, 9, 2, 2, 105, 105, 115, 255);
 }
 
 fn draw_decor_reed(pixels: &mut [u8], cx: usize, cy: usize) {
@@ -814,41 +843,57 @@ fn draw_stone(pixels: &mut [u8], cx: usize, cy: usize) {
 }
 
 fn draw_campfire(pixels: &mut [u8], cx: usize, cy: usize, frame: usize) {
-    // Logs
-    fill_rect(pixels, cx, cy, 4, 11, 8, 2, 100, 60, 20, 255);
-    // Flame
-    let flame_h = 3 + frame;
-    let flame_col = [
-        [255, 200, 50],
-        [255, 150, 30],
-        [255, 100, 20],
-    ];
-    let fc = flame_col[frame % 3];
-    fill_rect(pixels, cx, cy, 6, 11 - flame_h, 4, flame_h,
-              fc[0], fc[1], fc[2], 255);
-    // Ember glow
-    set_pixel(pixels, cx + 7, cy + 12, 255, 100, 20, 255);
+    // Crossed logs (X shape at bottom)
+    fill_rect(pixels, cx, cy, 4, 12, 8, 2, 101, 67, 33, 255);
+    // Second log crossing
+    fill_rect(pixels, cx, cy, 5, 11, 6, 1,  80, 50, 20, 255);
+    // Flame — teardrop/triangle shape (3px wide at base, 1px at tip)
+    // Base glow (orange-red, 3px)
+    fill_rect(pixels, cx, cy, 6, 10, 4, 2, 255,  80, 20, 255);
+    // Mid flame (orange, 3px)
+    fill_rect(pixels, cx, cy, 6,  8, 4, 2, 255, 140, 30, 255);
+    // Upper flame (yellow, narrows)
+    fill_rect(pixels, cx, cy, 7,  6, 2, 2, 255, 200, 50, 255);
+    // Tip (bright yellow, 1px, shifted by frame for flicker)
+    let tip_x = if frame % 2 == 0 { 7 } else { 8 };
+    set_pixel(pixels, cx + tip_x, cy + 5, 255, 240, 100, 255);
+    // Ember glow on logs
+    set_pixel(pixels, cx + 7, cy + 13, 255, 100, 20, 200);
+    set_pixel(pixels, cx + 8, cy + 13, 200,  60, 10, 200);
 }
 
 fn draw_lean_to(pixels: &mut [u8], cx: usize, cy: usize) {
-    // Diagonal roof
-    for i in 0..8usize {
-        fill_rect(pixels, cx, cy, 4 + i, 4 + i / 2, 1, 1, 140, 100, 60, 255);
+    // Angled roof: 2px thick diagonal line from top-right to mid-left
+    for i in 0..9usize {
+        let rx = 3 + i;
+        let ry = 4 + i / 2;
+        set_pixel(pixels, cx + rx, cy + ry, 140, 100, 60, 255);
+        // Thickness: one pixel below
+        if ry + 1 < 16 {
+            set_pixel(pixels, cx + rx, cy + ry + 1, 120, 85, 50, 255);
+        }
     }
-    // Posts
-    fill_rect(pixels, cx, cy, 4, 8, 1, 6, 100, 70, 40, 255);
-    fill_rect(pixels, cx, cy, 11, 4, 1, 10, 100, 70, 40, 255);
+    // Tall post (right side, where roof peaks)
+    fill_rect(pixels, cx, cy, 11, 4, 2, 10, 101, 67, 33, 255);
+    // Short support (left side)
+    fill_rect(pixels, cx, cy,  3, 8, 2,  6, 101, 67, 33, 255);
 }
 
 fn draw_hut(pixels: &mut [u8], cx: usize, cy: usize) {
-    // Walls
-    fill_rect(pixels, cx, cy, 3, 8, 10, 6, 180, 150, 100, 255);
-    // Roof (triangle-ish)
-    for i in 0..5usize {
-        fill_rect(pixels, cx, cy, 3 + i, 4 + i, 10 - i * 2, 1, 120, 80, 40, 255);
-    }
-    // Door
-    fill_rect(pixels, cx, cy, 7, 10, 2, 4, 80, 50, 30, 255);
+    // Walls: rectangular base
+    fill_rect(pixels, cx, cy, 2, 9, 12, 5, 180, 150, 100, 255);
+    // Roof: triangle, row by row (widest at base, 1px tip)
+    fill_rect(pixels, cx, cy, 2, 8, 12, 1, 120,  80, 40, 255); // eave
+    fill_rect(pixels, cx, cy, 3, 7,  10, 1, 120,  80, 40, 255);
+    fill_rect(pixels, cx, cy, 4, 6,   8, 1, 130,  90, 45, 255);
+    fill_rect(pixels, cx, cy, 5, 5,   6, 1, 130,  90, 45, 255);
+    fill_rect(pixels, cx, cy, 6, 4,   4, 1, 140, 100, 50, 255);
+    fill_rect(pixels, cx, cy, 7, 3,   2, 1, 140, 100, 50, 255);
+    // Door (dark center)
+    fill_rect(pixels, cx, cy, 7, 11,  2, 3,  60,  40, 20, 255);
+    // Window dot
+    set_pixel(pixels, cx + 4, cy + 10, 200, 180, 140, 255);
+    set_pixel(pixels, cx + 11, cy + 10, 200, 180, 140, 255);
 }
 
 fn draw_wall(pixels: &mut [u8], cx: usize, cy: usize) {

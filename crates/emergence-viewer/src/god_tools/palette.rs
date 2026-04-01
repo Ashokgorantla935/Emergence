@@ -67,13 +67,6 @@ fn render_power_button(ui: &mut Ui, state: &mut GodToolState, power: &PowerDef) 
     let is_active = state.active_power == Some(power.id);
     let is_ready = state.cooldowns.is_ready(power.id);
 
-    let label = if !is_ready {
-        let ticks = state.cooldowns.remaining_ticks(power.id);
-        format!("{} ({}t)", power.name, ticks)
-    } else {
-        power.name.to_string()
-    };
-
     let text_color = if is_active {
         Color32::YELLOW
     } else if !is_ready {
@@ -82,7 +75,7 @@ fn render_power_button(ui: &mut Ui, state: &mut GodToolState, power: &PowerDef) 
         Color32::WHITE
     };
 
-    let btn = egui::Button::new(RichText::new(&label).color(text_color))
+    let btn = egui::Button::new(RichText::new(power.name).color(text_color))
         .fill(if is_active { Color32::from_rgb(60, 40, 0) } else { Color32::from_rgb(30, 30, 30) });
 
     let resp = ui.add_enabled(is_ready, btn);
@@ -97,6 +90,18 @@ fn render_power_button(ui: &mut Ui, state: &mut GodToolState, power: &PowerDef) 
 
     if resp.hovered() {
         resp.on_hover_text(power.tooltip);
+    }
+
+    // Cooldown progress bar — shown only while on cooldown
+    if !is_ready && power.cooldown > 0 {
+        let charge = state.cooldowns.charge_fraction(power.id, power.cooldown);
+        let remaining = state.cooldowns.remaining_ticks(power.id);
+        ui.add(
+            egui::ProgressBar::new(charge)
+                .desired_width(160.0)
+                .text(format!("{}t", remaining))
+                .fill(Color32::from_rgb(80, 60, 10)),
+        );
     }
 }
 

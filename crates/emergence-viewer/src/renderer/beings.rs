@@ -108,6 +108,7 @@ impl BeingRenderer {
             let (emotion_tint, size) = state_color_and_size(
                 i,
                 &beings.needs[i],
+                &beings.emotions[i],
                 beings.states[i],
                 beings.creature_type[i],
                 beings.life_phase(i),
@@ -186,59 +187,95 @@ const FAUNA_SIZE: [f32; 8] = [
     0.5,  // Snake
 ];
 
-/// Return (tint, size) based on creature type, life phase, and need state.
-/// Fauna get fixed species colors/sizes; humans get need-driven state colors with per-being hue variation.
+/// Emotion colors blended into sprite tint when an emotion is dominant.
+/// Order matches EMO_* indices: Fear=0, Joy=1, Curiosity=2, Anger=3, Grief=4, Contentment=5.
+const EMOTION_COLORS: [[f32; 3]; 6] = [
+    [0.55, 0.15, 0.75], // Fear        — purple
+    [1.00, 0.90, 0.20], // Joy         — warm yellow
+    [1.00, 0.55, 0.10], // Curiosity   — orange
+    [0.95, 0.10, 0.10], // Anger       — red
+    [0.20, 0.35, 0.90], // Grief       — blue
+    [0.25, 0.82, 0.30], // Contentment — green
+];
+
+/// Return the dominant emotion index (highest value) and its intensity.
+fn dominant_emotion(emotions: &[f32; 6]) -> (usize, f32) {
+    let mut best_idx = 0usize;
+    let mut best_val = 0.0f32;
+    for i in 0..6 {
+        if emotions[i] > best_val {
+            best_val = emotions[i];
+            best_idx = i;
+        }
+    }
+    (best_idx, best_val)
+}
+
+/// Return (tint, size) based on creature type, life phase, need state, and emotions.
+///
+/// Priority:
+/// 1. Critical needs (safety < 0.3, hunger < 0.3/0.5) always override — survival visibility.
+/// 2. Dominant emotion blended into cloth color when healthy (emotion > 0.15).
+/// 3. Cloth color alone when no significant emotion.
 fn state_color_and_size(
     being_idx: usize,
     needs: &[f32; 6],
+    emotions: &[f32; 6],
     state: BeingState,
     creature_type: u8,
     phase: LifePhase,
 ) -> ([f32; 3], f32) {
     let ct = creature_type as usize;
 
-    // Fauna: species-specific color and size, ignore state
+    // Fauna: species-specific color and size, ignore state/emotion
     if creature_type != CreatureType::Human as u8 && ct < 8 {
         let color = FAUNA_COLOR[ct];
         let size = FAUNA_SIZE[ct];
         return (color, size);
     }
 
-    // Human: size by life phase — youth 0.7x, elder 0.9x, adult 1.0x baseline
+    // Human: size by life phase
     let base_size = match phase {
-        LifePhase::Youth => 1.4,  // 2.0 * 0.7
+        LifePhase::Youth => 1.4,
         LifePhase::Adult => 2.0,
-        LifePhase::Elder => 1.8,  // 2.0 * 0.9
+        LifePhase::Elder => 1.8,
     };
 
-    // Human: state-driven primary color blended with per-being cloth color for visual variety
     let cloth_color = being_cloth_color(being_idx);
 
     if state == BeingState::Sleeping {
-        // Sleeping: blue tint blended with personal cloth color
         let c = blend_colors([0.3, 0.5, 1.0], cloth_color, 0.3);
         return (c, base_size);
     }
+
     let safety = needs[NEED_SAFETY];
     let hunger = needs[NEED_HUNGER];
+
+    // Critical need overrides — always take precedence over emotion
     if safety < 0.3 {
-        // Fear/danger: strong red override, slight cloth tint
         let c = blend_colors([1.0, 0.15, 0.15], cloth_color, 0.1);
         return (c, base_size);
     }
     if hunger < 0.3 {
-        // Starving: orange override
         let c = blend_colors([1.0, 0.5, 0.1], cloth_color, 0.1);
         return (c, base_size);
     }
     if hunger < 0.5 {
-        // Hungry: yellow-orange, some cloth tint
         let c = blend_colors([1.0, 0.9, 0.2], cloth_color, 0.2);
         return (c, base_size);
     }
-    // Healthy: cloth color dominates (shows personality/culture)
-    let c = blend_colors([0.3, 0.85, 0.3], cloth_color, 0.5);
-    (c, base_size)
+
+    // Healthy: layer dominant emotion onto cloth color.
+    // Weight ramps from 0 at emotion=0.15 to 0.65 at emotion=1.0.
+    let base = blend_colors([0.3, 0.85, 0.3], cloth_color, 0.5);
+    let (dom_idx, dom_val) = dominant_emotion(emotions);
+    let emo_weight = ((dom_val - 0.15) / 0.85).clamp(0.0, 1.0) * 0.65;
+    if emo_weight > 0.01 {
+        let c = blend_colors(base, EMOTION_COLORS[dom_idx], emo_weight);
+        (c, base_size)
+    } else {
+        (base, base_size)
+    }
 }
 
 /// Per-being cloth color derived from being index hash — 6 distinct palette entries.

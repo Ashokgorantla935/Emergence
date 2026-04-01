@@ -66,7 +66,7 @@ impl Default for Particle {
     }
 }
 
-/// 12 emitter types matching all visual events.
+/// 15 emitter types — 12 original + 3 emotion event emitters.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EmitterKind {
     BirthSparkle,
@@ -81,6 +81,10 @@ pub enum EmitterKind {
     RainSplash,
     Snow,
     WorldEvent, // generic: wildfire embers, tornado debris, etc.
+    // Emotion event particles — emitted when emotion crosses threshold
+    EmotionJoy,    // yellow sparkle upward
+    EmotionAnger,  // red flash burst
+    EmotionGrief,  // blue teardrop floating up
 }
 
 pub struct ParticleSystem {
@@ -279,6 +283,53 @@ impl ParticleSystem {
                     max_lifetime: 50.0,
                     size:         0.2,
                     sprite_uv:    UV_SPARKLE,
+                    alive:        true,
+                });
+            }
+            EmitterKind::EmotionJoy => {
+                // 3 yellow sparkles floating upward
+                for _ in 0..3 {
+                    let vx = (fastrand::f32() - 0.5) * 0.3;
+                    let vy = -(0.25 + fastrand::f32() * 0.2);
+                    self.spawn(Particle {
+                        position:     [origin[0], origin[1] - 1.0],
+                        velocity:     [vx, vy],
+                        color:        [1.0, 0.95, 0.15, 1.0], // bright yellow
+                        lifetime:     35.0,
+                        max_lifetime: 35.0,
+                        size:         0.22,
+                        sprite_uv:    UV_SPARKLE,
+                        alive:        true,
+                    });
+                }
+            }
+            EmitterKind::EmotionAnger => {
+                // 4 red flash particles burst outward
+                for i in 0..4usize {
+                    let angle = (i as f32) * std::f32::consts::TAU / 4.0 + fastrand::f32() * 0.5;
+                    let speed = 0.3 + fastrand::f32() * 0.3;
+                    self.spawn(Particle {
+                        position:     [origin[0], origin[1] - 0.8],
+                        velocity:     [angle.cos() * speed, angle.sin() * speed],
+                        color:        [1.0, 0.1, 0.05, 1.0], // vivid red
+                        lifetime:     18.0,
+                        max_lifetime: 18.0,
+                        size:         0.2,
+                        sprite_uv:    UV_FLASH,
+                        alive:        true,
+                    });
+                }
+            }
+            EmitterKind::EmotionGrief => {
+                // Single blue teardrop floating upward slowly
+                self.spawn(Particle {
+                    position:     [origin[0], origin[1] - 1.0],
+                    velocity:     [(fastrand::f32() - 0.5) * 0.1, -0.15],
+                    color:        [0.2, 0.4, 1.0, 0.9], // blue
+                    lifetime:     55.0,
+                    max_lifetime: 55.0,
+                    size:         0.28,
+                    sprite_uv:    UV_SOUL, // teardrop-like soul sprite
                     alive:        true,
                 });
             }

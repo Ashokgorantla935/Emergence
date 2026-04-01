@@ -27,7 +27,8 @@ use emergence_viewer::screen_state::{
     SaveSlotInfo, ScenarioSelectAction, ScenarioSelectUi, ScreenState, SpeedControls,
     TopBar,
 };
-use emergence_viewer::god_tools::{GodToolState, palette as god_palette};
+use emergence_viewer::god_tools::{GodToolState, CursorPreview, palette as god_palette};
+use emergence_viewer::renderer::post_process::ScreenShake;
 use emergence_viewer::ui::news_feed::NewsFeed;
 use emergence_viewer::ui::minimap::Minimap;
 use emergence_viewer::ui::statistics::{StatsHistory, StatisticsPanel};
@@ -122,6 +123,11 @@ struct App {
 
     // Accumulated wall-clock time for water animation shader
     elapsed_time: f32,
+
+    // God tool visual feedback
+    cursor_preview: CursorPreview,
+    flash_alpha: f32,
+    shake: ScreenShake,
 }
 
 impl App {
@@ -176,6 +182,9 @@ impl App {
             left_mouse_clicked: false,
             shift_held: false,
             elapsed_time: 0.0,
+            cursor_preview: CursorPreview::new(),
+            flash_alpha: 0.0,
+            shake: ScreenShake::new(),
         }
     }
 
@@ -692,6 +701,22 @@ impl ApplicationHandler for App {
                             if let Some(sound) = emergence_viewer::audio::god_power_id_to_sound(pid) {
                                 self.sound_engine.play_god_power(sound);
                             }
+                            // Screen shake for heavy destruction powers
+                            match pid {
+                                32 => self.shake.trigger(1.0),  // Earthquake
+                                33 => self.shake.trigger(0.8),  // Volcano / Flood
+                                37 => self.shake.trigger(0.6),  // Tornado
+                                31 => self.shake.trigger(0.7),  // MeteorStrike
+                                39 | 41 => self.shake.trigger(0.5), // KillRegion / RemoveAll
+                                _ => {}
+                            }
+                            // Impact flash for lightning and fire powers
+                            match pid {
+                                30 => self.flash_alpha = 0.9,  // Lightning
+                                36 => self.flash_alpha = 0.5,  // Wildfire ignite
+                                26 => self.flash_alpha = 0.4,  // Heatwave
+                                _ => {}
+                            }
                         }
                         let mut w = world.write().unwrap();
                         for action in self.god_tool_state.action_queue.drain(..) {
@@ -788,6 +813,22 @@ impl ApplicationHandler for App {
         // Update camera
         self.camera.update(dt);
 
+        // Apply screen shake offset to camera position
+        if self.shake.trauma > 0.0 {
+            let tick = self.world.as_ref()
+                .and_then(|w| w.try_read().ok())
+                .map(|w| w.tick)
+                .unwrap_or(0);
+            let offset = self.shake.update(tick);
+            self.camera.position[0] += offset[0];
+            self.camera.position[1] += offset[1];
+        }
+
+        // Decay flash alpha (~10 ticks at 60fps ≈ 160ms)
+        if self.flash_alpha > 0.0 {
+            self.flash_alpha = (self.flash_alpha - dt * 6.0).max(0.0);
+        }
+
         // Accumulate wall-clock time for water animation and tree sway
         self.elapsed_time += dt;
         if let Some(ref rs) = self.render_state {
@@ -835,7 +876,7 @@ impl ApplicationHandler for App {
                     [0.0, 0.0]
                 };
                 let world_read = world.read().unwrap();
-                let _preview = emergence_viewer::god_tools::handle_input(
+                self.cursor_preview = emergence_viewer::god_tools::handle_input(
                     &mut self.god_tool_state,
                     world_pos,
                     self.left_mouse_clicked,
@@ -995,6 +1036,36 @@ impl ApplicationHandler for App {
                     }
                 }
 
+                // Emotion event particles: sample beings every 20 ticks to avoid flood.
+                // Each tick, check the bucket of beings whose index % 20 == tick % 20.
+                // This gives each being an emotion check once per 20 ticks (~0.33 sec at 60tps).
+                {
+                    use emergence_core::being::data::{
+                        BeingState, EMO_JOY, EMO_ANGER, EMO_GRIEF,
+                    };
+                    let bucket = (world.tick % 20) as usize;
+                    let beings = &world.beings;
+                    for i in (bucket..beings.count).step_by(20) {
+                        if beings.states[i] == BeingState::Dead {
+                            continue;
+                        }
+                        let emos = &beings.emotions[i];
+                        let pos = beings.positions[i];
+                        // Joy spike
+                        if emos[EMO_JOY] > 0.55 {
+                            ps.emit(EmitterKind::EmotionJoy, pos, world.tick);
+                        }
+                        // Anger spike
+                        if emos[EMO_ANGER] > 0.6 {
+                            ps.emit(EmitterKind::EmotionAnger, pos, world.tick);
+                        }
+                        // Grief spike
+                        if emos[EMO_GRIEF] > 0.55 {
+                            ps.emit(EmitterKind::EmotionGrief, pos, world.tick);
+                        }
+                    }
+                }
+
                 ps.update(&rs.queue);
             }
 
@@ -1121,6 +1192,168 @@ impl ApplicationHandler for App {
                 // Handle minimap camera jumps
                 if let Some(jump) = self.minimap.jump_target.take() {
                     self.camera.position = jump;
+                }
+
+                // Brush preview circle overlay (world-space → screen-space projection)
+                if self.god_tool_state.active_power.is_some() {
+                    if let Some(ref window) = self.window {
+                        let win_size = window.inner_size();
+                        let sw = win_size.width as f32;
+                        let sh = win_size.height as f32;
+                        let preview = self.cursor_preview.clone();
+
+                        if let Some(screen_pos) = self.camera.world_to_screen(
+                            preview.world_pos[0],
+                            preview.world_pos[1],
+                            sw, sh,
+                        ) {
+                            let pixels_per_unit = sh / self.camera.zoom;
+                            let screen_radius = preview.radius * pixels_per_unit;
+                            let color = preview.color;
+                            let egui_color = egui::Color32::from_rgba_unmultiplied(
+                                (color[0] * 255.0) as u8,
+                                (color[1] * 255.0) as u8,
+                                (color[2] * 255.0) as u8,
+                                (color[3] * 200.0) as u8,
+                            );
+                            let stroke_color = egui::Color32::from_rgba_unmultiplied(
+                                (color[0] * 255.0) as u8,
+                                (color[1] * 255.0) as u8,
+                                (color[2] * 255.0) as u8,
+                                230,
+                            );
+                            let center = egui::pos2(screen_pos[0], screen_pos[1]);
+                            let drag_start_screen = if preview.show_drag_line {
+                                preview.drag_start.and_then(|s| {
+                                    self.camera.world_to_screen(s[0], s[1], sw, sh)
+                                })
+                            } else {
+                                None
+                            };
+
+                            egui::Area::new(egui::Id::new("brush_preview_overlay"))
+                                .fixed_pos(egui::pos2(0.0, 0.0))
+                                .order(egui::Order::Foreground)
+                                .interactable(false)
+                                .show(&self.egui_ctx, |ui| {
+                                    let painter = ui.painter();
+                                    if preview.show_circle && screen_radius > 1.0 {
+                                        painter.circle(
+                                            center,
+                                            screen_radius,
+                                            egui_color,
+                                            egui::Stroke::new(1.5, stroke_color),
+                                        );
+                                    } else {
+                                        let r = 6.0;
+                                        painter.line_segment(
+                                            [egui::pos2(center.x - r, center.y), egui::pos2(center.x + r, center.y)],
+                                            egui::Stroke::new(1.5, stroke_color),
+                                        );
+                                        painter.line_segment(
+                                            [egui::pos2(center.x, center.y - r), egui::pos2(center.x, center.y + r)],
+                                            egui::Stroke::new(1.5, stroke_color),
+                                        );
+                                    }
+                                    if let Some(ds) = drag_start_screen {
+                                        painter.line_segment(
+                                            [egui::pos2(ds[0], ds[1]), center],
+                                            egui::Stroke::new(2.0, stroke_color),
+                                        );
+                                    }
+                                });
+                        }
+                    }
+                }
+
+                // Impact flash overlay (full-screen semi-transparent white rect)
+                if self.flash_alpha > 0.01 {
+                    egui::Area::new(egui::Id::new("flash_overlay"))
+                        .fixed_pos(egui::pos2(0.0, 0.0))
+                        .order(egui::Order::Foreground)
+                        .interactable(false)
+                        .show(&self.egui_ctx, |ui| {
+                            if let Some(ref window) = self.window {
+                                let win_size = window.inner_size();
+                                let rect = egui::Rect::from_min_size(
+                                    egui::pos2(0.0, 0.0),
+                                    egui::vec2(win_size.width as f32, win_size.height as f32),
+                                );
+                                ui.painter().rect_filled(
+                                    rect,
+                                    0.0,
+                                    egui::Color32::from_rgba_unmultiplied(
+                                        255, 255, 220,
+                                        (self.flash_alpha * 180.0) as u8,
+                                    ),
+                                );
+                            }
+                        });
+                }
+
+                // Settlement world markers — floating labels, center diamond, radius ring
+                if !self.settlement_detector.settlements.is_empty() {
+                    let screen_w = rs.surface_config.width as f32;
+                    let screen_h = rs.surface_config.height as f32;
+                    let pixels_per_world_unit = screen_h / self.camera.zoom;
+
+                    egui::Area::new(egui::Id::new("settlement_overlay"))
+                        .fixed_pos(egui::Pos2::ZERO)
+                        .order(egui::Order::Background)
+                        .interactable(false)
+                        .show(&self.egui_ctx, |ui| {
+                            let painter = ui.painter();
+                            for s in &self.settlement_detector.settlements {
+                                let Some([sx, sy]) = self.camera.world_to_screen(
+                                    s.center[0], s.center[1], screen_w, screen_h,
+                                ) else {
+                                    continue;
+                                };
+                                let center = egui::Pos2::new(sx, sy);
+
+                                // Settlement radius ring (faint circle)
+                                let radius_world = (s.population as f32 * 1.5 + 8.0).min(40.0);
+                                let radius_px = radius_world * pixels_per_world_unit;
+                                painter.circle_stroke(
+                                    center,
+                                    radius_px,
+                                    egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 220, 100, 60)),
+                                );
+
+                                // Center diamond marker
+                                let d = 5.0f32;
+                                let diamond = vec![
+                                    center + egui::Vec2::new(0.0, -d),
+                                    center + egui::Vec2::new(d, 0.0),
+                                    center + egui::Vec2::new(0.0, d),
+                                    center + egui::Vec2::new(-d, 0.0),
+                                ];
+                                painter.add(egui::Shape::convex_polygon(
+                                    diamond,
+                                    egui::Color32::from_rgba_unmultiplied(255, 220, 100, 200),
+                                    egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(200, 160, 60, 220)),
+                                ));
+
+                                // Name + population label
+                                let label = format!("{} ({})", s.name, s.population);
+                                let label_pos = center + egui::Vec2::new(0.0, -d - 12.0);
+                                // Dark shadow for readability
+                                painter.text(
+                                    label_pos + egui::Vec2::new(1.0, 1.0),
+                                    egui::Align2::CENTER_BOTTOM,
+                                    &label,
+                                    egui::FontId::proportional(12.0),
+                                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180),
+                                );
+                                painter.text(
+                                    label_pos,
+                                    egui::Align2::CENTER_BOTTOM,
+                                    &label,
+                                    egui::FontId::proportional(12.0),
+                                    egui::Color32::from_rgba_unmultiplied(255, 230, 130, 230),
+                                );
+                            }
+                        });
                 }
 
                 self.onboarding.show(&self.egui_ctx);

@@ -259,4 +259,22 @@ impl Camera {
             self.position[1] - ndc_y * half_h,
         ]
     }
+
+    /// Convert world coordinates to screen pixel coordinates.
+    /// Returns None if the point is outside the viewport.
+    pub fn world_to_screen(&self, world_x: f32, world_y: f32, screen_w: f32, screen_h: f32) -> Option<[f32; 2]> {
+        let half_h = self.zoom / 2.0;
+        let half_w = half_h * self.aspect;
+        let dx = world_x - self.position[0];
+        let dy = world_y - self.position[1];
+        // Reject clearly off-screen (with small margin)
+        if dx < -half_w * 1.1 || dx > half_w * 1.1 || dy < -half_h * 1.1 || dy > half_h * 1.1 {
+            return None;
+        }
+        let ndc_x = dx / half_w;
+        let ndc_y = -dy / half_h;
+        let sx = (ndc_x + 1.0) * 0.5 * screen_w;
+        let sy = (1.0 - ndc_y) * 0.5 * screen_h;
+        Some([sx, sy])
+    }
 }

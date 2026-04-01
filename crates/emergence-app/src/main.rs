@@ -157,6 +157,9 @@ struct App {
 
     // World annotations: floating dramatic callouts (wars, kingdoms, alliances)
     world_annotations: Vec<WorldAnnotation>,
+
+    // Toast queue: persistent floating action labels with 2-second fade-out
+    toast_queue: FloatingToastQueue,
 }
 
 /// A floating world annotation shown over game events.
@@ -166,6 +169,70 @@ struct WorldAnnotation {
     color: egui::Color32,
     spawn_tick: u32,
     duration: u32,
+}
+
+/// A single floating toast label — persists for 2 seconds with fade-out.
+struct FloatingToast {
+    text: &'static str,
+    world_pos: [f32; 2],
+    color: egui::Color32,
+    remaining_frames: u32,
+    /// Vertical drift offset in world units (increases each tick).
+    drift: f32,
+}
+
+/// Queue of active floating toasts. Replaces per-frame action label sampling.
+struct FloatingToastQueue {
+    toasts: Vec<FloatingToast>,
+}
+
+impl FloatingToastQueue {
+    fn new() -> Self {
+        Self { toasts: Vec::new() }
+    }
+
+    /// Push a toast. Deduplicates: refresh timer if same text exists within 2 cells.
+    fn push(&mut self, text: &'static str, world_pos: [f32; 2], color: egui::Color32) {
+        // Evict oldest if at cap
+        if self.toasts.len() >= 50 {
+            self.toasts.remove(0);
+        }
+        for toast in &mut self.toasts {
+            if toast.text == text {
+                let dx = toast.world_pos[0] - world_pos[0];
+                let dy = toast.world_pos[1] - world_pos[1];
+                if dx * dx + dy * dy < 4.0 {
+                    toast.remaining_frames = 120;
+                    return;
+                }
+            }
+        }
+        self.toasts.push(FloatingToast {
+            text,
+            world_pos,
+            color,
+            remaining_frames: 120,
+            drift: 0.0,
+        });
+    }
+
+    /// Advance one frame: decrement timers, drift upward, remove expired.
+    fn tick(&mut self) {
+        self.toasts.retain_mut(|t| {
+            t.remaining_frames = t.remaining_frames.saturating_sub(1);
+            t.drift += 0.015; // drift upward ~0.015 world units per frame
+            t.remaining_frames > 0
+        });
+    }
+
+    /// Alpha for a toast — fades out over the last 30 frames.
+    fn alpha(toast: &FloatingToast) -> f32 {
+        if toast.remaining_frames > 30 {
+            1.0
+        } else {
+            toast.remaining_frames as f32 / 30.0
+        }
+    }
 }
 
 impl App {
@@ -226,6 +293,7 @@ impl App {
             show_bond_lines: true,
             show_kingdom_colors: true,
             world_annotations: Vec::new(),
+            toast_queue: FloatingToastQueue::new(),
         }
     }
 
@@ -1140,7 +1208,7 @@ impl ApplicationHandler for App {
             let world = world.read().unwrap();
 
             let cam_uniform = self.camera.uniform();
-            rs.update_camera(&cam_uniform, pixels_per_unit);
+            rs.update_camera(&cam_uniform, pixels_per_unit, self.camera.zoom);
 
             self.anim.update(dt, &world.beings);
 
@@ -1675,101 +1743,119 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                // ── Floating action labels above beings ────────────────────────
-                // Sample ~1/30 of beings per frame via bucket rotation to cap label count.
-                if let Some(ref world) = self.world {
-                    let world = world.read().unwrap();
-                    let screen_w = rs.surface_config.width as f32;
-                    let screen_h = rs.surface_config.height as f32;
-                    let tick_bucket = (world.tick % 30) as usize;
-                    let count = world.beings.hot.count;
-
-                    // Collect label data before the egui closure (borrow checker)
-                    struct LabelEntry {
-                        sx: f32,
-                        sy: f32,
-                        text: &'static str,
-                        color: egui::Color32,
-                    }
-                    let mut labels: Vec<LabelEntry> = Vec::with_capacity(32);
-
-                    for i in (tick_bucket..count).step_by(30) {
-                        if labels.len() >= 30 {
-                            break;
+                // ── Floating action labels — toast queue (2s fade-out, no flicker) ──
+                // Each frame: scan 1/30 of beings and push notable actions into the
+                // toast queue. The queue holds labels for 120 frames (~2s at 60fps)
+                // and fades out over the last 30 frames, eliminating 1-tick strobing.
+                {
+                    // Push new toasts from this frame's bucket slice
+                    if let Some(ref world) = self.world {
+                        let world = world.read().unwrap();
+                        let tick_bucket = (world.tick % 30) as usize;
+                        let count = world.beings.hot.count;
+                        let mut pushed = 0usize;
+                        for i in (tick_bucket..count).step_by(30) {
+                            if pushed >= 30 { break; }
+                            if world.beings.hot.states[i] == emergence_core::being::data::BeingState::Dead {
+                                continue;
+                            }
+                            let action_u8 = world.beings.hot.pending_action[i];
+                            let (text, color): (&'static str, egui::Color32) = match action_u8 {
+                                5  => ("Bonding",   egui::Color32::from_rgb(255, 180, 220)),
+                                6  => ("Sharing",   egui::Color32::from_rgb(255, 220, 30)),
+                                8  => ("Exploring", egui::Color32::from_rgb(60, 210, 80)),
+                                11 => ("Mourning",  egui::Color32::from_rgb(120, 140, 255)),
+                                14 => ("Hunting",   egui::Color32::from_rgb(230, 50, 50)),
+                                15 => ("Teaching",  egui::Color32::from_rgb(255, 160, 30)),
+                                16 => ("Building",  egui::Color32::from_rgb(100, 200, 255)),
+                                3  => ("Fighting",  egui::Color32::from_rgb(220, 40, 40)),
+                                _  => continue,
+                            };
+                            let pos = world.beings.hot.positions[i];
+                            self.toast_queue.push(text, pos, color);
+                            pushed += 1;
                         }
-                        // Skip dead beings
-                        if world.beings.hot.states[i] == emergence_core::being::data::BeingState::Dead {
-                            continue;
-                        }
-                        let action_u8 = world.beings.hot.pending_action[i];
-                        let (text, color): (&'static str, egui::Color32) = match action_u8 {
-                            5  => ("Bonding",   egui::Color32::from_rgb(255, 180, 220)), // Bond — pink
-                            6  => ("Sharing",   egui::Color32::from_rgb(255, 220, 30)),  // ShareFood — yellow
-                            8  => ("Exploring", egui::Color32::from_rgb(60, 210, 80)),   // Explore — green
-                            11 => ("Mourning",  egui::Color32::from_rgb(120, 140, 255)), // Mourn — blue/indigo
-                            14 => ("Hunting",   egui::Color32::from_rgb(230, 50, 50)),   // Hunt — red
-                            15 => ("Teaching",  egui::Color32::from_rgb(255, 160, 30)),  // Teach — orange
-                            16 => ("Building",  egui::Color32::from_rgb(100, 200, 255)), // Build — cyan
-                            3  => ("Fighting",  egui::Color32::from_rgb(220, 40, 40)),   // Flee (conflict) — red
-                            _  => continue, // skip unremarkable actions
-                        };
-
-                        let pos = world.beings.hot.positions[i];
-                        let Some([sx, sy]) = self.camera.world_to_screen(pos[0], pos[1], screen_w, screen_h)
-                        else { continue };
-
-                        // Skip if off-screen
-                        if sx < -20.0 || sx > screen_w + 20.0 || sy < -20.0 || sy > screen_h + 20.0 {
-                            continue;
-                        }
-
-                        labels.push(LabelEntry { sx, sy, text, color });
                     }
 
-                    if !labels.is_empty() {
-                        egui::Area::new(egui::Id::new("action_labels_overlay"))
-                            .fixed_pos(egui::pos2(0.0, 0.0))
-                            .order(egui::Order::Foreground)
-                            .interactable(false)
-                            .show(&self.egui_ctx, |ui| {
-                                let painter = ui.painter();
-                                for entry in &labels {
-                                    let label_pos = egui::pos2(entry.sx, entry.sy - 22.0);
-                                    // Semi-transparent background pill
-                                    let font = egui::FontId::proportional(10.0);
-                                    let galley = painter.layout_no_wrap(
-                                        entry.text.to_string(),
-                                        font.clone(),
-                                        entry.color,
-                                    );
-                                    let text_size = galley.size();
-                                    let bg_rect = egui::Rect::from_center_size(
-                                        label_pos,
-                                        text_size + egui::vec2(6.0, 3.0),
-                                    );
-                                    painter.rect_filled(
-                                        bg_rect,
-                                        egui::CornerRadius::same(3),
-                                        egui::Color32::from_rgba_unmultiplied(0, 0, 0, 140),
-                                    );
-                                    // Shadow
-                                    painter.text(
-                                        label_pos + egui::vec2(1.0, 1.0),
-                                        egui::Align2::CENTER_CENTER,
-                                        entry.text,
-                                        egui::FontId::proportional(10.0),
-                                        egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180),
-                                    );
-                                    // Label
-                                    painter.text(
-                                        label_pos,
-                                        egui::Align2::CENTER_CENTER,
-                                        entry.text,
-                                        egui::FontId::proportional(10.0),
-                                        entry.color,
-                                    );
-                                }
+                    // Advance toast timers (drift + countdown)
+                    self.toast_queue.tick();
+
+                    // Render active toasts
+                    if !self.toast_queue.toasts.is_empty() {
+                        let screen_w = rs.surface_config.width as f32;
+                        let screen_h = rs.surface_config.height as f32;
+
+                        struct ToastRender {
+                            sx: f32,
+                            sy: f32,
+                            text: &'static str,
+                            color: egui::Color32,
+                            alpha: f32,
+                        }
+                        let mut render_list: Vec<ToastRender> = Vec::with_capacity(self.toast_queue.toasts.len());
+                        for toast in &self.toast_queue.toasts {
+                            let wx = toast.world_pos[0];
+                            let wy = toast.world_pos[1] - toast.drift;
+                            let Some([sx, sy]) = self.camera.world_to_screen(wx, wy, screen_w, screen_h)
+                            else { continue };
+                            if sx < -20.0 || sx > screen_w + 20.0 || sy < -20.0 || sy > screen_h + 20.0 {
+                                continue;
+                            }
+                            render_list.push(ToastRender {
+                                sx, sy,
+                                text: toast.text,
+                                color: toast.color,
+                                alpha: FloatingToastQueue::alpha(toast),
                             });
+                        }
+
+                        if !render_list.is_empty() {
+                            egui::Area::new(egui::Id::new("action_labels_overlay"))
+                                .fixed_pos(egui::pos2(0.0, 0.0))
+                                .order(egui::Order::Foreground)
+                                .interactable(false)
+                                .show(&self.egui_ctx, |ui| {
+                                    let painter = ui.painter();
+                                    for entry in &render_list {
+                                        let a = (entry.alpha * 255.0) as u8;
+                                        let [r, g, b, _] = entry.color.to_array();
+                                        let text_color = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
+                                        let bg_alpha = (entry.alpha * 140.0) as u8;
+                                        let shadow_alpha = (entry.alpha * 180.0) as u8;
+                                        let label_pos = egui::pos2(entry.sx, entry.sy - 22.0);
+                                        let font = egui::FontId::proportional(10.0);
+                                        let galley = painter.layout_no_wrap(
+                                            entry.text.to_string(),
+                                            font.clone(),
+                                            text_color,
+                                        );
+                                        let text_size = galley.size();
+                                        let bg_rect = egui::Rect::from_center_size(
+                                            label_pos,
+                                            text_size + egui::vec2(6.0, 3.0),
+                                        );
+                                        painter.rect_filled(
+                                            bg_rect,
+                                            egui::CornerRadius::same(3),
+                                            egui::Color32::from_rgba_unmultiplied(0, 0, 0, bg_alpha),
+                                        );
+                                        painter.text(
+                                            label_pos + egui::vec2(1.0, 1.0),
+                                            egui::Align2::CENTER_CENTER,
+                                            entry.text,
+                                            egui::FontId::proportional(10.0),
+                                            egui::Color32::from_rgba_unmultiplied(0, 0, 0, shadow_alpha),
+                                        );
+                                        painter.text(
+                                            label_pos,
+                                            egui::Align2::CENTER_CENTER,
+                                            entry.text,
+                                            egui::FontId::proportional(10.0),
+                                            text_color,
+                                        );
+                                    }
+                                });
+                        }
                     }
                 }
 
@@ -2189,9 +2275,9 @@ impl ApplicationHandler for App {
                             resolve_target: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(wgpu::Color {
-                                    r: 0.1,
-                                    g: 0.1,
-                                    b: 0.15,
+                                    r: 0.118,
+                                    g: 0.227,
+                                    b: 0.541,
                                     a: 1.0,
                                 }),
                                 store: wgpu::StoreOp::Store,
@@ -2247,6 +2333,9 @@ impl ApplicationHandler for App {
                     }
 
                     // World objects (resources + structures)
+                    // DISABLED: GPU hash decorations are now painted directly in terrain.wgsl
+                    // Kept here for potential restore — just remove the `if false` wrapper.
+                    if false {
                     if let Some(ref obj_r) = self.object_renderer {
                         if obj_r.instance_count > 0 {
                             render_pass.set_pipeline(&rs.object_pipeline);
@@ -2262,10 +2351,14 @@ impl ApplicationHandler for App {
                             render_pass.draw_indexed(0..6, 0, 0..obj_r.instance_count);
                         }
                     }
+                    } // end if false
 
                     // Beings (sprites)
+                    // Skip draw call entirely at macro zoom (< 2.0 px/unit = > ~150 visible cells).
+                    // LOD 2 dots are drawn at 2.0-5.0 px/unit; full sprites above 5.0 (handled in update).
+                    let being_pixels_per_unit = rs.surface_config.height as f32 / self.camera.zoom;
                     if let Some(ref being_r) = self.being_renderer {
-                        if being_r.instance_count > 0 {
+                        if being_r.instance_count > 0 && being_pixels_per_unit >= 2.0 {
                             render_pass.set_pipeline(&rs.sprite_pipeline);
                             render_pass.set_bind_group(0, &rs.camera_bind_group, &[]);
                             render_pass.set_bind_group(1, &rs.atlas.bind_group, &[]);

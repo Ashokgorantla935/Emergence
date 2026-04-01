@@ -671,6 +671,20 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
     }
 }
 
+/// Species-specific maximum speed in tiles per tick.
+fn max_speed_for(creature_type: u8) -> f32 {
+    match CreatureType::from_u8(creature_type) {
+        CreatureType::Human  => 0.15,
+        CreatureType::Wolf   => 0.30,
+        CreatureType::Hawk   => 0.35,
+        CreatureType::Deer   => 0.25,
+        CreatureType::Rabbit => 0.20,
+        CreatureType::Bear   => 0.15,
+        CreatureType::Fish   => 0.12,
+        CreatureType::Snake  => 0.08,
+    }
+}
+
 fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f32) {
     let pos = world.beings.hot.positions[being_index];
     let dx = target[0] - pos[0];
@@ -694,8 +708,13 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
     let effective_speed = speed / cost;
     let move_dist = effective_speed.min(dist);
 
-    let new_x = (pos[0] + nx * move_dist).clamp(0.0, world.terrain.width as f32 - 1.0);
-    let new_y = (pos[1] + ny * move_dist).clamp(0.0, world.terrain.height as f32 - 1.0);
+    // Clamp per-tick displacement to species max speed (prevents MLP brain from
+    // producing teleporting velocity vectors that appear as dark streaks).
+    let max_speed = max_speed_for(world.beings.hot.creature_type[being_index]);
+    let clamped_dist = move_dist.min(max_speed);
+
+    let new_x = (pos[0] + nx * clamped_dist).clamp(0.0, world.terrain.width as f32 - 1.0);
+    let new_y = (pos[1] + ny * clamped_dist).clamp(0.0, world.terrain.height as f32 - 1.0);
 
     let ncx = new_x as u32;
     let ncy = new_y as u32;
@@ -706,12 +725,12 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
     if is_fish {
         if is_water {
             world.beings.hot.positions[being_index] = [new_x, new_y];
-            world.beings.hot.velocities[being_index] = [nx * effective_speed, ny * effective_speed];
+            world.beings.hot.velocities[being_index] = [nx * clamped_dist, ny * clamped_dist];
         }
         // Fish stay in water — don't move to land
     } else if !is_water {
         world.beings.hot.positions[being_index] = [new_x, new_y];
-        world.beings.hot.velocities[being_index] = [nx * effective_speed, ny * effective_speed];
+        world.beings.hot.velocities[being_index] = [nx * clamped_dist, ny * clamped_dist];
     }
 }
 

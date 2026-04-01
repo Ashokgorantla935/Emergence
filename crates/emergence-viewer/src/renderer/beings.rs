@@ -167,9 +167,10 @@ impl BeingRenderer {
             let (atlas_uv, atlas_size, size, bob_flip) = match lod {
                 // LOD 1: static sprite — kill bob animation
                 1 => (atlas_uv, atlas_size, size, 0.0f32),
-                // LOD 2: 1px dot — use a solid white pixel in atlas top-left corner,
-                //         override size to 1 world unit, no animation
-                2 => ([0.0f32, 0.0], [ATLAS_CELL * 0.1, ATLAS_CELL * 0.1], 1.0f32, 0.0f32),
+                // LOD 2: solid colored dot — sentinel atlas_size [0,0] triggers
+                //         the dot path in the shader (emotion_tint circle, no atlas sampling).
+                //         Size 1.5 world units keeps dots visible at macro zoom.
+                2 => ([0.0f32, 0.0], [0.0f32, 0.0], 1.5f32, 0.0f32),
                 // LOD 0: full quality (no override)
                 _ => (atlas_uv, atlas_size, size, bob_flip),
             };

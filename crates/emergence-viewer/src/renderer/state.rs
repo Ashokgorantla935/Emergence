@@ -14,17 +14,21 @@ pub struct ExtCameraUniform {
     pub pixels_per_unit: f32,
     pub _pad0:           f32,
     pub _pad1:           f32,
-    pub _pad2:           f32,
+    pub zoom_level:      u32,  // 0=macro(>150 cells), 1=medium(50-150), 2=close(<50)
 }
 
 impl ExtCameraUniform {
-    pub fn from_basic(basic: &CameraUniform, pixels_per_unit: f32) -> Self {
+    pub fn from_basic(basic: &CameraUniform, pixels_per_unit: f32, cam_zoom: f32) -> Self {
+        // cam_zoom is the visible height in world cells
+        let zoom_level = if cam_zoom > 150.0 { 0u32 }
+                         else if cam_zoom > 50.0 { 1u32 }
+                         else { 2u32 };
         ExtCameraUniform {
             view_proj: basic.view_proj,
             pixels_per_unit,
             _pad0: 0.0,
             _pad1: 0.0,
-            _pad2: 0.0,
+            zoom_level,
         }
     }
 }
@@ -138,7 +142,7 @@ impl RenderState {
             pixels_per_unit: 32.0,
             _pad0: 0.0,
             _pad1: 0.0,
-            _pad2: 0.0,
+            zoom_level: 1u32,
         };
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -765,8 +769,8 @@ impl RenderState {
         }
     }
 
-    pub fn update_camera(&self, uniform: &CameraUniform, pixels_per_unit: f32) {
-        let ext = ExtCameraUniform::from_basic(uniform, pixels_per_unit);
+    pub fn update_camera(&self, uniform: &CameraUniform, pixels_per_unit: f32, cam_zoom: f32) {
+        let ext = ExtCameraUniform::from_basic(uniform, pixels_per_unit, cam_zoom);
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[ext]));
     }
 

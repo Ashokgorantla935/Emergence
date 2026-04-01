@@ -54,6 +54,15 @@ impl KingdomFrame {
 // GPU instance layouts
 // ---------------------------------------------------------------------------
 
+/// A filled territory vertex (position + color, packed into triangle fans).
+/// 24 bytes.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct FillVertex {
+    pub position: [f32; 2],   // 8B  world coords
+    pub color:    [f32; 4],   // 16B RGBA (alpha = territory overlay alpha)
+}
+
 /// A line segment instance (2px wide, rendered as a thin quad).
 /// 48 bytes total.
 #[repr(C)]
@@ -84,8 +93,9 @@ pub struct OverlayQuadInstance {
 // CPU-side buffer limits
 // ---------------------------------------------------------------------------
 
-const MAX_LINES:  usize = 512;   // border segments + alliance lines
+const MAX_LINES:  usize = 512;   // alliance lines only now
 const MAX_QUADS:  usize = 128;   // flags + crowns + capital stars
+const MAX_FILL_VERTS: usize = 4096; // territory triangle fans (hull_verts * 3 per kingdom)
 
 // ---------------------------------------------------------------------------
 // KingdomOverlay renderer
@@ -98,20 +108,23 @@ pub struct KingdomOverlay {
     // GPU buffers — pre-allocated, written every frame
     line_buffer:  wgpu::Buffer,
     quad_buffer:  wgpu::Buffer,
+    fill_buffer:  wgpu::Buffer,
 
     // Pipelines
     line_pipeline: wgpu::RenderPipeline,
     quad_pipeline: wgpu::RenderPipeline,
+    fill_pipeline: wgpu::RenderPipeline,
 
     // Bind group for camera uniform
     camera_bind_group: wgpu::BindGroup,
 
-    // Vertex buffer: unit quad shared by both pipelines
+    // Vertex buffer: unit quad shared by line/quad pipelines
     unit_quad_vbuf: wgpu::Buffer,
 
     // Staged CPU buffers (avoid per-frame heap alloc after first setup)
     line_instances: Vec<LineInstance>,
     quad_instances: Vec<OverlayQuadInstance>,
+    fill_vertices:  Vec<FillVertex>,
 }
 
 impl KingdomOverlay {
@@ -148,6 +161,13 @@ impl KingdomOverlay {
             mapped_at_creation: false,
         });
 
+        let fill_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label:              Some("Kingdom Fill Vertices"),
+            size:               (MAX_FILL_VERTS * std::mem::size_of::<FillVertex>()) as u64,
+            usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         // ── Camera bind group (same layout as main render) ───────────────────
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label:  Some("Kingdom Camera BG"),
@@ -166,6 +186,10 @@ impl KingdomOverlay {
         let quad_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label:  Some("Kingdom Quad Shader"),
             source: wgpu::ShaderSource::Wgsl(KINGDOM_QUAD_WGSL.into()),
+        });
+        let fill_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label:  Some("Kingdom Fill Shader"),
+            source: wgpu::ShaderSource::Wgsl(KINGDOM_FILL_WGSL.into()),
         });
 
         // ── Pipeline layout ───────────────────────────────────────────────────
@@ -281,17 +305,59 @@ impl KingdomOverlay {
             cache:         None,
         });
 
+        // ── Fill pipeline — territory cell overlay ────────────────────────────
+        // FillVertex: 24 bytes
+        // loc 0: position [f32;2] @ 0
+        // loc 1: color    [f32;4] @ 8
+        let fill_vertex_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<FillVertex>() as u64,
+            step_mode:    wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute { offset:  0, shader_location: 0, format: wgpu::VertexFormat::Float32x2 },
+                wgpu::VertexAttribute { offset:  8, shader_location: 1, format: wgpu::VertexFormat::Float32x4 },
+            ],
+        };
+
+        let fill_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label:  Some("Kingdom Fill Pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module:      &fill_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[fill_vertex_layout],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module:      &fill_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format:     surface_format,
+                    blend:      Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive:     wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+            depth_stencil: None,
+            multisample:   wgpu::MultisampleState::default(),
+            multiview:     None,
+            cache:         None,
+        });
+
         KingdomOverlay {
             show_borders: false,  // OFF by default — circles confuse users; toggle with K
             show_loyalty_heatmap: false,
             line_buffer,
             quad_buffer,
+            fill_buffer,
             line_pipeline,
             quad_pipeline,
+            fill_pipeline,
             camera_bind_group,
             unit_quad_vbuf,
             line_instances: Vec::with_capacity(MAX_LINES),
             quad_instances: Vec::with_capacity(MAX_QUADS),
+            fill_vertices:  Vec::with_capacity(MAX_FILL_VERTS),
         }
     }
 
@@ -310,6 +376,7 @@ impl KingdomOverlay {
     pub fn prepare(&mut self, queue: &wgpu::Queue, frame: &KingdomFrame) {
         self.line_instances.clear();
         self.quad_instances.clear();
+        self.fill_vertices.clear();
 
         if !self.show_borders {
             return;
@@ -320,31 +387,27 @@ impl KingdomOverlay {
         let pulse = (tick as f32 * std::f32::consts::TAU / 30.0).sin() * 0.5 + 0.5;
 
         for k in &frame.kingdoms {
-            // ── Territory border lines ────────────────────────────────────
-            if k.hull.len() >= 2 {
+            // ── Territory fill — triangle fan from centroid into hull ──────
+            if k.hull.len() >= 3 {
+                let cx = k.capital_pos[0];
+                let cy = k.capital_pos[1];
+
+                // Base fill alpha 0.35; war kingdoms pulse slightly brighter
+                let fill_alpha = if k.at_war {
+                    0.30 + pulse * 0.15  // 0.30–0.45
+                } else {
+                    0.35
+                };
+                let fill_color = [k.color[0], k.color[1], k.color[2], fill_alpha];
+
                 let n = k.hull.len();
                 for i in 0..n {
                     let a = k.hull[i];
                     let b = k.hull[(i + 1) % n];
-
-                    let (line_color, line_width) = if k.at_war {
-                        // War: red, 3px wide, pulsing alpha
-                        let alpha = 0.4 + pulse * 0.4; // 0.4-0.8 range
-                        ([1.0_f32, 0.2, 0.2, alpha], 0.04_f32)
-                    } else {
-                        // Peaceful: kingdom color, 2px, alpha 0.4
-                        ([k.color[0], k.color[1], k.color[2], 0.4], 0.03_f32)
-                    };
-
-                    if self.line_instances.len() < MAX_LINES {
-                        self.line_instances.push(LineInstance {
-                            start: a,
-                            end:   b,
-                            color: line_color,
-                            width: line_width,
-                            _pad0: 0.0,
-                            _pad1: [0.0; 2],
-                        });
+                    if self.fill_vertices.len() + 3 <= MAX_FILL_VERTS {
+                        self.fill_vertices.push(FillVertex { position: [cx, cy], color: fill_color });
+                        self.fill_vertices.push(FillVertex { position: a,        color: fill_color });
+                        self.fill_vertices.push(FillVertex { position: b,        color: fill_color });
                     }
                 }
             }
@@ -430,6 +493,13 @@ impl KingdomOverlay {
         }
 
         // ── Upload to GPU ─────────────────────────────────────────────────
+        if !self.fill_vertices.is_empty() {
+            queue.write_buffer(
+                &self.fill_buffer,
+                0,
+                bytemuck::cast_slice(&self.fill_vertices),
+            );
+        }
         if !self.line_instances.is_empty() {
             queue.write_buffer(
                 &self.line_buffer,
@@ -452,7 +522,15 @@ impl KingdomOverlay {
             return;
         }
 
-        // ── Border + alliance lines ───────────────────────────────────────
+        // ── Territory cell fill (semi-transparent hull) ───────────────────
+        if !self.fill_vertices.is_empty() {
+            pass.set_pipeline(&self.fill_pipeline);
+            pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            pass.set_vertex_buffer(0, self.fill_buffer.slice(..));
+            pass.draw(0..self.fill_vertices.len() as u32, 0..1);
+        }
+
+        // ── Alliance lines only (hull border lines removed) ───────────────
         if !self.line_instances.is_empty() {
             pass.set_pipeline(&self.line_pipeline);
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
@@ -682,6 +760,40 @@ fn convex_hull(pts: &[[f32; 2]]) -> Vec<[f32; 2]> {
 // ---------------------------------------------------------------------------
 // Inline WGSL shaders
 // ---------------------------------------------------------------------------
+
+const KINGDOM_FILL_WGSL: &str = r#"
+struct CameraUniform {
+    view_proj:       mat4x4<f32>,
+    pixels_per_unit: f32,
+    _pad0:           f32,
+    _pad1:           f32,
+    _pad2:           f32,
+};
+@group(0) @binding(0) var<uniform> cam: CameraUniform;
+
+struct VertexInput {
+    @location(0) position: vec2<f32>,
+    @location(1) color:    vec4<f32>,
+};
+
+struct VertexOutput {
+    @builtin(position) clip_pos: vec4<f32>,
+    @location(0)       color:    vec4<f32>,
+};
+
+@vertex
+fn vs_main(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    out.clip_pos = cam.view_proj * vec4<f32>(in.position, 0.0, 1.0);
+    out.color    = in.color;
+    return out;
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    return in.color;
+}
+"#;
 
 const KINGDOM_LINE_WGSL: &str = r#"
 struct CameraUniform {

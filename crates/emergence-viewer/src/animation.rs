@@ -236,10 +236,31 @@ impl AnimationManager {
         // Build index from personality
         let build = body_build_index(beings, i);
 
-        // Each row in the atlas = 1 build+phase combo (rows 0-11)
-        // Each col = anim_state (0-9) offset by frame
-        let atlas_row = (build * 4 + phase).min(11);
-        let atlas_col = ((state as u32) + frame).min(31);
+        // Atlas NPC layout (from compose_from_assets):
+        //   Rows 0-3:  Adults (builds 0-3)
+        //   Rows 4-7:  Youth  (builds 0-3)
+        //   Rows 8-11: Elders (builds 0-3)
+        // Within each row, cols 0-15 are populated (16 cols per row).
+        // State→col mapping must fit within 0-15.
+        const STATE_BASE_COL: [u32; 10] = [
+            0,  // Idle:    cols 0-1   (2 frames)
+            2,  // Walk:    cols 2-5   (4 frames)
+            2,  // Run:     cols 2-5   (reuse Walk — cols 6+ not filled)
+            6,  // Eat:     cols 6-7   (2 frames)
+            8,  // Sleep:   cols 8-9   (2 frames)
+            10, // Fight:   cols 10-13 (4 frames)
+            6,  // Share:   cols 6-7   (reuse Eat)
+            8,  // Mourn:   cols 8-9   (reuse Sleep)
+            2,  // Explore: cols 2-5   (reuse Walk)
+            14, // Die:     cols 14-15 (2 frames)
+        ];
+        const STATE_FRAME_COUNT: [u32; 10] = [2, 4, 4, 2, 2, 4, 2, 2, 4, 2];
+
+        let state_idx = (state as usize).min(9);
+        // Atlas rows: phase-major, build-minor (phase*4 + build)
+        // Adults=phase0 → rows 0-3, Youth=phase1 → rows 4-7, Elders=phase2 → rows 8-11
+        let atlas_row = (phase * 4 + build).min(11);
+        let atlas_col = (STATE_BASE_COL[state_idx] + (frame % STATE_FRAME_COUNT[state_idx])).min(15);
 
         [atlas_col as f32 * ATLAS_CELL, atlas_row as f32 * ATLAS_CELL]
     }
@@ -268,27 +289,29 @@ fn body_build_index(beings: &Beings, i: usize) -> u32 {
 }
 
 /// Atlas UV for a fauna sprite.
-/// Fauna occupy rows 12-13 in the atlas (512x512, 32x32 cells).
-/// Column base per species (4 frames each, cycling on frame):
-///   col  0: hawk   (CreatureType 5)
-///   col  4: deer   (CreatureType 2)
-///   col  8: wolf   (CreatureType 1)
-///   col 12: bear   (CreatureType 6)
-///   col 16: rabbit (CreatureType 3)
-///   col 20: fish   (CreatureType 4)
-///   col 24: snake  (CreatureType 7)
+/// Actual atlas layout from compose_from_assets:
+///   Row 12 col  0-3:  Bird      (4 frames)
+///   Row 12 col  4-7:  Chicken   (4 frames, Sprout Lands)
+///   Row 12 col  8-11: Chicken2  (4 frames, Sunnyside)
+///   Row 13 col  0-3:  Cow       (4 frames)
+///   Row 13 col  4-7:  Pig       (4 frames)
+///   Row 13 col  8-11: Cow2      (4 frames, Sprout Lands)
+/// CreatureType mapped to nearest visual match:
+///   Hawk/Wolf/Snake → Bird  (row 12, col 0)
+///   Deer/Rabbit     → Chicken (row 12, col 4)
+///   Bear            → Cow   (row 13, col 0)
+///   Fish            → Pig   (row 13, col 4)
 fn fauna_atlas_uv(ct: CreatureType, frame: u8) -> [f32; 2] {
-    let col_base: u32 = match ct {
-        CreatureType::Hawk   => 0,
-        CreatureType::Deer   => 4,
-        CreatureType::Wolf   => 8,
-        CreatureType::Bear   => 12,
-        CreatureType::Rabbit => 16,
-        CreatureType::Fish   => 20,
-        CreatureType::Snake  => 24,
-        CreatureType::Human  => 0, // fallback, shouldn't reach here
+    let (atlas_row, col_base): (u32, u32) = match ct {
+        CreatureType::Hawk   => (12, 0),  // Bird
+        CreatureType::Wolf   => (12, 0),  // Bird
+        CreatureType::Snake  => (12, 0),  // Bird
+        CreatureType::Deer   => (12, 4),  // Chicken
+        CreatureType::Rabbit => (12, 4),  // Chicken
+        CreatureType::Bear   => (13, 0),  // Cow
+        CreatureType::Fish   => (13, 4),  // Pig
+        CreatureType::Human  => (12, 0),  // fallback
     };
-    let atlas_row: u32 = 12;
-    let atlas_col = (col_base + (frame as u32 % 4)).min(31);
+    let atlas_col = (col_base + (frame as u32 % 4)).min(15);
     [atlas_col as f32 * ATLAS_CELL, atlas_row as f32 * ATLAS_CELL]
 }

@@ -112,6 +112,18 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    // LOD 2 sentinel: atlas_size.x < 0.001 means macro-zoom solid-color dot.
+    // Skip atlas sampling entirely — render emotion_tint as a filled circle.
+    if (in.atlas_size.x < 0.001) {
+        // Circular dot shape: distance from centre of quad.
+        let cx = (in.local_u - 0.5) * 2.0; // -1..1
+        let cy = (in.local_v - 0.5) * 2.0; // -1..1
+        let dist_sq = cx * cx + cy * cy;
+        if (dist_sq > 1.0) { discard; }
+        let final_rgb = in.emotion_tint * in.brightness;
+        return vec4<f32>(final_rgb, in.alpha);
+    }
+
     let atlas_color = textureSample(sprite_atlas, atlas_sampler, in.uv);
     let alpha = atlas_color.a;
 
@@ -143,11 +155,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
 
-    // Opaque/semi-opaque pixel: two-tone sprite coloring.
-    // Atlas encodes skin pixels as near-white (r>0.7), cloth as mid-gray (r~0.5).
-    let is_skin = atlas_color.r > 0.7;
-    let pixel_color = select(in.emotion_tint, in.skin_tone, is_skin);
-    let final_rgb = pixel_color * in.brightness;
+    // Opaque/semi-opaque pixel: render atlas color as-is from the sprite sheet.
+    // No skin/cloth threshold — Sunnyside sprites carry their own color information.
+    let final_rgb = atlas_color.rgb * in.brightness;
 
     return vec4<f32>(final_rgb, alpha * in.alpha);
 }

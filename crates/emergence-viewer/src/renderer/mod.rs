@@ -7,3 +7,4 @@ pub mod objects;
 pub mod particles;
 pub mod post_process;
 pub mod kingdom_overlay;
+pub mod compute;

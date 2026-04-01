@@ -175,6 +175,9 @@ impl BeingRenderer {
             }
         }
 
+        // Y-sort: lower Y (screen bottom) renders on top of higher Y (screen top)
+        instances.sort_by(|a, b| a.position[1].partial_cmp(&b.position[1]).unwrap_or(std::cmp::Ordering::Equal));
+
         self.instance_count = instances.len() as u32;
         if !instances.is_empty() {
             queue.write_buffer(

@@ -1258,7 +1258,7 @@ impl ApplicationHandler for App {
                     for i in (bucket..beings.count).step_by(100) {
                         if beings.states[i] != emergence_core::being::data::BeingState::Dead {
                             // ~1% hit rate: fire when (tick * being_id) hashes into low slot
-                            let hash = (world.tick.wrapping_mul(i as u32 + 1).wrapping_add(i as u32 * 2654435761)) % 100;
+                            let hash = (world.tick.wrapping_mul(i as u32 + 1).wrapping_add((i as u32).wrapping_mul(2654435761))) % 100;
                             if hash == 0 {
                                 let pos = beings.positions[i];
                                 ps.emit(EmitterKind::TalkBubble, pos, world.tick);

@@ -226,9 +226,6 @@ pub fn score_actions(
         }
     }
 
-    // Find lowest need (excluding rest if just woke up)
-    let lowest_need = find_lowest_need(needs, beings.states[being_index]);
-
     // Nearby beings for social actions
     let nearby = spatial.query_radius_with_positions(pos[0], pos[1], radius, &beings.positions);
 
@@ -259,7 +256,7 @@ pub fn score_actions(
 
     let creature_type = beings.creature_type[being_index];
     for &action in Action::allowed_actions(creature_type) {
-        let mut score = need_relevance(action, lowest_need)
+        let mut score = logistic_need_score(action, needs)
             * personality_modifier(action, personality)
             * emotion_modifier(action, emotions);
 
@@ -980,54 +977,86 @@ fn find_water_direction(
     None
 }
 
-fn find_lowest_need(needs: &[f32; 6], state: BeingState) -> usize {
-    let mut lowest_idx = 0;
-    let mut lowest_val = f32::MAX;
-    for i in 0..6 {
-        // Skip rest if we were just sleeping (state is still Sleeping)
-        if i == NEED_REST && state == BeingState::Sleeping {
-            continue;
-        }
-        if needs[i] < lowest_val {
-            lowest_val = needs[i];
-            lowest_idx = i;
-        }
-    }
-    lowest_idx
+
+/// Logistic response curve: U(x) = 1 / (1 + e^(-k*(x - x0)))
+/// k = slope (urgency), x0 = midpoint (threshold of caring)
+#[inline(always)]
+fn logistic(x: f32, k: f32, x0: f32) -> f32 {
+    1.0 / (1.0 + (-k * (x - x0)).exp())
 }
 
-fn need_relevance(action: Action, lowest_need: usize) -> f32 {
-    match (action, lowest_need) {
-        (Action::SeekFood, NEED_HUNGER) => 1.0,
-        (Action::PickUpFood, NEED_HUNGER) => 0.6,
-        (Action::PickUpStone, NEED_PURPOSE) => 0.5,
-        (Action::SeekShelter, NEED_WARMTH) => 1.0,
-        (Action::SeekShelter, NEED_SAFETY) => 0.7,
-        (Action::Flee, NEED_SAFETY) => 1.0,
-        (Action::ApproachBeing, NEED_BELONGING) => 0.9,
-        (Action::Bond, NEED_BELONGING) => 0.8,
-        (Action::ShareFood, NEED_BELONGING) => 0.6,
-        (Action::ShareFood, NEED_PURPOSE) => 0.7,
-        (Action::ShareResource, NEED_BELONGING) => 0.5,
-        (Action::ShareResource, NEED_PURPOSE) => 0.6,
-        (Action::Cluster, NEED_WARMTH) => 0.7,
-        (Action::Cluster, NEED_SAFETY) => 0.6,
-        (Action::Cluster, NEED_BELONGING) => 0.8,
-        (Action::Explore, NEED_PURPOSE) => 0.9,
-        (Action::Wander, NEED_PURPOSE) => 0.5,
-        (Action::Sleep, NEED_REST) => 1.0,
-        (Action::Mourn, _) => 0.3, // always low base relevance
-        (Action::Memorialize, _) => 0.4,
-        (Action::CreateMark, NEED_PURPOSE) => 0.7,
-        (Action::AvoidBeing, NEED_SAFETY) => 0.8,
-        (Action::TakeFood, NEED_HUNGER) => 0.7,
-        (Action::Hunt, NEED_HUNGER) => 0.8, // predators hunt when hungry
-        (Action::Build, NEED_SAFETY) => 0.6,
-        (Action::Build, NEED_WARMTH) => 0.5,
-        (Action::Build, NEED_PURPOSE) => 0.4,
-        (Action::Craft, NEED_PURPOSE) => 0.7,
-        (Action::Teach, NEED_PURPOSE) => 0.8,
-        _ => 0.1, // default low relevance
+/// Response Curve Utility AI: score each action using logistic curves on actual need values.
+/// Replaces flat need_relevance() lookup — actions now respond to *how urgent* a need is,
+/// not just whether it's the single lowest need.
+///
+/// Input needs are in [0,1] where 1.0 = fully satisfied, 0.0 = critical.
+/// We pass `1.0 - need` as x to get urgency (high urgency when need is low).
+fn logistic_need_score(action: Action, needs: &[f32; 6]) -> f32 {
+    // Convenience: urgency = how depleted each need is (0 = full, 1 = empty)
+    let hunger_urgency   = 1.0 - needs[NEED_HUNGER];
+    let warmth_urgency   = 1.0 - needs[NEED_WARMTH];
+    let safety_urgency   = 1.0 - needs[NEED_SAFETY];
+    let belong_urgency   = 1.0 - needs[NEED_BELONGING];
+    let purpose_urgency  = 1.0 - needs[NEED_PURPOSE];
+    let rest_urgency     = 1.0 - needs[NEED_REST];
+
+    match action {
+        // Eat / gather food: steep curve (k=10), gets urgent below 70% food (x0=0.7)
+        Action::SeekFood => logistic(hunger_urgency, 10.0, 0.7),
+        Action::PickUpFood => logistic(hunger_urgency, 8.0, 0.6) * 0.7,
+        Action::TakeFood => logistic(hunger_urgency, 10.0, 0.75) * 0.8,
+        Action::Hunt => logistic(hunger_urgency, 10.0, 0.7) * 0.9,
+
+        // Warmth / shelter: moderate slope (k=8), threshold 0.6
+        Action::SeekShelter => {
+            let w = logistic(warmth_urgency, 8.0, 0.6);
+            let s = logistic(safety_urgency, 6.0, 0.5) * 0.7;
+            w.max(s)
+        }
+        Action::Cluster => {
+            let w = logistic(warmth_urgency, 6.0, 0.5) * 0.8;
+            let s = logistic(safety_urgency, 6.0, 0.5) * 0.7;
+            let b = logistic(belong_urgency, 6.0, 0.5) * 0.9;
+            w.max(s).max(b)
+        }
+
+        // Safety / flee: steep curve (k=12), threshold 0.6 — panics fast
+        Action::Flee => logistic(safety_urgency, 12.0, 0.6),
+        Action::AvoidBeing => logistic(safety_urgency, 8.0, 0.5) * 0.9,
+
+        // Social / belonging: gentler curve (k=6), threshold 0.5
+        Action::ApproachBeing => logistic(belong_urgency, 6.0, 0.5),
+        Action::Bond => logistic(belong_urgency, 6.0, 0.55) * 0.9,
+        Action::ShareFood => {
+            let b = logistic(belong_urgency, 5.0, 0.4) * 0.7;
+            let p = logistic(purpose_urgency, 5.0, 0.4) * 0.8;
+            b.max(p)
+        }
+        Action::ShareResource => {
+            let b = logistic(belong_urgency, 5.0, 0.35) * 0.6;
+            let p = logistic(purpose_urgency, 5.0, 0.4) * 0.7;
+            b.max(p)
+        }
+
+        // Purpose / higher needs: gentle slope (k=5), low threshold
+        Action::Explore => logistic(purpose_urgency, 5.0, 0.4),
+        Action::Wander => logistic(purpose_urgency, 4.0, 0.3) * 0.6,
+        Action::Build => {
+            let s = logistic(safety_urgency, 5.0, 0.4) * 0.7;
+            let p = logistic(purpose_urgency, 5.0, 0.35) * 0.6;
+            s.max(p)
+        }
+        Action::Craft => logistic(purpose_urgency, 5.0, 0.4) * 0.8,
+        Action::Teach => logistic(purpose_urgency, 5.0, 0.45) * 0.9,
+        Action::PickUpStone => logistic(purpose_urgency, 4.0, 0.35) * 0.6,
+        Action::CreateMark => logistic(purpose_urgency, 4.0, 0.4) * 0.8,
+
+        // Rest: steep curve (k=10), urgency hits at 80% depleted
+        Action::Sleep => logistic(rest_urgency, 10.0, 0.8),
+
+        // Grief-driven: low base, always available
+        Action::Mourn => 0.3,
+        Action::Memorialize => 0.4,
     }
 }
 

@@ -39,6 +39,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Time-of-day color grade
     color = vec4<f32>(color.rgb * pp.tint_color * pp.brightness, color.a);
 
+    // Vignette: darken edges to draw eye toward center
+    let center = vec2<f32>(0.5, 0.5);
+    let dist = distance(in.uv, center);
+    let vignette = smoothstep(0.8, 0.3, dist); // 1.0 at center, 0.0 at corners
+    color = vec4<f32>(color.rgb * mix(0.6, 1.0, vignette), color.a);
+
     // Lightning flash overlay (white)
     let flash_rgb = mix(color.rgb, vec3<f32>(1.0, 1.0, 0.95), pp.flash_alpha);
     return vec4<f32>(flash_rgb, color.a);

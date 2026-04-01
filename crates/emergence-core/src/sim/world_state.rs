@@ -36,12 +36,37 @@ pub enum EventType {
     GodAction,         // actor_id = power id
 }
 
+/// Compact cause attached to an Event at emission time, when Being data is available.
+/// Avoids passing &Beings into the viewer's format layer post-hoc.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum EventCause {
+    /// No specific cause (default for most events).
+    None,
+    /// Death by starvation — hunger_zero_ticks attached.
+    Starvation { hunger_zero_ticks: u16 },
+    /// Death by exposure (cold) — warmth_zero_ticks attached.
+    Exposure { warmth_zero_ticks: u16 },
+    /// Death by old age — age and lifespan in ticks.
+    OldAge { age: u32, lifespan: u32 },
+    /// Hunger level at time of action (0.0 = starving, 1.0 = full).
+    Hunger { level: f32 },
+    /// Relationship warmth with target at time of action.
+    RelationshipWarmth { warmth: f32 },
+    /// Relationship trust with target at time of action.
+    RelationshipTrust { trust: f32 },
+    /// Danger signal level at actor's position.
+    DangerSignal { level: f32 },
+    /// Population count in the group/kingdom.
+    PopulationCount { count: u32 },
+}
+
 pub struct Event {
     pub tick: u32,
     pub actor_id: u32,
     pub target_id: u32,
     pub event_type: EventType,
     pub location: [f32; 2],
+    pub cause: EventCause,
 }
 
 pub struct EventLog {

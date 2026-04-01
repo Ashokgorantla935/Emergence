@@ -3,7 +3,7 @@
 /// Wires into the existing news_feed.rs UI panel.
 
 use std::collections::VecDeque;
-use emergence_core::sim::world_state::{Event, EventLog, EventType};
+use emergence_core::sim::world_state::{Event, EventCause, EventLog, EventType};
 use emergence_core::sim::event_log::ImportanceTier;
 use super::kingdom::KingdomDetector;
 use super::settlement::SettlementDetector;
@@ -215,22 +215,65 @@ impl NewsFeedSystem {
                 "{} was born into the world.",
                 actor_name
             ),
-            EventType::Died => format!(
-                "{} has died.",
-                actor_name
-            ),
+            EventType::Died => match event.cause {
+                EventCause::Starvation { hunger_zero_ticks } => format!(
+                    "{} starved — no food within reach for {} ticks.",
+                    actor_name, hunger_zero_ticks
+                ),
+                EventCause::Exposure { warmth_zero_ticks } => format!(
+                    "{} perished from exposure — freezing for {} ticks.",
+                    actor_name, warmth_zero_ticks
+                ),
+                EventCause::OldAge { age, lifespan } => {
+                    let age_years = age / 28800;
+                    let _ = lifespan;
+                    if age_years > 0 {
+                        format!("{} died of old age ({} years).", actor_name, age_years)
+                    } else {
+                        format!("{} died of old age.", actor_name)
+                    }
+                }
+                _ => format!("{} has died.", actor_name),
+            },
             EventType::Reproduced => format!(
                 "{} and {} welcomed a new life.",
                 actor_name, target_name
             ),
-            EventType::Bonded => format!(
-                "{} and {} formed a deep bond.",
-                actor_name, target_name
-            ),
-            EventType::Killed => format!(
-                "{} was slain by {}.",
-                target_name, actor_name
-            ),
+            EventType::Bonded => match event.cause {
+                EventCause::RelationshipWarmth { warmth } => format!(
+                    "{} and {} formed a deep bond — warmth {:.2}.",
+                    actor_name, target_name, warmth
+                ),
+                _ => format!("{} and {} formed a deep bond.", actor_name, target_name),
+            },
+            EventType::Killed => match event.cause {
+                EventCause::Hunger { level } if level < 0.3 => format!(
+                    "{} was slain by {} — driven by critical hunger ({:.0}%).",
+                    target_name, actor_name, level * 100.0
+                ),
+                _ => format!("{} was slain by {}.", target_name, actor_name),
+            },
+            EventType::SharedFood => match event.cause {
+                EventCause::RelationshipTrust { trust } if trust > 0.3 => format!(
+                    "{} shared food with {} — trust bond ({:.2}).",
+                    actor_name, target_name, trust
+                ),
+                _ => format!("{} shared food with {}.", actor_name, target_name),
+            },
+            EventType::StoleFood => match event.cause {
+                EventCause::Hunger { level } => format!(
+                    "{} stole from {} — hunger critical ({:.0}%).",
+                    actor_name, target_name, level * 100.0
+                ),
+                _ => format!("{} stole from {}.", actor_name, target_name),
+            },
+            EventType::Fled => match event.cause {
+                EventCause::DangerSignal { level } if level > 0.4 => format!(
+                    "{} fled — danger signals nearby ({:.0}%).",
+                    actor_name, level * 100.0
+                ),
+                _ => format!("{} fled from danger.", actor_name),
+            },
             EventType::BuildingComplete => format!(
                 "{} completed a new structure.", actor_name
             ),
@@ -240,26 +283,37 @@ impl NewsFeedSystem {
                     .get(event.actor_id as usize)
                     .map(|s| s.name.as_str())
                     .unwrap_or("a new settlement");
-                format!("A settlement has formed: {}.", s_name)
+                match event.cause {
+                    EventCause::PopulationCount { count } => format!(
+                        "A settlement has formed: {} ({} beings).", s_name, count
+                    ),
+                    _ => format!("A settlement has formed: {}.", s_name),
+                }
             }
             EventType::SettlementDissolved => {
-                format!("A settlement has dissolved.")
+                "A settlement has dissolved.".to_string()
             }
             EventType::KingdomFormed => {
                 let k = kingdom_detector.kingdoms.iter()
                     .find(|k| k.id == event.actor_id);
                 if let Some(k) = k {
                     let leader = super::kingdom::leader_being_name(k.leader_idx as u32);
-                    format!(
-                        "The Kingdom of {} has been founded. {} rules {} beings.",
-                        k.name, leader, k.population
-                    )
+                    match event.cause {
+                        EventCause::PopulationCount { count } => format!(
+                            "The Kingdom of {} has been founded — {} rules {} beings.",
+                            k.name, leader, count
+                        ),
+                        _ => format!(
+                            "The Kingdom of {} has been founded. {} rules {} beings.",
+                            k.name, leader, k.population
+                        ),
+                    }
                 } else {
                     "A new kingdom has risen.".to_string()
                 }
             }
             EventType::KingdomFell => {
-                format!("A kingdom has collapsed into independent settlements.")
+                "A kingdom has collapsed into independent settlements.".to_string()
             }
             EventType::LeaderElected => {
                 let settle_name = settlement_detector

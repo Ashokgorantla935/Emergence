@@ -157,6 +157,9 @@ pub fn update_kingdoms(
                 target_id: leader_idx as u32,
                 event_type: EventType::KingdomFormed,
                 location: settlement.center,
+                cause: crate::sim::world_state::EventCause::PopulationCount {
+                    count: settlement.population,
+                },
             });
             events.push(Event {
                 tick,
@@ -164,6 +167,7 @@ pub fn update_kingdoms(
                 target_id: settlement.id,
                 event_type: EventType::LeaderElected,
                 location: settlement.center,
+                cause: crate::sim::world_state::EventCause::None,
             });
             k
         };
@@ -197,6 +201,7 @@ pub fn update_kingdoms(
                             target_id: k.id,
                             event_type: EventType::LeaderElected,
                             location: s.center,
+                            cause: crate::sim::world_state::EventCause::None,
                         });
                     }
                     None => {
@@ -207,6 +212,7 @@ pub fn update_kingdoms(
                             target_id: k.leader_idx as u32,
                             event_type: EventType::KingdomFell,
                             location: k.centroid,
+                            cause: crate::sim::world_state::EventCause::None,
                         });
                         // Don't add to new_kingdoms (will be dropped)
                     }
@@ -261,6 +267,7 @@ pub fn record_combat(
                 target_id: kd,
                 event_type: EventType::WarStarted,
                 location: [0.0, 0.0],
+                cause: crate::sim::world_state::EventCause::None,
             });
         }
     } else {

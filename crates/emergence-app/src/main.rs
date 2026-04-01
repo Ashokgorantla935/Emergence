@@ -41,6 +41,28 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::Window;
 
 // ---------------------------------------------------------------------------
+// Theme
+// ---------------------------------------------------------------------------
+
+fn apply_game_theme(ctx: &egui::Context) {
+    let mut visuals = egui::Visuals::dark();
+    visuals.panel_fill = egui::Color32::from_rgb(25, 22, 18);
+    visuals.window_fill = egui::Color32::from_rgb(30, 27, 22);
+    visuals.extreme_bg_color = egui::Color32::from_rgb(18, 15, 12);
+    visuals.override_text_color = Some(egui::Color32::from_rgb(230, 220, 200));
+    visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(40, 35, 28);
+    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(50, 44, 35);
+    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(70, 60, 45);
+    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(200, 170, 80);
+    visuals.widgets.noninteractive.bg_stroke =
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 60, 40));
+    visuals.window_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 60, 40));
+    visuals.selection.bg_fill = egui::Color32::from_rgba_premultiplied(200, 170, 80, 60);
+    visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 170, 80));
+    ctx.set_visuals(visuals);
+}
+
+// ---------------------------------------------------------------------------
 // App struct
 // ---------------------------------------------------------------------------
 
@@ -132,6 +154,18 @@ struct App {
     // Social emergence overlay toggles
     show_bond_lines: bool,
     show_kingdom_colors: bool,
+
+    // World annotations: floating dramatic callouts (wars, kingdoms, alliances)
+    world_annotations: Vec<WorldAnnotation>,
+}
+
+/// A floating world annotation shown over game events.
+struct WorldAnnotation {
+    text: String,
+    world_pos: [f32; 2],
+    color: egui::Color32,
+    spawn_tick: u32,
+    duration: u32,
 }
 
 impl App {
@@ -191,6 +225,7 @@ impl App {
             shake: ScreenShake::new(),
             show_bond_lines: true,
             show_kingdom_colors: true,
+            world_annotations: Vec::new(),
         }
     }
 
@@ -452,6 +487,9 @@ impl ApplicationHandler for App {
         self.render_state = Some(render_state);
         self.egui_state = Some(egui_state);
         self.egui_renderer = Some(egui_renderer);
+
+        // Apply warm dark game theme once at init.
+        apply_game_theme(&self.egui_ctx);
     }
 
     fn window_event(
@@ -809,6 +847,72 @@ impl ApplicationHandler for App {
                                 _ => {}
                             }
                         }
+                    }
+
+                    // World annotations: spawn callouts for dramatic kingdom events
+                    {
+                        use emergence_core::sim::world_state::EventType;
+                        let recent = world.events.events.iter()
+                            .filter(|e| e.tick + ticks >= world.tick);
+                        for ev in recent {
+                            let (text, color, duration) = match ev.event_type {
+                                EventType::KingdomFormed => {
+                                    // Look up kingdom name by actor_id
+                                    let name = self.kingdom_detector.kingdoms.iter()
+                                        .find(|k| k.id == ev.actor_id)
+                                        .map(|k| k.name.clone())
+                                        .unwrap_or_else(|| format!("#{}", ev.actor_id));
+                                    (
+                                        format!("KINGDOM BORN: {}", name),
+                                        egui::Color32::from_rgb(255, 200, 40),
+                                        180u32,
+                                    )
+                                }
+                                EventType::KingdomFell => {
+                                    let name = self.kingdom_detector.kingdoms.iter()
+                                        .find(|k| k.id == ev.actor_id)
+                                        .map(|k| k.name.clone())
+                                        .unwrap_or_else(|| format!("#{}", ev.actor_id));
+                                    (
+                                        format!("{} HAS FALLEN", name),
+                                        egui::Color32::from_rgb(160, 20, 20),
+                                        180u32,
+                                    )
+                                }
+                                EventType::WarStarted => (
+                                    "WAR!".to_string(),
+                                    egui::Color32::from_rgb(220, 40, 40),
+                                    120u32,
+                                ),
+                                EventType::AllianceFormed => (
+                                    "ALLIANCE".to_string(),
+                                    egui::Color32::from_rgb(80, 140, 220),
+                                    120u32,
+                                ),
+                                EventType::SettlementFormed => (
+                                    "Settlement founded".to_string(),
+                                    egui::Color32::from_rgb(240, 200, 100),
+                                    120u32,
+                                ),
+                                _ => continue,
+                            };
+                            // Enforce max 5 visible annotations (oldest removed first)
+                            if self.world_annotations.len() >= 5 {
+                                self.world_annotations.remove(0);
+                            }
+                            self.world_annotations.push(WorldAnnotation {
+                                text,
+                                world_pos: ev.location,
+                                color,
+                                spawn_tick: world.tick,
+                                duration,
+                            });
+                        }
+                        // Expire old annotations
+                        let current_tick = world.tick;
+                        self.world_annotations.retain(|a| {
+                            current_tick < a.spawn_tick + a.duration
+                        });
                     }
 
                     self.ticks_since_timer += ticks;
@@ -1863,6 +1967,63 @@ impl ApplicationHandler for App {
                                                 .color(egui::Color32::from_rgba_unmultiplied(160, 160, 160, 180)),
                                         );
                                     });
+                            });
+                    }
+                }
+
+                // World annotations: floating dramatic callouts (wars, kingdoms, etc.)
+                if !self.world_annotations.is_empty() {
+                    if let (Some(ref window), Some(tick)) = (
+                        &self.window,
+                        self.world.as_ref().and_then(|w| w.try_read().ok()).map(|w| w.tick),
+                    ) {
+                        let win_size = window.inner_size();
+                        let screen_w = win_size.width as f32;
+                        let screen_h = win_size.height as f32;
+
+                        egui::Area::new(egui::Id::new("world_annotations"))
+                            .fixed_pos(egui::Pos2::ZERO)
+                            .order(egui::Order::Foreground)
+                            .interactable(false)
+                            .show(&self.egui_ctx, |ui| {
+                                let painter = ui.painter();
+                                for ann in &self.world_annotations {
+                                    let Some([sx, sy]) = self.camera.world_to_screen(
+                                        ann.world_pos[0], ann.world_pos[1], screen_w, screen_h,
+                                    ) else { continue };
+
+                                    // Fade out in last 30 ticks
+                                    let age = tick.saturating_sub(ann.spawn_tick);
+                                    let alpha = if age + 30 >= ann.duration {
+                                        let remaining = ann.duration.saturating_sub(age) as f32;
+                                        (remaining / 30.0).clamp(0.0, 1.0)
+                                    } else {
+                                        1.0f32
+                                    };
+                                    let a = (alpha * 255.0) as u8;
+                                    let [r, g, b, _] = ann.color.to_array();
+                                    let text_color = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
+                                    let shadow_color = egui::Color32::from_rgba_unmultiplied(0, 0, 0, (alpha * 200.0) as u8);
+
+                                    let pos = egui::pos2(sx, sy - 20.0);
+                                    let font = egui::FontId::proportional(20.0);
+                                    // Shadow
+                                    painter.text(
+                                        pos + egui::vec2(2.0, 2.0),
+                                        egui::Align2::CENTER_CENTER,
+                                        &ann.text,
+                                        font.clone(),
+                                        shadow_color,
+                                    );
+                                    // Main text
+                                    painter.text(
+                                        pos,
+                                        egui::Align2::CENTER_CENTER,
+                                        &ann.text,
+                                        font,
+                                        text_color,
+                                    );
+                                }
                             });
                     }
                 }

@@ -14,7 +14,7 @@ use crate::being::lifecycle::{age_beings, age_beings_no_death, check_death_condi
 use crate::being::needs::decay_needs;
 use crate::being::social::{deposit_emotion_signals, init_kinship_warmth};
 use crate::sim::movement::execute_action;
-use crate::sim::world_state::{Event, EventType, World};
+use crate::sim::world_state::{Event, EventCause, EventType, World};
 use crate::world::signal::SignalChannel;
 
 pub fn tick(world: &mut World) {
@@ -113,7 +113,26 @@ pub fn tick(world: &mut World) {
     } else {
         check_death_conditions(&mut world.beings, world.climate.season())
     };
-    // Merge old-age and condition deaths — all receive the same grief/event treatment
+
+    // Build death list with causes: old-age first, then condition deaths.
+    // Condition deaths may be starvation (hunger_zero_ticks > 0) or exposure.
+    let mut newly_dead_with_cause: Vec<(usize, EventCause)> = Vec::new();
+    for idx in &age_dead {
+        let cause = EventCause::OldAge {
+            age: world.beings.ages[*idx],
+            lifespan: world.beings.lifespans[*idx],
+        };
+        newly_dead_with_cause.push((*idx, cause));
+    }
+    for idx in &condition_dead {
+        let cause = if world.beings.hunger_zero_ticks[*idx] >= 10000 {
+            EventCause::Starvation { hunger_zero_ticks: world.beings.hunger_zero_ticks[*idx] }
+        } else {
+            EventCause::Exposure { warmth_zero_ticks: world.beings.warmth_zero_ticks[*idx] }
+        };
+        newly_dead_with_cause.push((*idx, cause));
+    }
+    // For downstream grief/signal processing keep a flat list.
     let newly_dead: Vec<usize> = age_dead.into_iter().chain(condition_dead).collect();
 
     // Handle death consequences
@@ -147,13 +166,18 @@ pub fn tick(world: &mut World) {
                 }
             }
         }
+    }
 
+    // Emit death events with causes (separate loop so grief processing doesn't need cause).
+    for (dead_idx, cause) in &newly_dead_with_cause {
+        let pos = world.beings.positions[*dead_idx];
         world.events.push(Event {
             tick: world.tick,
-            actor_id: dead_idx as u32,
+            actor_id: *dead_idx as u32,
             target_id: 0,
             event_type: EventType::Died,
             location: pos,
+            cause: *cause,
         });
     }
 
@@ -390,6 +414,7 @@ pub fn tick(world: &mut World) {
                     target_id: s.population,
                     event_type: EventType::SettlementFormed,
                     location: s.center,
+                    cause: EventCause::PopulationCount { count: s.population },
                 });
                 // Strong comfort burst at new settlement center
                 let scx = (s.center[0] as u32).min(world.signals.width - 1);
@@ -420,6 +445,7 @@ pub fn tick(world: &mut World) {
                     target_id: stype as u32,
                     event_type: EventType::BuildingComplete,
                     location: [bx as f32, by as f32],
+                    cause: EventCause::None,
                 });
             }
         }
@@ -632,6 +658,7 @@ fn process_births(world: &mut World) {
             target_id: 0,
             event_type: EventType::Born,
             location: pos,
+            cause: EventCause::None,
         });
         world.events.push(Event {
             tick,
@@ -639,6 +666,7 @@ fn process_births(world: &mut World) {
             target_id: parents[1],
             event_type: EventType::Reproduced,
             location: pos,
+            cause: EventCause::None,
         });
     }
 }

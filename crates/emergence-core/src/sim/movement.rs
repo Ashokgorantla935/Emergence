@@ -97,12 +97,20 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
             if let Some(target) = action.target_pos {
                 move_toward(world, being_index, target, speed * 1.5); // 1.5x flee speed
             }
+            let cx = pos[0] as u32;
+            let cy = pos[1] as u32;
+            let danger = world.signals.read(
+                crate::world::signal::SignalChannel::Danger,
+                cx.min(world.signals.width - 1),
+                cy.min(world.signals.height - 1),
+            );
             world.events.push(Event {
                 tick,
                 actor_id: being_index as u32,
                 target_id: 0,
                 event_type: EventType::Fled,
                 location: pos,
+                cause: crate::sim::world_state::EventCause::DangerSignal { level: danger },
             });
         }
         Action::ApproachBeing => {
@@ -143,12 +151,17 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                 world.beings.needs[being_index][NEED_BELONGING] =
                     (world.beings.needs[being_index][NEED_BELONGING] + 0.02).min(1.0);
 
+                let warmth = world.beings.relationships[being_index]
+                    .find(target_idx as u32)
+                    .map(|imp| imp.warmth)
+                    .unwrap_or(0.0);
                 world.events.push(Event {
                     tick,
                     actor_id: being_index as u32,
                     target_id: target_idx as u32,
                     event_type: EventType::Bonded,
                     location: pos,
+                    cause: crate::sim::world_state::EventCause::RelationshipWarmth { warmth },
                 });
             }
         }
@@ -180,12 +193,17 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                         Action::ShareFood, radius, tick,
                     );
 
+                    let trust = world.beings.relationships[target_idx]
+                        .find(being_index as u32)
+                        .map(|imp| imp.trust)
+                        .unwrap_or(0.0);
                     world.events.push(Event {
                         tick,
                         actor_id: being_index as u32,
                         target_id: target_idx as u32,
                         event_type: EventType::SharedFood,
                         location: pos,
+                        cause: crate::sim::world_state::EventCause::RelationshipTrust { trust },
                     });
                 }
             }
@@ -221,6 +239,9 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                         target_id: target_idx as u32,
                         event_type: EventType::StoleFood,
                         location: pos,
+                        cause: crate::sim::world_state::EventCause::Hunger {
+                            level: world.beings.needs[being_index][NEED_HUNGER],
+                        },
                     });
                 }
             }
@@ -330,6 +351,9 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                                 target_id: prey_idx as u32,
                                 event_type: EventType::Killed,
                                 location: prey_pos,
+                                cause: crate::sim::world_state::EventCause::Hunger {
+                                    level: world.beings.needs[being_index][NEED_HUNGER],
+                                },
                             });
                         } else {
                             // Miss: prey flees, predator cooldown via combat_modifier
@@ -434,6 +458,7 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                         target_id: target_type as u32,
                         event_type: EventType::BuildingComplete,
                         location: [bx as f32, by as f32],
+                        cause: crate::sim::world_state::EventCause::None,
                     });
                 }
             } else {

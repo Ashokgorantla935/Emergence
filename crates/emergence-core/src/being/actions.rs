@@ -259,7 +259,51 @@ pub fn score_actions(
         }
 
         // Build allowed action indices for Boltzmann selection
-        let allowed_indices: Vec<u8> = Action::ALL.iter().map(|&a| a as u8).collect();
+        let mut allowed_indices: Vec<u8> = Action::ALL.iter().map(|&a| a as u8).collect();
+
+        // ACTION MASKING: Humans may only Hunt when they have a legitimate reason.
+        // Evaluated every tick; fauna are unaffected (they exit via the heuristic path below).
+        let hunger = beings.hot.needs[being_index][NEED_HUNGER];
+        let safety = beings.hot.needs[being_index][NEED_SAFETY];
+
+        let mut hunt_justified = crime_at_pos > 0.1; // guard-behavior already boosted q_values above
+
+        // Precondition 1: Desperation — starving and a nearby human is carrying food
+        if !hunt_justified && hunger < 0.25 {
+            hunt_justified = nearby.iter().any(|&ni| {
+                ni != being_index
+                    && beings.hot.states[ni] != BeingState::Dead
+                    && beings.hot.creature_type[ni] == CreatureType::Human as u8
+                    && beings.hot.carry[ni][0] > 0.1
+            });
+        }
+
+        // Precondition 2: Grudge — deep negative trust toward a nearby human
+        if !hunt_justified {
+            hunt_justified = nearby.iter().any(|&ni| {
+                ni != being_index
+                    && beings.hot.states[ni] != BeingState::Dead
+                    && beings.hot.creature_type[ni] == CreatureType::Human as u8
+                    && beings.cold.relationships[being_index]
+                        .find(ni as u32)
+                        .map(|imp| imp.trust < -0.5)
+                        .unwrap_or(false)
+            });
+        }
+
+        // Precondition 3: Self-defense — low safety and a nearby human is actively hunting
+        if !hunt_justified && safety < 0.3 {
+            hunt_justified = nearby.iter().any(|&ni| {
+                ni != being_index
+                    && beings.hot.states[ni] != BeingState::Dead
+                    && beings.hot.creature_type[ni] == CreatureType::Human as u8
+                    && beings.hot.pending_action[ni] == Action::Hunt as u8
+            });
+        }
+
+        if !hunt_justified {
+            allowed_indices.retain(|&a| a != Action::Hunt as u8);
+        }
 
         let curiosity = beings.hot.personalities[being_index][TRAIT_CURIOUS].clamp(-1.0, 1.0);
         let temperature = 0.5 + 1.5 * curiosity;

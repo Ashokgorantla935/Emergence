@@ -461,6 +461,14 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                             0.3,
                         );
                     }
+
+                    // Combat exhaustion: fighting costs rest and safety for humans only
+                    if world.beings.hot.creature_type[being_index] == CreatureType::Human as u8 {
+                        world.beings.hot.needs[being_index][NEED_REST] =
+                            (world.beings.hot.needs[being_index][NEED_REST] - 0.10).max(0.0);
+                        world.beings.hot.needs[being_index][NEED_SAFETY] =
+                            (world.beings.hot.needs[being_index][NEED_SAFETY] - 0.05).max(0.0);
+                    }
                 }
             }
         }

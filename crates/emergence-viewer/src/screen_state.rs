@@ -200,9 +200,10 @@ impl MainMenuUi {
                 );
                 ui.add_space(8.0);
                 ui.label(
-                    egui::RichText::new("a swarm intelligence engine")
+                    egui::RichText::new("A world of emergent intelligence")
                         .size(16.0)
-                        .weak(),
+                        .italics()
+                        .color(egui::Color32::from_rgb(150, 180, 220)),
                 );
 
                 ui.add_space(60.0);
@@ -422,8 +423,15 @@ impl ScenarioSelectUi {
 
                         if ui
                             .add_sized(
-                                egui::vec2(160.0, 36.0),
-                                egui::Button::new(egui::RichText::new("Start World").strong()),
+                                egui::vec2(160.0, 42.0),
+                                egui::Button::new(
+                                    egui::RichText::new("Start World")
+                                        .strong()
+                                        .size(16.0)
+                                        .color(egui::Color32::BLACK),
+                                )
+                                .fill(egui::Color32::GOLD)
+                                .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(200, 160, 0))),
                             )
                             .clicked()
                         {
@@ -601,8 +609,13 @@ impl TopBar {
                     SimSpeed::Speed100x,
                 ] {
                     let active = controls.speed == speed;
-                    let btn = egui::Button::new(speed.label());
-                    let btn = if active { btn.fill(egui::Color32::from_rgb(80, 120, 200)) } else { btn };
+                    let label = if active {
+                        egui::RichText::new(speed.label()).color(egui::Color32::GOLD).strong()
+                    } else {
+                        egui::RichText::new(speed.label())
+                    };
+                    let btn = egui::Button::new(label)
+                        .fill(if active { egui::Color32::from_rgb(60, 50, 0) } else { egui::Color32::from_rgb(30, 30, 30) });
                     if ui.add(btn).clicked() {
                         controls.set_speed(speed);
                     }

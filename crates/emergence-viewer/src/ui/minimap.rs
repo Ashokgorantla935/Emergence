@@ -1,11 +1,14 @@
 /// Minimap — 160x160px bottom-right. Terrain biome + being dots + camera viewport rect.
 
 use emergence_core::being::data::Beings;
+use emergence_core::sim::kingdom::Kingdom;
 
 pub struct Minimap {
     pub visible: bool,
     /// Pixel buffer: 160x160 RGBA.
     pixels: Vec<egui::Color32>,
+    /// Cached terrain-only pixels (no beings, no kingdoms). Used as base for overlays.
+    terrain_pixels: Vec<egui::Color32>,
     pub world_size: [f32; 2],
     frame_counter: u32,
     /// Camera viewport in world coords: [x, y, w, h].
@@ -21,6 +24,7 @@ impl Minimap {
         Minimap {
             visible: true,
             pixels: vec![egui::Color32::BLACK; MAP_SIZE * MAP_SIZE],
+            terrain_pixels: vec![egui::Color32::BLACK; MAP_SIZE * MAP_SIZE],
             world_size,
             frame_counter: 0,
             camera_viewport: [0.0, 0.0, world_size[0], world_size[1]],
@@ -35,7 +39,31 @@ impl Minimap {
                 let tx = (px * terrain_w / MAP_SIZE).min(terrain_w - 1);
                 let ty = (py * terrain_h / MAP_SIZE).min(terrain_h - 1);
                 let biome = terrain_biomes[ty * terrain_w + tx];
-                self.pixels[py * MAP_SIZE + px] = biome_color(biome);
+                let color = biome_color(biome);
+                self.terrain_pixels[py * MAP_SIZE + px] = color;
+                self.pixels[py * MAP_SIZE + px] = color;
+            }
+        }
+    }
+
+    /// Tint minimap pixels with kingdom territory colors at 30% alpha.
+    /// Call after update_terrain, before update_beings.
+    pub fn update_kingdoms(&mut self, kingdoms: &[Kingdom], terrain_w: usize, terrain_h: usize) {
+        // Reset pixels to terrain base
+        self.pixels.copy_from_slice(&self.terrain_pixels);
+
+        for kingdom in kingdoms {
+            let [kr, kg, kb] = kingdom.color;
+            for &(cx, cy) in &kingdom.territory_cells {
+                // Convert territory cell coords to minimap pixel coords
+                let px = ((cx as usize * MAP_SIZE) / terrain_w.max(1)).min(MAP_SIZE - 1);
+                let py = ((cy as usize * MAP_SIZE) / terrain_h.max(1)).min(MAP_SIZE - 1);
+                let base = self.pixels[py * MAP_SIZE + px];
+                // Blend kingdom color at 30% over terrain
+                let r = (base.r() as u32 * 70 / 100 + kr as u32 * 30 / 100).min(255) as u8;
+                let g = (base.g() as u32 * 70 / 100 + kg as u32 * 30 / 100).min(255) as u8;
+                let b = (base.b() as u32 * 70 / 100 + kb as u32 * 30 / 100).min(255) as u8;
+                self.pixels[py * MAP_SIZE + px] = egui::Color32::from_rgb(r, g, b);
             }
         }
     }

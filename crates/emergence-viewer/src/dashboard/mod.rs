@@ -12,6 +12,8 @@ pub struct Dashboard {
     pub birth_history: Vec<u32>,
     pub death_history: Vec<u32>,
     last_tick: u32,
+    /// Smoothly lerped population for slot-machine display effect.
+    displayed_pop: f32,
 }
 
 impl Dashboard {
@@ -26,6 +28,7 @@ impl Dashboard {
             birth_history: vec![0; 100],
             death_history: vec![0; 100],
             last_tick: 0,
+            displayed_pop: 0.0,
         }
     }
 
@@ -38,6 +41,8 @@ impl Dashboard {
     ) {
         self.population = beings.alive_count as u32;
         self.tick_rate = actual_tick_rate;
+        // Lerp displayed population toward actual for slot-machine roll effect
+        self.displayed_pop += (self.population as f32 - self.displayed_pop) * 0.1;
 
         // Count births and deaths in the current year from event log
         // A year is 28800 ticks; compute start of current year
@@ -112,9 +117,9 @@ impl Dashboard {
             .default_height(44.0)
             .show(egui_ctx, |ui| {
                 ui.horizontal(|ui| {
-                    // Population — large and prominent
+                    // Population — large and prominent, lerped for smooth roll effect
                     ui.label(
-                        egui::RichText::new(format!("{}", self.population))
+                        egui::RichText::new(format!("{}", self.displayed_pop as u32))
                             .strong()
                             .size(22.0),
                     );

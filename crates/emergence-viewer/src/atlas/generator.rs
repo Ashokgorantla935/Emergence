@@ -1334,6 +1334,25 @@ fn crop_and_scale(src: &image::RgbaImage, sx: u32, sy: u32, sw: u32, sh: u32) ->
     downscale_nearest(src, sx, sy, sw, sh, 16, 16)
 }
 
+/// Blit a small source image (any size ≤ 16x16) centered into a 16x16 atlas cell.
+fn blit_cell_centered(pixels: &mut [u8], atlas_row: usize, atlas_col: usize, src: &image::RgbaImage) {
+    let (ox, oy) = cell_origin(atlas_row, atlas_col);
+    let sw = src.width() as usize;
+    let sh = src.height() as usize;
+    let dx = if sw < 16 { (16 - sw) / 2 } else { 0 };
+    let dy = if sh < 16 { (16 - sh) / 2 } else { 0 };
+    let blit_w = sw.min(16);
+    let blit_h = sh.min(16);
+    for py in 0..blit_h {
+        for px in 0..blit_w {
+            let pixel = src.get_pixel(px as u32, py as u32);
+            if pixel[3] > 0 {
+                set_pixel(pixels, ox + dx + px, oy + dy + py, pixel[0], pixel[1], pixel[2], pixel[3]);
+            }
+        }
+    }
+}
+
 /// Compose the atlas from real sprite assets, with procedural fallbacks.
 /// Returns (pixel_data, report_lines).
 pub fn compose_from_assets(packs_root: &str) -> (Vec<u8>, Vec<String>) {
@@ -1343,7 +1362,6 @@ pub fn compose_from_assets(packs_root: &str) -> (Vec<u8>, Vec<String>) {
 
     // ── Humans: Rows 0–11 from premade-npc-spritesheets ────────────────────
     // Each npc*.png = 256x512, 8 cols x 16 rows of 32x32 cells.
-    // We take row 0 (y=0) of each sheet and map cols 0-9 → atlas cols 0-9.
     // NPC mapping: npc1→row0, npc3→row1, npc5→row2, npc7→row3 (adults)
     //              npc2→row4, npc4→row5, npc6→row6, npc8→row7 (youth)
     //              npc9→row8, npc10→row9, npc11→row10, npc12→row11 (elder)
@@ -1355,13 +1373,23 @@ pub fn compose_from_assets(packs_root: &str) -> (Vec<u8>, Vec<String>) {
     for &(npc_num, atlas_row) in npc_map {
         let path = format!("{}/premade-npc-spritesheets/npc{}.png", packs_root, npc_num);
         if let Some(sheet) = load_png(&path) {
-            // Use source row 0 (first animation row = idle/walk)
-            // 10 animation states → cols 0–9 in atlas
+            // 10 animation states → cols 0–9 in atlas, all 32 source cols sampled
             let mut mapped = 0usize;
             for atlas_col in 0..10usize {
-                // Source frame: walking row 2 for odd cols (walk frames), row 0 for even (idle)
                 let src_row = if atlas_col % 3 == 0 { 0u32 } else { atlas_col as u32 % 4 };
                 let src_col = atlas_col as u32 % 8;
+                let sx = src_col * 32;
+                let sy = src_row * 32;
+                if sx + 32 <= sheet.width() && sy + 32 <= sheet.height() {
+                    let tile = crop_and_scale(&sheet, sx, sy, 32, 32);
+                    blit_cell(&mut pixels, atlas_row, atlas_col, &tile);
+                    mapped += 1;
+                }
+            }
+            // Fill cols 10-15 with additional animation rows from the same sheet
+            for atlas_col in 10..16usize {
+                let src_row = (atlas_col as u32 - 10 + 4) % 8; // rows 4-7 = more anim states
+                let src_col = (atlas_col as u32 - 10) % 8;
                 let sx = src_col * 32;
                 let sy = src_row * 32;
                 if sx + 32 <= sheet.width() && sy + 32 <= sheet.height() {
@@ -1376,7 +1404,7 @@ pub fn compose_from_assets(packs_root: &str) -> (Vec<u8>, Vec<String>) {
         }
     }
 
-    // ── Fauna Row 12 col 0: Bird (native 16x16) ────────────────────────────
+    // ── Fauna Row 12 col 0-3: Bird (native 16x16) ─────────────────────────
     {
         let path = format!(
             "{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/\
@@ -1384,7 +1412,6 @@ pub fn compose_from_assets(packs_root: &str) -> (Vec<u8>, Vec<String>) {
             packs_root
         );
         if let Some(sheet) = load_png(&path) {
-            // 64x16 = 4 frames of 16x16. Blit frames 0–3 into row 12, cols 0–3.
             for frame in 0..4usize {
                 let tile = crop_and_scale(&sheet, (frame as u32) * 16, 0, 16, 16);
                 blit_cell(&mut pixels, 12, frame, &tile);
@@ -1395,7 +1422,49 @@ pub fn compose_from_assets(packs_root: &str) -> (Vec<u8>, Vec<String>) {
         }
     }
 
-    // ── Fauna Row 13 col 0: Cow (32x32 → 16x16) ──────────────────────────
+    // ── Fauna Row 12 col 4-7: Chicken (Sprout Lands, native 16x16) ────────
+    // Free Chicken Sprites.png = 64x32 = 4 frames x 16x16 (2 rows)
+    {
+        let path = format!(
+            "{}/Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/\
+             Characters/Free Chicken Sprites.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            for frame in 0..4usize {
+                let sx = (frame as u32) * 16;
+                if sx + 16 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 16, 16);
+                    blit_cell(&mut pixels, 12, 4 + frame, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 12 col 4-7 (chicken): native 16x16, 4 frames from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 12 col 4-7 (chicken): file not found, using procedural"));
+        }
+    }
+
+    // ── Fauna Row 12 col 8-11: Sunnyside chicken (native 16x16) ──────────
+    {
+        let path = format!(
+            "{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/\
+             Sunnyside_World_Assets/Elements/Animals/spr_deco_chicken_01_strip4.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            let frame_w = sheet.width() / 4;
+            let frame_h = sheet.height();
+            for frame in 0..4usize {
+                let tile = crop_and_scale(&sheet, (frame as u32) * frame_w, 0, frame_w, frame_h);
+                blit_cell(&mut pixels, 12, 8 + frame, &tile);
+            }
+            report.push(format!("MAPPED   row 12 col 8-11 (sunnyside chicken): 4 frames from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 12 col 8-11 (sunnyside chicken): file not found"));
+        }
+    }
+
+    // ── Fauna Row 13 col 0-3: Cow (32x32 → 16x16) ────────────────────────
     {
         let path = format!(
             "{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/\
@@ -1413,7 +1482,7 @@ pub fn compose_from_assets(packs_root: &str) -> (Vec<u8>, Vec<String>) {
         }
     }
 
-    // ── Fauna Row 13 col 4: Pig ───────────────────────────────────────────
+    // ── Fauna Row 13 col 4-7: Pig (32x32 → 16x16) ────────────────────────
     {
         let path = format!(
             "{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/\
@@ -1431,7 +1500,34 @@ pub fn compose_from_assets(packs_root: &str) -> (Vec<u8>, Vec<String>) {
         }
     }
 
-    // ── Fauna Row 14 col 0: Sheep ─────────────────────────────────────────
+    // ── Fauna Row 13 col 8-11: Sprout Lands Cow (32x32 → 16x16) ─────────
+    // Free Cow Sprites.png = 96x64 = 3 frames x 32x32 (2 rows)
+    {
+        let path = format!(
+            "{}/Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/\
+             Characters/Free Cow Sprites.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            for frame in 0..3usize {
+                let sx = (frame as u32) * 32;
+                if sx + 32 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 32, 32);
+                    blit_cell(&mut pixels, 13, 8 + frame, &tile);
+                }
+            }
+            // 4th frame from row 2 of the sheet
+            if 32 <= sheet.height() {
+                let tile = crop_and_scale(&sheet, 0, 32, 32, 32);
+                blit_cell(&mut pixels, 13, 11, &tile);
+            }
+            report.push(format!("MAPPED   row 13 col 8-11 (sprout cow): 4 frames 32->16 from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 13 col 8-11 (sprout cow): file not found"));
+        }
+    }
+
+    // ── Fauna Row 14 col 0-3: Sheep (32x32 → 16x16) ──────────────────────
     {
         let path = format!(
             "{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/\
@@ -1449,7 +1545,7 @@ pub fn compose_from_assets(packs_root: &str) -> (Vec<u8>, Vec<String>) {
         }
     }
 
-    // ── Fauna Row 14 col 4: Duck ──────────────────────────────────────────
+    // ── Fauna Row 14 col 4-7: Duck (32x32 → 16x16) ───────────────────────
     {
         let path = format!(
             "{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/\
@@ -1467,26 +1563,40 @@ pub fn compose_from_assets(packs_root: &str) -> (Vec<u8>, Vec<String>) {
         }
     }
 
-    // ── Nature Row 21: pixel_16_woods (native 16x16) ──────────────────────
-    // The 352x192 sheet is 22 cols x 12 rows. We sample tile positions to find
-    // tree, bush, rock, reed. Based on common woods tileset conventions:
-    //   Row 0 = ground/grass tiles, Row 1+ = nature objects.
-    // We'll sample multiple candidate rows and pick visually interesting ones.
+    // ── Fauna Row 15 col 0-3: Blinking deco (Sunnyside, 16x16 strip) ──────
+    // spr_deco_blinking_strip12.png may vary in size; try native blit
+    {
+        let path = format!(
+            "{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/\
+             Sunnyside_World_Assets/Elements/Animals/spr_deco_blinking_strip12.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            // Take first 4 frames — interpret as frame_w = width/12
+            let frame_w = (sheet.width() / 12).max(16);
+            let frame_h = sheet.height();
+            for frame in 0..4usize {
+                let sx = (frame as u32) * frame_w;
+                if sx + frame_w <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, frame_w, frame_h);
+                    blit_cell(&mut pixels, 15, frame, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 15 col 0-3 (blinking): 4 frames from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 15 col 0-3 (blinking): file not found"));
+        }
+    }
+
+    // ── Nature Row 21 col 0-15: pixel_16_woods (native 16x16) ────────────
     {
         let path = format!(
             "{}/pixel_16_woods v2 free/pixel_16_woods v2 free/free_pixel_16_woods.png",
             packs_root
         );
         if let Some(sheet) = load_png(&path) {
-            // Candidate positions for tree-like sprites (typically rows 1-4 in woods tilesets)
-            // tree: col 0, row 2 (y=32) is a common tree position
-            // bush: col 4, row 2
-            // rock: col 8, row 3
-            // reed/grass: col 0, row 4
-            // We'll also try cols from different rows to maximize visual variety
-
+            // 352x192 = 22 cols x 12 rows. Sample diverse rows for maximum variety.
             let nature_cells: &[(usize, u32, u32, &str)] = &[
-                // (atlas_col, sheet_col, sheet_row, name)
                 (0,  0, 2, "tree-a"),
                 (1,  1, 2, "tree-b"),
                 (2,  2, 2, "tree-c"),
@@ -1504,101 +1614,118 @@ pub fn compose_from_assets(packs_root: &str) -> (Vec<u8>, Vec<String>) {
                 (14, 0, 5, "stump"),
                 (15, 1, 5, "log"),
             ];
-
-            let mut mapped = 0usize;
             for &(atlas_col, sc, sr, name) in nature_cells {
                 let sx = sc * 16;
                 let sy = sr * 16;
                 if sx + 16 <= sheet.width() && sy + 16 <= sheet.height() {
                     let tile = crop_and_scale(&sheet, sx, sy, 16, 16);
                     blit_cell(&mut pixels, 21, atlas_col, &tile);
-                    mapped += 1;
                     report.push(format!("MAPPED   row 21 col {:2} ({}): native 16x16 from sheet ({},{})", atlas_col, name, sc, sr));
                 } else {
                     report.push(format!("FALLBACK row 21 col {:2} ({}): out of bounds", atlas_col, name));
                 }
             }
-            let _ = mapped;
         } else {
-            report.push(format!("FALLBACK row 21 all (nature): pixel_16_woods not found, using procedural"));
+            report.push(format!("FALLBACK row 21 col 0-15 (nature): pixel_16_woods not found"));
         }
     }
 
-    // ── World Objects Row 20 col 4-6: Campfire frames ─────────────────────
-    // Animation_Campfire.png = 256x32 = 8 frames x 32x32
-    {
-        let path = format!(
-            "{}/The Fan-tasy Tileset (Free) 1.5.7/The Fan-tasy Tileset (Free)/\
-             Art/Props/Animation/Animation_Campfire.png",
-            packs_root
-        );
-        if let Some(sheet) = load_png(&path) {
-            for frame in 0..3usize {
-                let sx = (frame as u32) * 32;
-                if sx + 32 <= sheet.width() {
-                    let tile = crop_and_scale(&sheet, sx, 0, 32, 32);
-                    blit_cell(&mut pixels, 20, 4 + frame, &tile);
-                }
-            }
-            report.push(format!("MAPPED   row 20 col 4-6 (campfire): 3 frames 32->16 from {}", path));
-        } else {
-            report.push(format!("FALLBACK row 20 col 4-6 (campfire): file not found, using procedural"));
-        }
-    }
-
-    // ── World Objects Row 20 col 0: Berry bush (Sprout Lands) ─────────────
-    {
-        let path = format!(
-            "{}/Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/\
-             Objects/Basic Plants.png",
-            packs_root
-        );
-        if let Some(sheet) = load_png(&path) {
-            // 96x32 = 6 cols x 2 rows of 16x16
-            for col in 0..4usize {
-                if (col as u32) * 16 + 16 <= sheet.width() {
-                    let tile = crop_and_scale(&sheet, (col as u32) * 16, 0, 16, 16);
-                    blit_cell(&mut pixels, 20, col, &tile);
-                }
-            }
-            report.push(format!("MAPPED   row 20 col 0-3 (plants): native 16x16 from {}", path));
-        } else {
-            report.push(format!("FALLBACK row 20 col 0-3 (plants): file not found, using procedural"));
-        }
-    }
-
-    // ── Terrain-like Row 21 fallback — mystic_woods decor ─────────────────
-    // decor_16x16.png = 64x80 = 4x5 grid of 16x16
-    // Fill any row-21 cols 16-19 with mystic_woods decor tiles
+    // ── Nature Row 21 col 16-19: mystic_woods decor ───────────────────────
+    // decor_16x16.png = 64x80 = 4 cols x 5 rows of 16x16
     {
         let path = format!(
             "{}/mystic_woods_free_2.2/sprites/tilesets/decor_16x16.png",
             packs_root
         );
         if let Some(sheet) = load_png(&path) {
-            for i in 0..4usize {
-                let sx = (i as u32 % 4) * 16;
-                let sy = (i as u32 / 4) * 16;
+            // Use all available tiles across multiple rows
+            let decor_positions: &[(usize, u32, u32, &str)] = &[
+                (16, 0, 0, "decor-0"),
+                (17, 1, 0, "decor-1"),
+                (18, 2, 0, "decor-2"),
+                (19, 3, 0, "decor-3"),
+                (20, 0, 1, "decor-4"),
+                (21, 1, 1, "decor-5"),
+                (22, 2, 1, "decor-6"),
+                (23, 3, 1, "decor-7"),
+                (24, 0, 2, "decor-8"),
+                (25, 1, 2, "decor-9"),
+                (26, 2, 2, "decor-10"),
+                (27, 3, 2, "decor-11"),
+            ];
+            let mut mapped = 0usize;
+            for &(atlas_col, sc, sr, _name) in decor_positions {
+                let sx = sc * 16;
+                let sy = sr * 16;
                 if sx + 16 <= sheet.width() && sy + 16 <= sheet.height() {
                     let tile = crop_and_scale(&sheet, sx, sy, 16, 16);
-                    blit_cell(&mut pixels, 21, 16 + i, &tile);
+                    blit_cell(&mut pixels, 21, atlas_col, &tile);
+                    mapped += 1;
                 }
             }
-            report.push(format!("MAPPED   row 21 col 16-19 (mystic decor): native 16x16 from {}", path));
+            report.push(format!("MAPPED   row 21 col 16-{} (mystic decor): {} native 16x16 from {}", 16 + mapped - 1, mapped, path));
         } else {
-            report.push(format!("FALLBACK row 21 col 16-19 (mystic decor): file not found"));
+            report.push(format!("FALLBACK row 21 col 16-27 (mystic decor): file not found"));
         }
     }
 
-    // ── mana seed forest tiles: Row 22 ────────────────────────────────────
+    // ── Nature Row 21 col 28-31: pixel_16_woods extra rows ────────────────
+    {
+        let path = format!(
+            "{}/pixel_16_woods v2 free/pixel_16_woods v2 free/free_pixel_16_woods.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            let extra: &[(usize, u32, u32, &str)] = &[
+                (28, 4, 3, "stump-b"),
+                (29, 5, 3, "log-b"),
+                (30, 4, 4, "twig"),
+                (31, 5, 4, "pine"),
+            ];
+            for &(atlas_col, sc, sr, name) in extra {
+                let sx = sc * 16;
+                let sy = sr * 16;
+                if sx + 16 <= sheet.width() && sy + 16 <= sheet.height() {
+                    let tile = crop_and_scale(&sheet, sx, sy, 16, 16);
+                    blit_cell(&mut pixels, 21, atlas_col, &tile);
+                    report.push(format!("MAPPED   row 21 col {:2} ({}): native 16x16 from sheet ({},{})", atlas_col, name, sc, sr));
+                }
+            }
+        }
+    }
+
+    // ── Trees Row 21 extra: Fan-tasy Trees_Bushes.png (64px trees → 16x16) ─
+    // Trees_Bushes.png = 384x96 = 6 trees at ~64px each
+    {
+        let path = format!(
+            "{}/The Fan-tasy Tileset (Free) 1.5.7/The Fan-tasy Tileset (Free)/\
+             Art/Trees and Bushes/Atlas/Trees_Bushes.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            // Sheet is 384x96; treat as variable cells. Sample 4 evenly-spaced regions.
+            let step = sheet.width() / 6;
+            let tree_names = ["tree-em1", "tree-em2", "bush-em1", "bush-em2"];
+            // Use row 23 cols 0-3 for Fan-tasy trees (separate from pixel_16_woods row)
+            for i in 0..4usize {
+                let sx = (i as u32) * step;
+                let tile = crop_and_scale(&sheet, sx, 0, step, sheet.height());
+                blit_cell(&mut pixels, 23, i, &tile);
+                report.push(format!("MAPPED   row 23 col {:2} ({}): fantsy tree/bush 64->16 from sheet", i, tree_names[i]));
+            }
+        } else {
+            report.push(format!("FALLBACK row 23 col 0-3 (fantasy trees): file not found"));
+        }
+    }
+
+    // ── mana seed forest: Row 22 cols 0-15 (native 16x16) ─────────────────
     {
         let path = format!(
             "{}/mana seed seasonal forest sample (summer)/seasonal sample (summer).png",
             packs_root
         );
         if let Some(sheet) = load_png(&path) {
-            // 256x256 = 16x16 grid of 16x16 tiles.
-            // Fill row 22 with first 16 cols of this sheet (row 0).
+            // 256x256 = 16x16 tiles. Fill rows 22 (row 0) and extra (row 1) of sheet.
             let mut mapped = 0usize;
             for col in 0..16usize {
                 let sx = (col as u32) * 16;
@@ -1608,9 +1735,411 @@ pub fn compose_from_assets(packs_root: &str) -> (Vec<u8>, Vec<String>) {
                     mapped += 1;
                 }
             }
-            report.push(format!("MAPPED   row 22 col 0-{} (mana seed forest): native 16x16", mapped - 1));
+            // Row 1 of mana seed → atlas row 22 cols 16-31
+            for col in 0..16usize {
+                let sx = (col as u32) * 16;
+                if sx + 16 <= sheet.width() && 32 <= sheet.height() {
+                    let tile = crop_and_scale(&sheet, sx, 16, 16, 16);
+                    blit_cell(&mut pixels, 22, 16 + col, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 22 col 0-{} (mana seed forest): {} native 16x16", mapped - 1, mapped));
         } else {
             report.push(format!("FALLBACK row 22 (mana seed): file not found, using procedural"));
+        }
+    }
+
+    // ── Terrain Row 23 cols 4-19: mystic_woods plains (native 16x16) ──────
+    // plains.png = 96x192 = 6 cols x 12 rows of 16x16
+    {
+        let path = format!(
+            "{}/mystic_woods_free_2.2/sprites/tilesets/plains.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            let mut mapped = 0usize;
+            for i in 0..16usize {
+                let sc = (i as u32) % 6;
+                let sr = (i as u32) / 6;
+                let sx = sc * 16;
+                let sy = sr * 16;
+                if sx + 16 <= sheet.width() && sy + 16 <= sheet.height() {
+                    let tile = crop_and_scale(&sheet, sx, sy, 16, 16);
+                    blit_cell(&mut pixels, 23, 4 + i, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 23 col 4-{} (mystic plains): {} native 16x16 from {}", 4 + mapped - 1, mapped, path));
+        } else {
+            report.push(format!("FALLBACK row 23 col 4-19 (mystic plains): file not found"));
+        }
+    }
+
+    // ── Water Decoration Row 23 cols 20-27: mystic_woods water decor ───────
+    {
+        let path = format!(
+            "{}/mystic_woods_free_2.2/sprites/tilesets/water_decorations.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            let cols_avail = (sheet.width() / 16).min(8) as usize;
+            let rows_avail = (sheet.height() / 16).min(2) as usize;
+            let mut mapped = 0usize;
+            'outer: for sr in 0..rows_avail {
+                for sc in 0..((sheet.width() / 16) as usize) {
+                    if mapped >= 8 { break 'outer; }
+                    let sx = (sc as u32) * 16;
+                    let sy = (sr as u32) * 16;
+                    if sx + 16 <= sheet.width() && sy + 16 <= sheet.height() {
+                        let tile = crop_and_scale(&sheet, sx, sy, 16, 16);
+                        blit_cell(&mut pixels, 23, 20 + mapped, &tile);
+                        mapped += 1;
+                    }
+                }
+            }
+            let _ = cols_avail;
+            report.push(format!("MAPPED   row 23 col 20-{} (water deco): {} native 16x16 from {}", 20 + mapped - 1, mapped, path));
+        } else {
+            report.push(format!("FALLBACK row 23 col 20-27 (water deco): file not found"));
+        }
+    }
+
+    // ── World Objects Row 20 col 0-3: Sprout Lands plants (native 16x16) ──
+    // Basic Plants.png = 96x32 = 6 cols x 2 rows of 16x16
+    {
+        let path = format!(
+            "{}/Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/\
+             Objects/Basic Plants.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            // Row 0: growth stages 1-6; row 1: more stages
+            let mut mapped = 0usize;
+            for col in 0..6usize {
+                let sx = (col as u32) * 16;
+                if sx + 16 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 16, 16);
+                    blit_cell(&mut pixels, 20, col, &tile);
+                    mapped += 1;
+                }
+            }
+            // Second row of plants → cols 16-21 in row 20
+            for col in 0..6usize {
+                let sx = (col as u32) * 16;
+                if sx + 16 <= sheet.width() && 32 <= sheet.height() {
+                    let tile = crop_and_scale(&sheet, sx, 16, 16, 16);
+                    blit_cell(&mut pixels, 20, 16 + col, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 20 col 0-5,16-21 (plants): {} native 16x16 from {}", mapped, path));
+        } else {
+            report.push(format!("FALLBACK row 20 col 0-5 (plants): file not found, using procedural"));
+        }
+    }
+
+    // ── World Objects Row 20 col 6-9: Campfire frames (32x32 → 16x16) ────
+    // Animation_Campfire.png = 256x32 = 8 frames x 32x32
+    {
+        let path = format!(
+            "{}/The Fan-tasy Tileset (Free) 1.5.7/The Fan-tasy Tileset (Free)/\
+             Art/Props/Animation/Animation_Campfire.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            // All 8 campfire frames → cols 6-13
+            for frame in 0..8usize {
+                let sx = (frame as u32) * 32;
+                if sx + 32 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 32, 32);
+                    blit_cell(&mut pixels, 20, 6 + frame, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 20 col 6-13 (campfire): 8 frames 32->16 from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 20 col 6-13 (campfire): file not found, using procedural"));
+        }
+    }
+
+    // ── World Objects Row 20 col 14-15: Wood Bridge (Sprout Lands, native) ─
+    // Wood Bridge.png = 80x48 = 5 cols x 3 rows of 16x16
+    {
+        let path = format!(
+            "{}/Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/\
+             Objects/Wood Bridge.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            for i in 0..2usize {
+                let sx = (i as u32) * 16;
+                if sx + 16 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 16, 16);
+                    blit_cell(&mut pixels, 20, 14 + i, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 20 col 14-15 (bridge): native 16x16 from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 20 col 14-15 (bridge): file not found"));
+        }
+    }
+
+    // ── World Objects Row 20 col 22-25: Grass Biom things (Sprout Lands) ──
+    // Basic Grass Biom things 1.png = 144x80 = 9 cols x 5 rows of 16x16
+    {
+        let path = format!(
+            "{}/Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/\
+             Objects/Basic Grass Biom things 1.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            let mut mapped = 0usize;
+            for col in 0..8usize {
+                let sx = (col as u32) * 16;
+                if sx + 16 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 16, 16);
+                    blit_cell(&mut pixels, 20, 22 + col, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 20 col 22-{} (grass biom): {} native 16x16 from {}", 22 + mapped - 1, mapped, path));
+        } else {
+            report.push(format!("FALLBACK row 20 col 22-29 (grass biom): file not found"));
+        }
+    }
+
+    // ── Buildings Row 20 col 30-31: Fan-tasy buildings (32x32 → 16x16) ───
+    // Buildings.png = 224x544. Treat as 7 cols x 17 rows at 32px.
+    {
+        let path = format!(
+            "{}/The Fan-tasy Tileset (Free) 1.5.7/The Fan-tasy Tileset (Free)/\
+             Art/Buildings/Atlas/Buildings.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            for i in 0..2usize {
+                let sx = (i as u32) * 32;
+                if sx + 32 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 32, 32);
+                    blit_cell(&mut pixels, 20, 30 + i, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 20 col 30-31 (buildings): 2 cells 32->16 from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 20 col 30-31 (buildings): file not found"));
+        }
+    }
+
+    // ── Fan-tasy Props: Row 19 (accessories row) cols 0-7 ─────────────────
+    // Props.png = 288x160. Treat as 9 cols x 5 rows at 32px.
+    {
+        let path = format!(
+            "{}/The Fan-tasy Tileset (Free) 1.5.7/The Fan-tasy Tileset (Free)/\
+             Art/Props/Atlas/Props.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            let mut mapped = 0usize;
+            for col in 0..8usize {
+                let sx = (col as u32) * 32;
+                if sx + 32 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 32, 32);
+                    blit_cell(&mut pixels, 19, col, &tile);
+                    mapped += 1;
+                }
+            }
+            // Second row of props → cols 8-15
+            for col in 0..8usize {
+                let sx = (col as u32) * 32;
+                if sx + 32 <= sheet.width() && 32 <= sheet.height() {
+                    let tile = crop_and_scale(&sheet, sx, 32, 32, 32);
+                    blit_cell(&mut pixels, 19, 8 + col, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 19 col 0-{} (fantasy props): {} cells 32->16 from {}", mapped - 1, mapped, path));
+        } else {
+            report.push(format!("FALLBACK row 19 col 0-15 (fantasy props): file not found"));
+        }
+    }
+
+    // ── Fan-tasy Rocks: Row 19 cols 16-19 ─────────────────────────────────
+    // Rocks.png = 182x32. Treat as variable-width rock sprites.
+    {
+        let path = format!(
+            "{}/The Fan-tasy Tileset (Free) 1.5.7/The Fan-tasy Tileset (Free)/\
+             Art/Rocks/Atlas/Rocks.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            let step = sheet.width() / 7;
+            for i in 0..4usize {
+                let sx = (i as u32) * step;
+                let tile = crop_and_scale(&sheet, sx, 0, step, sheet.height());
+                blit_cell(&mut pixels, 19, 16 + i, &tile);
+            }
+            report.push(format!("MAPPED   row 19 col 16-19 (fantasy rocks): 4 cells from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 19 col 16-19 (fantasy rocks): file not found"));
+        }
+    }
+
+    // ── Fan-tasy Ground Tileset: Row 19 cols 20-27 ───────────────────────
+    // Tileset_Ground.png = 192x224 = 12 cols x 14 rows of 16x16
+    {
+        let path = format!(
+            "{}/The Fan-tasy Tileset (Free) 1.5.7/The Fan-tasy Tileset (Free)/\
+             Art/Ground Tileset/Tileset_Ground.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            let mut mapped = 0usize;
+            for col in 0..8usize {
+                let sx = (col as u32) * 16;
+                if sx + 16 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 16, 16);
+                    blit_cell(&mut pixels, 19, 20 + col, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 19 col 20-{} (fantasy ground): {} native 16x16 from {}", 20 + mapped - 1, mapped, path));
+        } else {
+            report.push(format!("FALLBACK row 19 col 20-27 (fantasy ground): file not found"));
+        }
+    }
+
+    // ── Sprout Lands Wooden House tileset: Row 18 (buildings) ─────────────
+    // Wooden House.png = 112x80 = 7 cols x 5 rows of 16x16
+    {
+        let path = format!(
+            "{}/Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/\
+             Tilesets/Wooden House.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            let mut mapped = 0usize;
+            let cols = (sheet.width() / 16) as usize;
+            let rows = (sheet.height() / 16) as usize;
+            'outer2: for sr in 0..rows {
+                for sc in 0..cols {
+                    if mapped >= 32 { break 'outer2; }
+                    let sx = (sc as u32) * 16;
+                    let sy = (sr as u32) * 16;
+                    let tile = crop_and_scale(&sheet, sx, sy, 16, 16);
+                    blit_cell(&mut pixels, 18, mapped, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 18 col 0-{} (wooden house): {} native 16x16 from {}", mapped - 1, mapped, path));
+        } else {
+            report.push(format!("FALLBACK row 18 col 0-31 (wooden house): file not found"));
+        }
+    }
+
+    // ── mystic_woods water tiles: Row 17 ──────────────────────────────────
+    // water1.png = 96x64 = 6 cols x 4 rows of 16x16
+    {
+        let path = format!(
+            "{}/mystic_woods_free_2.2/sprites/tilesets/water1.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            let mut mapped = 0usize;
+            let cols = (sheet.width() / 16) as usize;
+            let rows = (sheet.height() / 16) as usize;
+            'outer3: for sr in 0..rows {
+                for sc in 0..cols {
+                    if mapped >= 24 { break 'outer3; }
+                    let sx = (sc as u32) * 16;
+                    let sy = (sr as u32) * 16;
+                    let tile = crop_and_scale(&sheet, sx, sy, 16, 16);
+                    blit_cell(&mut pixels, 17, mapped, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 17 col 0-{} (water tiles): {} native 16x16 from {}", mapped - 1, mapped, path));
+        } else {
+            report.push(format!("FALLBACK row 17 col 0-23 (water tiles): file not found"));
+        }
+    }
+
+    // ── mystic_woods fences: Row 17 cols 24-31 ────────────────────────────
+    // fences.png = 64x64 = 4x4 grid of 16x16
+    {
+        let path = format!(
+            "{}/mystic_woods_free_2.2/sprites/tilesets/fences.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            let mut mapped = 0usize;
+            for sr in 0..4usize {
+                for sc in 0..4usize {
+                    if mapped >= 8 { break; }
+                    let sx = (sc as u32) * 16;
+                    let sy = (sr as u32) * 16;
+                    if sx + 16 <= sheet.width() && sy + 16 <= sheet.height() {
+                        let tile = crop_and_scale(&sheet, sx, sy, 16, 16);
+                        blit_cell(&mut pixels, 17, 24 + mapped, &tile);
+                        mapped += 1;
+                    }
+                }
+            }
+            report.push(format!("MAPPED   row 17 col 24-{} (fences): {} native 16x16 from {}", 24 + mapped - 1, mapped, path));
+        } else {
+            report.push(format!("FALLBACK row 17 col 24-31 (fences): file not found"));
+        }
+    }
+
+    // ── mystic_woods objects (barrels, chests): Row 16 ────────────────────
+    // objects.png = 256x208. Grid of mixed-size objects. Treat as 16-col 16px grid.
+    {
+        let path = format!(
+            "{}/mystic_woods_free_2.2/sprites/objects/objects.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            let mut mapped = 0usize;
+            let cols = (sheet.width() / 16) as usize;
+            let rows = (sheet.height() / 16).min(2) as usize;
+            'outer4: for sr in 0..rows {
+                for sc in 0..cols {
+                    if mapped >= 32 { break 'outer4; }
+                    let sx = (sc as u32) * 16;
+                    let sy = (sr as u32) * 16;
+                    if sx + 16 <= sheet.width() && sy + 16 <= sheet.height() {
+                        let tile = crop_and_scale(&sheet, sx, sy, 16, 16);
+                        blit_cell(&mut pixels, 16, mapped, &tile);
+                        mapped += 1;
+                    }
+                }
+            }
+            report.push(format!("MAPPED   row 16 col 0-{} (mystic objects): {} native 16x16 from {}", mapped - 1, mapped, path));
+        } else {
+            report.push(format!("FALLBACK row 16 col 0-31 (mystic objects): file not found"));
+        }
+    }
+
+    // ── Sprout Lands Tilled Dirt: Row 20 col 30 (also usable in farm UI) ──
+    // Tilled_Dirt_Wide.png - place in row 20 col 30 area
+    {
+        let path = format!(
+            "{}/Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/\
+             Tilesets/Tilled_Dirt_Wide.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            let cols = ((sheet.width() / 16) as usize).min(4);
+            for col in 0..cols {
+                let sx = (col as u32) * 16;
+                if sx + 16 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 16, 16);
+                    // Put in row 23 cols 28-31 (terrain area)
+                    blit_cell(&mut pixels, 23, 28 + col, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 23 col 28-31 (tilled dirt): native 16x16 from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 23 col 28-31 (tilled dirt): file not found"));
         }
     }
 
@@ -1618,7 +2147,7 @@ pub fn compose_from_assets(packs_root: &str) -> (Vec<u8>, Vec<String>) {
     let mapped_count = report.iter().filter(|s| s.starts_with("MAPPED")).count();
     let fallback_count = report.iter().filter(|s| s.starts_with("FALLBACK")).count();
     report.push(format!(
-        "\nSUMMARY: {} cells mapped from real assets, {} cells used procedural fallback",
+        "\nSUMMARY: {} sprite groups mapped from real assets, {} used procedural fallback",
         mapped_count, fallback_count
     ));
 

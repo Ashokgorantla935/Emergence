@@ -58,7 +58,7 @@ impl MainMenu {
     pub fn new() -> Self {
         MainMenu {
             visible: true,
-            selected_scenario: Scenario::TwoTribes,
+            selected_scenario: Scenario::TheExperiment,
             difficulty: 0.5,
             world_size: 0.5,
             seed_text: String::new(),
@@ -80,6 +80,12 @@ impl MainMenu {
             .resizable(false)
             .show(egui_ctx, |ui| {
                 ui.heading("Choose a World");
+                ui.label(
+                    egui::RichText::new("A world of emergent intelligence")
+                        .italics()
+                        .color(egui::Color32::from_rgb(150, 180, 220))
+                        .size(13.0),
+                );
                 ui.separator();
 
                 // 2-column scenario grid
@@ -157,9 +163,14 @@ impl MainMenu {
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let btn = egui::Button::new(
-                        egui::RichText::new("Start World").strong(),
+                        egui::RichText::new("Start World")
+                            .strong()
+                            .size(16.0)
+                            .color(egui::Color32::BLACK),
                     )
-                    .min_size(egui::vec2(120.0, 36.0));
+                    .fill(egui::Color32::GOLD)
+                    .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(200, 160, 0)))
+                    .min_size(egui::vec2(140.0, 42.0));
                     if ui.add(btn).clicked() {
                         let seed = parse_seed(&self.seed_text);
                         self.start_requested =

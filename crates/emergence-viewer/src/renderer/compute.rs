@@ -38,7 +38,8 @@ pub struct SignalComputePipeline {
     pub width: u32,
     pub height: u32,
     /// Which buffer is currently the "read" source (false = A, true = B).
-    flip: bool,
+    /// Cell allows flipping without &mut self so dispatch works through &RenderState.
+    flip: std::cell::Cell<bool>,
 }
 
 impl SignalComputePipeline {
@@ -156,7 +157,7 @@ impl SignalComputePipeline {
             pipeline,
             width,
             height,
-            flip: false,
+            flip: std::cell::Cell::new(false),
         }
     }
 
@@ -190,8 +191,10 @@ impl SignalComputePipeline {
 
     /// Dispatch one diffusion pass. Workgroups are ceil(width/16) x ceil(height/16).
     /// Swaps ping-pong buffers after dispatch.
-    pub fn dispatch(&mut self, encoder: &mut wgpu::CommandEncoder) {
-        let bind_group = if self.flip {
+    /// Takes `&self` (uses Cell<bool> for flip) so it can be called through a shared reference.
+    pub fn dispatch(&self, encoder: &mut wgpu::CommandEncoder) {
+        let flip = self.flip.get();
+        let bind_group = if flip {
             &self.bind_group_b_to_a
         } else {
             &self.bind_group_a_to_b
@@ -210,13 +213,13 @@ impl SignalComputePipeline {
         // pass dropped here, releasing the borrow on encoder
         drop(pass);
 
-        self.flip = !self.flip;
+        self.flip.set(!flip);
     }
 
     /// Upload CPU signal data into the current read buffer.
     /// Call this before `dispatch()` to inject agent-written signals each frame.
     pub fn upload_signals(&self, queue: &wgpu::Queue, data: &[f32]) {
-        let read_buf = if self.flip { &self.buf_b } else { &self.buf_a };
+        let read_buf = if self.flip.get() { &self.buf_b } else { &self.buf_a };
         queue.write_buffer(read_buf, 0, bytemuck::cast_slice(data));
     }
 
@@ -236,7 +239,7 @@ impl SignalComputePipeline {
 
         // The write buffer is the one we just wrote into — opposite of flip state
         // (flip was toggled after dispatch, so current "read" is last written).
-        let src_buf = if self.flip { &self.buf_a } else { &self.buf_b };
+        let src_buf = if self.flip.get() { &self.buf_a } else { &self.buf_b };
 
         let staging = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Signal Readback Staging"),

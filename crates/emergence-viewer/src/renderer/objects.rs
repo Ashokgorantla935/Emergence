@@ -9,34 +9,136 @@ use emergence_core::world::resource::{FoodType, ResourceLayer};
 use emergence_core::world::terrain::{Biome, Terrain};
 use wgpu::util::DeviceExt;
 
-// Atlas layout constants — rows 20-23 (cell = 1/32 UV)
+// Atlas layout constants — rows 18-23 (cell = 1/32 UV)
 const ATLAS_CELL: f32 = 1.0 / 32.0;
 
+// Convenience: build a [f32;2] UV top-left from (row, col)
+const fn uv(col: u8, row: u8) -> [f32; 2] {
+    [col as f32 * ATLAS_CELL, row as f32 * ATLAS_CELL]
+}
+
 // Resource atlas cells (row 20, col 0-7)
-const UV_BERRY_FULL:    [f32; 2] = [0.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
-const UV_BERRY_DEPLETED:[f32; 2] = [1.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
-const UV_WHEAT_FULL:    [f32; 2] = [2.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
-const UV_WHEAT_DEPLETED:[f32; 2] = [3.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
-const UV_FISH_FULL:     [f32; 2] = [4.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
-const UV_FISH_DEPLETED: [f32; 2] = [5.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
-const UV_STONE:         [f32; 2] = [6.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
+const UV_BERRY_FULL:    [f32; 2] = uv(0, 20);
+const UV_BERRY_DEPLETED:[f32; 2] = uv(1, 20);
+const UV_WHEAT_FULL:    [f32; 2] = uv(2, 20);
+const UV_WHEAT_DEPLETED:[f32; 2] = uv(3, 20);
+const UV_FISH_FULL:     [f32; 2] = uv(4, 20);
+const UV_FISH_DEPLETED: [f32; 2] = uv(5, 20);
+const UV_STONE:         [f32; 2] = uv(6, 20);
 
-// Decorative terrain objects (row 21, col 0-7)
-// These share the same sprite cell as row 21; tint color differentiates them visually.
-const UV_DECOR_TREE:   [f32; 2] = [0.0 * ATLAS_CELL, 21.0 * ATLAS_CELL];
-const UV_DECOR_BUSH:   [f32; 2] = [1.0 * ATLAS_CELL, 21.0 * ATLAS_CELL];
-const UV_DECOR_ROCK:   [f32; 2] = [2.0 * ATLAS_CELL, 21.0 * ATLAS_CELL];
-const UV_DECOR_REED:   [f32; 2] = [3.0 * ATLAS_CELL, 21.0 * ATLAS_CELL];
-const UV_DECOR_CACTUS: [f32; 2] = [4.0 * ATLAS_CELL, 21.0 * ATLAS_CELL];
+// Sprout Lands — plants, campfire bridge (row 20, col 8-11)
+const UV_SL_PLANT_A:    [f32; 2] = uv(8,  20);
+const UV_SL_PLANT_B:    [f32; 2] = uv(9,  20);
+const UV_SL_CAMPFIRE_UNLIT: [f32; 2] = uv(10, 20);
+const UV_SL_BRIDGE:     [f32; 2] = uv(11, 20);
 
-// Structure atlas cells (row 20, col 11+)
-const UV_CAMPFIRE_0:  [f32; 2] = [11.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
-const UV_CAMPFIRE_1:  [f32; 2] = [12.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
-const UV_CAMPFIRE_2:  [f32; 2] = [13.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
-const UV_LEAN_TO:     [f32; 2] = [14.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
-const UV_HUT:         [f32; 2] = [15.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
-const UV_WALL:        [f32; 2] = [16.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
-const UV_FOOD_CACHE:  [f32; 2] = [17.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
+// Grass biome decorations — Sprout Lands (row 20, col 22-29)
+const UV_GRASS_DECOR_0: [f32; 2] = uv(22, 20);
+const UV_GRASS_DECOR_1: [f32; 2] = uv(23, 20);
+const UV_GRASS_DECOR_2: [f32; 2] = uv(24, 20);
+const UV_GRASS_DECOR_3: [f32; 2] = uv(25, 20);
+const UV_GRASS_DECOR_4: [f32; 2] = uv(26, 20);
+const UV_GRASS_DECOR_5: [f32; 2] = uv(27, 20);
+const UV_GRASS_DECOR_6: [f32; 2] = uv(28, 20);
+const UV_GRASS_DECOR_7: [f32; 2] = uv(29, 20);
+
+// Fan-tasy buildings (row 20, col 30-31)
+const UV_FT_BUILDING_A: [f32; 2] = uv(30, 20);
+const UV_FT_BUILDING_B: [f32; 2] = uv(31, 20);
+
+// Decorative terrain objects — pixel_16_woods (row 21, col 0-9)
+// These are the ORIGINAL sprites (kept as-is for backwards compat).
+const UV_DECOR_TREE:   [f32; 2] = uv(0, 21);
+const UV_DECOR_BUSH:   [f32; 2] = uv(1, 21);
+const UV_DECOR_ROCK:   [f32; 2] = uv(2, 21);
+const UV_DECOR_REED:   [f32; 2] = uv(3, 21);
+const UV_DECOR_CACTUS: [f32; 2] = uv(4, 21);
+
+// Tree variants — pixel_16_woods (row 21, col 0-5)
+const UV_TREE_A: [f32; 2] = uv(0, 21); // conifer tall
+const UV_TREE_B: [f32; 2] = uv(1, 21); // round tree
+const UV_TREE_C: [f32; 2] = uv(2, 21); // wide oak
+const UV_TREE_D: [f32; 2] = uv(3, 21); // pine
+const UV_TREE_E: [f32; 2] = uv(4, 21); // dark tree
+const UV_TREE_F: [f32; 2] = uv(5, 21); // slim birch
+
+// Rock/reed variants — pixel_16_woods (row 21, col 6-9)
+const UV_ROCK_A:       [f32; 2] = uv(6, 21);
+const UV_ROCK_B:       [f32; 2] = uv(7, 21);
+const UV_REED_A:       [f32; 2] = uv(8, 21);
+const UV_REED_B:       [f32; 2] = uv(9, 21);
+
+// Grass / flowers / mushrooms — pixel_16_woods (row 21, col 10-15)
+const UV_FLOWER_A:     [f32; 2] = uv(10, 21);
+const UV_FLOWER_B:     [f32; 2] = uv(11, 21);
+const UV_FLOWER_C:     [f32; 2] = uv(12, 21);
+const UV_GRASS_TUFT_A: [f32; 2] = uv(13, 21);
+const UV_GRASS_TUFT_B: [f32; 2] = uv(14, 21);
+const UV_MUSHROOM:     [f32; 2] = uv(15, 21);
+
+// Mystic woods decor + extras (row 21, col 16-31)
+const UV_MW_DECOR_0:   [f32; 2] = uv(16, 21);
+const UV_MW_DECOR_1:   [f32; 2] = uv(17, 21);
+const UV_MW_DECOR_2:   [f32; 2] = uv(18, 21);
+const UV_MW_DECOR_3:   [f32; 2] = uv(19, 21);
+const UV_MW_DECOR_4:   [f32; 2] = uv(20, 21);
+const UV_MW_DECOR_5:   [f32; 2] = uv(21, 21);
+const UV_MW_DECOR_6:   [f32; 2] = uv(22, 21);
+const UV_MW_DECOR_7:   [f32; 2] = uv(23, 21);
+
+// Fan-tasy props / rocks / ground tiles (row 19)
+const UV_FT_PROP_A:    [f32; 2] = uv(0, 19);
+const UV_FT_PROP_B:    [f32; 2] = uv(1, 19);
+const UV_FT_ROCK_A:    [f32; 2] = uv(2, 19);
+const UV_FT_ROCK_B:    [f32; 2] = uv(3, 19);
+const UV_FT_ROCK_C:    [f32; 2] = uv(4, 19);
+const UV_FT_GROUND_A:  [f32; 2] = uv(5, 19);
+const UV_FT_GROUND_B:  [f32; 2] = uv(6, 19);
+
+// Sprout Lands wooden house tileset (row 18, col 0-7)
+const UV_HUT_SL_A:     [f32; 2] = uv(0, 18);
+const UV_HUT_SL_B:     [f32; 2] = uv(1, 18);
+const UV_HUT_SL_C:     [f32; 2] = uv(2, 18);
+const UV_HUT_SL_D:     [f32; 2] = uv(3, 18);
+const UV_HUT_SL_E:     [f32; 2] = uv(4, 18);
+const UV_HUT_SL_F:     [f32; 2] = uv(5, 18);
+const UV_HUT_SL_G:     [f32; 2] = uv(6, 18);
+const UV_HUT_SL_H:     [f32; 2] = uv(7, 18);
+
+// Structure atlas cells (row 20, col 11+) — ORIGINAL kept for backwards compat
+const UV_CAMPFIRE_0:  [f32; 2] = uv(11, 20);
+const UV_CAMPFIRE_1:  [f32; 2] = uv(12, 20);
+const UV_CAMPFIRE_2:  [f32; 2] = uv(13, 20);
+const UV_LEAN_TO:     [f32; 2] = uv(14, 20);
+const UV_HUT:         [f32; 2] = uv(15, 20);
+const UV_WALL:        [f32; 2] = uv(16, 20);
+const UV_FOOD_CACHE:  [f32; 2] = uv(17, 20);
+
+// Variant tables — used for random selection during decoration spawn
+const TREE_VARIANTS_FOREST: &[[f32; 2]] = &[
+    UV_TREE_A, UV_TREE_B, UV_TREE_C, UV_TREE_D, UV_TREE_E, UV_TREE_F,
+];
+const TREE_VARIANTS_GRASSLAND: &[[f32; 2]] = &[
+    UV_TREE_A, UV_TREE_B, UV_MW_DECOR_0,
+];
+const BUSH_VARIANTS: &[[f32; 2]] = &[
+    UV_DECOR_BUSH, UV_MW_DECOR_1, UV_MW_DECOR_2, UV_MW_DECOR_3,
+];
+const ROCK_VARIANTS: &[[f32; 2]] = &[
+    UV_ROCK_A, UV_ROCK_B, UV_FT_ROCK_A, UV_FT_ROCK_B, UV_FT_ROCK_C,
+];
+const FLOWER_VARIANTS: &[[f32; 2]] = &[
+    UV_FLOWER_A, UV_FLOWER_B, UV_FLOWER_C,
+    UV_GRASS_TUFT_A, UV_GRASS_TUFT_B,
+    UV_GRASS_DECOR_0, UV_GRASS_DECOR_1, UV_GRASS_DECOR_2, UV_GRASS_DECOR_3,
+];
+const REED_VARIANTS: &[[f32; 2]] = &[
+    UV_REED_A, UV_REED_B, UV_DECOR_REED,
+];
+const HUT_VARIANTS: &[[f32; 2]] = &[
+    UV_HUT, UV_HUT_SL_A, UV_HUT_SL_B, UV_HUT_SL_C,
+    UV_HUT_SL_D, UV_HUT_SL_E, UV_FT_BUILDING_A, UV_FT_BUILDING_B,
+];
 
 /// Max objects: 12K resources + 15K decorations + 2K structures
 const MAX_OBJECTS: usize = 35_000;
@@ -266,49 +368,60 @@ impl ObjectRenderer {
                     // Biome + seed -> sprite type, tint, size.
                     // Tints are near-identity (1.0) — real atlas sprites have colors baked in.
                     // Sizes match WorldBox spec: trees 4.0-5.0, bushes 2.0-3.0, rocks 1.5-2.0.
+                    // Uses variant tables so every cell picks a different sprite from the expanded atlas.
                     let (atlas_uv, tint, size) = match biome {
                         Biome::Forest => {
                             tree_count += 1;
-                            match hash % 4 {
-                                0 => (UV_DECOR_TREE, [1.0f32, 1.0, 1.0], 4.5), // conifer
-                                1 => (UV_DECOR_TREE, [1.0f32, 1.0, 1.0], 4.0), // oak
-                                2 => (UV_DECOR_BUSH, [1.0f32, 1.0, 1.0], 2.5), // understory bush
-                                _ => (UV_DECOR_BUSH, [1.0f32, 1.0, 1.0], 2.0), // undergrowth
+                            // 60% trees (6 variants), 40% bush/undergrowth (4 variants)
+                            if hash % 10 < 6 {
+                                let v = TREE_VARIANTS_FOREST[hash % TREE_VARIANTS_FOREST.len()];
+                                let sz = 4.0 + (hash % 3) as f32 * 0.25; // 4.0–4.5
+                                (v, [1.0f32, 1.0, 1.0], sz)
+                            } else {
+                                let v = BUSH_VARIANTS[(hash >> 4) % BUSH_VARIANTS.len()];
+                                (v, [1.0f32, 1.0, 1.0], 2.0 + (hash % 3) as f32 * 0.25)
                             }
                         }
                         Biome::Grassland => {
                             bush_count += 1;
-                            match hash % 5 {
-                                0 => (UV_DECOR_BUSH, [1.0f32, 1.0, 1.0], 2.0), // flower
-                                1 => (UV_DECOR_BUSH, [1.0f32, 1.0, 1.0], 2.0), // flower
-                                2 => (UV_DECOR_BUSH, [1.0f32, 1.0, 1.0], 2.2), // grass tuft
-                                3 => (UV_DECOR_BUSH, [1.0f32, 1.0, 1.0], 2.0), // grass tuft 2
-                                _ => (UV_DECOR_TREE, [1.0f32, 1.0, 1.0], 4.5), // lone tree
+                            // 80% flowers/grass, 20% lone tree
+                            if hash % 5 == 4 {
+                                let v = TREE_VARIANTS_GRASSLAND[(hash >> 3) % TREE_VARIANTS_GRASSLAND.len()];
+                                (v, [1.0f32, 1.0, 1.0], 4.5)
+                            } else {
+                                let v = FLOWER_VARIANTS[hash % FLOWER_VARIANTS.len()];
+                                (v, [1.0f32, 1.0, 1.0], 2.0 + (hash % 3) as f32 * 0.1)
                             }
                         }
                         Biome::Mountain => {
                             rock_count += 1;
                             let elevation_hint = (y as f32 / h as f32) * 0.5 + (hash % 100) as f32 * 0.005;
+                            let v = ROCK_VARIANTS[(hash >> 2) % ROCK_VARIANTS.len()];
                             if elevation_hint > 0.6 && hash % 3 == 0 {
-                                (UV_DECOR_ROCK, [1.0f32, 1.0, 1.0], 1.8) // snow patch
+                                (v, [1.0f32, 1.0, 1.0], 1.8) // snow patch
                             } else if hash % 2 == 0 {
-                                (UV_DECOR_ROCK, [1.0f32, 1.0, 1.0], 2.0) // large rock
+                                (v, [1.0f32, 1.0, 1.0], 2.0) // large rock
                             } else {
-                                (UV_DECOR_ROCK, [1.0f32, 1.0, 1.0], 1.5) // small rock
+                                (v, [1.0f32, 1.0, 1.0], 1.5) // small rock
                             }
                         }
                         Biome::Wetland => {
+                            let v = REED_VARIANTS[(hash >> 1) % REED_VARIANTS.len()];
                             if hash % 3 == 0 {
-                                (UV_DECOR_REED, [1.0f32, 1.0, 1.0], 2.5) // cattail
+                                (v, [1.0f32, 1.0, 1.0], 2.5) // cattail
                             } else {
-                                (UV_DECOR_REED, [1.0f32, 1.0, 1.0], 2.0) // reed
+                                (v, [1.0f32, 1.0, 1.0], 2.0) // reed
                             }
                         }
                         Biome::Desert => {
+                            // Cactus stays as-is; sprinkle mystic-woods decor for scrub variety
                             if hash % 4 == 0 {
-                                (UV_DECOR_CACTUS, [1.0f32, 1.0, 1.0], 3.0) // cactus
+                                (UV_DECOR_CACTUS, [1.0f32, 1.0, 1.0], 3.0)
+                            } else if hash % 8 < 2 {
+                                let v = UV_MW_DECOR_4;
+                                (v, [1.0f32, 1.0, 1.0], 1.8) // dead scrub variant
                             } else {
-                                (UV_DECOR_CACTUS, [1.0f32, 1.0, 1.0], 2.0) // dead scrub
+                                (UV_DECOR_CACTUS, [1.0f32, 1.0, 1.0], 2.0)
                             }
                         }
                         Biome::Water => continue,
@@ -344,11 +457,17 @@ impl ObjectRenderer {
                 if s == 0 {
                     continue;
                 }
+                // Per-cell hash for stable building variant selection (not frame-dependent)
+                let struct_hash = cell_hash(x, y);
                 use emergence_core::world::terrain::StructureType;
                 let (atlas_uv, tint, size) = match StructureType::from_u8(s) {
                     StructureType::Campfire     => (campfire_frame_uv[frame], [1.0f32, 1.0, 1.0], 1.8),
                     StructureType::LeanTo       => (UV_LEAN_TO,   [1.0f32, 1.0, 1.0], 3.5),
-                    StructureType::Hut          => (UV_HUT,       [1.0f32, 1.0, 1.0], 5.0),
+                    StructureType::Hut          => {
+                        // Randomly pick from 8 building variants (Sprout Lands + Fan-tasy + original)
+                        let v = HUT_VARIANTS[struct_hash % HUT_VARIANTS.len()];
+                        (v, [1.0f32, 1.0, 1.0], 5.0)
+                    }
                     StructureType::Wall         => (UV_WALL,      [1.0f32, 1.0, 1.0], 5.0),
                     StructureType::ResourceCache=> (UV_FOOD_CACHE,[1.0f32, 1.0, 1.0], 3.0),
                     StructureType::None         => continue,

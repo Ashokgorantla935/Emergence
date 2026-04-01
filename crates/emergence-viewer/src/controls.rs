@@ -124,11 +124,22 @@ impl TimeControls {
 
                     ui.separator();
 
-                    // Speed buttons
+                    // Speed buttons — active highlighted with gold
                     for &spd in SimSpeed::all() {
                         let selected = !self.paused && self.speed == spd;
-                        let btn = egui::Button::new(spd.label())
-                            .selected(selected)
+                        let label = if selected {
+                            egui::RichText::new(spd.label())
+                                .color(egui::Color32::GOLD)
+                                .strong()
+                        } else {
+                            egui::RichText::new(spd.label())
+                        };
+                        let btn = egui::Button::new(label)
+                            .fill(if selected {
+                                egui::Color32::from_rgb(60, 50, 0)
+                            } else {
+                                egui::Color32::from_rgb(30, 30, 30)
+                            })
                             .min_size(egui::vec2(36.0, 24.0));
                         if ui.add(btn).clicked() {
                             self.speed = spd;

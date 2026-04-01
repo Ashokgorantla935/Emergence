@@ -1152,7 +1152,7 @@ impl ApplicationHandler for App {
                 // At high speeds (many ticks/frame) we always render at 1.0.
                 // At Speed1x the tick runs at end of each frame so frac = 1.0.
                 let frame_frac = 1.0f32;
-                br.update(&rs.queue, &world.beings, &self.anim, frame_frac, world.tick as u32);
+                br.update(&rs.queue, &world.beings, &self.anim, frame_frac, world.tick as u32, pixels_per_unit);
             }
             if let Some(ref hm) = self.heatmap_renderer {
                 hm.update(&rs.queue, &world.signals);
@@ -2150,6 +2150,22 @@ impl ApplicationHandler for App {
                 let mut encoder = rs.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("World Encoder"),
                 });
+
+                // ── Compute pass: signal grid diffusion ───────────────────
+                // Dispatches GPU diffusion shader before any render pass.
+                // Uploads Danger channel (index 0) when its dimensions match the
+                // compute pipeline; otherwise dispatches with existing buffer data.
+                {
+                    if let Some(ref world) = self.world {
+                        let world_r = world.read().unwrap();
+                        let channel = &world_r.signals.channels[0];
+                        let expected = (rs.signal_compute.width * rs.signal_compute.height) as usize;
+                        if channel.len() == expected {
+                            rs.signal_compute.upload_signals(&rs.queue, channel);
+                        }
+                    }
+                    rs.signal_compute.dispatch(&mut encoder);
+                }
 
                 {
                     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

@@ -84,14 +84,22 @@ impl BeingRenderer {
     /// Update instance buffer from engine state. Called every frame.
     /// `frame_frac` is the fractional progress into the current tick (0..1) for interpolation.
     /// `game_tick` is the current simulation tick (for bob phase).
+    /// `pixels_per_unit` drives LOD selection:
+    ///   LOD 0 (>10 px/unit): full sprites + animation
+    ///   LOD 1 (3-10 px/unit): static sprites, no bob animation
+    ///   LOD 2 (<3 px/unit): 1px dot (solid color region in atlas corner)
     pub fn update(
         &mut self,
-        queue:      &wgpu::Queue,
-        beings:     &Beings,
-        anim:       &AnimationManager,
-        frame_frac: f32,
-        game_tick:  u32,
+        queue:           &wgpu::Queue,
+        beings:          &Beings,
+        anim:            &AnimationManager,
+        frame_frac:      f32,
+        game_tick:       u32,
+        pixels_per_unit: f32,
     ) {
+        let lod = if pixels_per_unit > 10.0 { 0u8 }
+            else if pixels_per_unit > 3.0  { 1 }
+            else                           { 2 };
         // Grow prev_positions buffer to cover all being slots
         if self.prev_positions.len() < beings.count {
             self.prev_positions.resize(beings.count, [0.0, 0.0]);
@@ -153,6 +161,17 @@ impl BeingRenderer {
                 // Idle: no bob, but preserve facing from last known velocity (default right)
                 // Use 0.0 to signal idle; shader will detect abs < 0.001 as idle
                 0.0
+            };
+
+            // LOD overrides
+            let (atlas_uv, atlas_size, size, bob_flip) = match lod {
+                // LOD 1: static sprite — kill bob animation
+                1 => (atlas_uv, atlas_size, size, 0.0f32),
+                // LOD 2: 1px dot — use a solid white pixel in atlas top-left corner,
+                //         override size to 1 world unit, no animation
+                2 => ([0.0f32, 0.0], [ATLAS_CELL * 0.1, ATLAS_CELL * 0.1], 1.0f32, 0.0f32),
+                // LOD 0: full quality (no override)
+                _ => (atlas_uv, atlas_size, size, bob_flip),
             };
 
             instances.push(BeingInstance {

@@ -3,6 +3,7 @@ use wgpu::util::DeviceExt;
 
 use super::super::camera::CameraUniform;
 use crate::atlas::Atlas;
+use super::compute::SignalComputePipeline;
 
 /// Extended camera uniform including sprite rendering fields.
 /// Kept backward-compatible: the original view_proj is always binding 0.
@@ -69,6 +70,8 @@ pub struct RenderState {
     pub particle_pipeline: wgpu::RenderPipeline,
     /// V3: Post-processing (day/night + screen shake).
     pub postprocess: super::post_process::PostProcessRenderer,
+    /// GPU compute pipeline for signal grid diffusion (ping-pong storage buffers).
+    pub signal_compute: SignalComputePipeline,
 }
 
 impl RenderState {
@@ -695,6 +698,10 @@ impl RenderState {
         let mut postprocess = super::post_process::PostProcessRenderer::new(&device, surface_format);
         postprocess.resize(&device, size.width.max(1), size.height.max(1), surface_format);
 
+        // ── Signal compute pipeline (ping-pong GPU diffusion) ─────────────
+        // Default grid 128x128; decay 0.95, diffusion 0.08 per tick.
+        let signal_compute = SignalComputePipeline::new(&device, 128, 128, 0.95, 0.08);
+
         RenderState {
             device,
             queue,
@@ -721,6 +728,7 @@ impl RenderState {
             object_pipeline,
             particle_pipeline,
             postprocess,
+            signal_compute,
         }
     }
 

@@ -150,7 +150,7 @@ impl NewsFeedSystem {
             } else {
                 match event.event_type {
                     EventType::Born => format!("{} beings were born.", count),
-                    EventType::BuildingComplete => format!("{} structures completed.", count),
+                    EventType::BuildingComplete => format!("{} shelters built.", count),
                     EventType::SharedFood => format!("{} food shared.", count),
                     EventType::Fled => format!("{} beings fled.", count),
                     _ => format!("{} events.", count),
@@ -335,23 +335,25 @@ impl NewsFeedSystem {
                 _ => format!("{} fled from danger.", actor_name),
             },
             EventType::BuildingComplete => format!(
-                "{} completed a new structure.", actor_name
+                "{} built a shelter.", actor_name
             ),
             EventType::SettlementFormed => {
                 let s_name = settlement_detector
                     .settlements
-                    .get(event.actor_id as usize)
+                    .iter()
+                    .find(|s| s.beings.contains(&(event.actor_id as usize)))
                     .map(|s| s.name.as_str())
-                    .unwrap_or("a new settlement");
-                match event.cause {
-                    EventCause::PopulationCount { count } => format!(
-                        "A settlement has formed: {} ({} beings).", s_name, count
-                    ),
-                    _ => format!("A settlement has formed: {}.", s_name),
-                }
+                    .unwrap_or("a settlement");
+                format!("{} founded {}.", actor_name, s_name)
             }
             EventType::SettlementDissolved => {
-                "A settlement has dissolved.".to_string()
+                let s_name = settlement_detector
+                    .settlements
+                    .iter()
+                    .find(|s| s.beings.contains(&(event.actor_id as usize)))
+                    .map(|s| s.name.as_str())
+                    .unwrap_or("a settlement");
+                format!("{} has dissolved.", s_name)
             }
             EventType::KingdomFormed => {
                 let k = kingdom_detector.kingdoms.iter()

@@ -1,0 +1,13 @@
+[package]
+name = "emergence-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+noise = { workspace = true }
+rayon = { workspace = true }
+fastrand = { workspace = true }
+half = { workspace = true }
+smallvec = { workspace = true }
+bitcode = { workspace = true }
+serde = { workspace = true }

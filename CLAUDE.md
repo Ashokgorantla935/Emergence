@@ -4,26 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Swarm OS — a high-performance swarm intelligence engine in Rust. Emotionally-driven agents in a procedural world display emergent social behaviors (love, revenge, culture, migration, justice) through stigmergy, not explicit programming. The "Little Worlds" simulation is the first app; an organic farm simulator (integrating with AgroForest 3D at `~/farmDesigner2/`) is planned second.
+Emergence — a high-performance swarm intelligence engine in Rust. Emotionally-driven agents in a procedural world display emergent social behaviors (love, revenge, culture, migration, justice) through stigmergy, not explicit programming. The "Little Worlds" simulation is the first app; an organic farm simulator (integrating with AgroForest 3D at `~/farmDesigner2/`) is planned second.
 
 ## Architecture
 
 Three-crate Cargo workspace:
 
-- **swarm-core** — Headless computation library. Zero rendering/IO dependencies. Pure engine with public API: create world, step, query. Contains `world/` (terrain, climate, resources, signal grid), `being/` (emotional agents with lifecycle), `sim/` (tick loop, spatial index, scheduling).
-- **swarm-viewer** — wgpu Metal-native visualization. Instanced rendering, signal heatmaps, camera controls, time control.
-- **swarm-worlds** — Domain configurations. `genesis.rs` (little beings), `farm.rs` (future organic farm).
+- **emergence-core** — Headless computation library. Zero rendering/IO dependencies. Pure engine with public API: create world, step, query. Contains `world/` (terrain, climate, resources, signal grid), `being/` (emotional agents with lifecycle), `sim/` (tick loop, spatial index, scheduling).
+- **emergence-viewer** — wgpu Metal-native visualization. Instanced rendering, signal heatmaps, camera controls, time control.
+- **emergence-worlds** — Domain configurations. `genesis.rs` (little beings), `farm.rs` (future organic farm).
 
-**Separation rule:** `swarm-core` must never depend on rendering, windowing, or IO beyond std.
+**Separation rule:** `emergence-core` must never depend on rendering, windowing, or IO beyond std.
 
 ## Build & Run
 
 ```bash
 cargo build                    # build all crates
-cargo build -p swarm-core      # build engine only
+cargo build -p emergence-core      # build engine only
 cargo test                     # run all tests
-cargo test -p swarm-core       # test engine only
-cargo run -p swarm-viewer      # run visualization
+cargo test -p emergence-core       # test engine only
+cargo run -p emergence-viewer      # run visualization
 cargo bench                    # run benchmarks
 ```
 
@@ -57,4 +57,4 @@ Critical performance rules:
 
 ## Design Spec
 
-Full design specification: `docs/specs/2026-03-31-swarm-os-design.md`
+Full design specification: `docs/specs/2026-03-31-swarm-os-design.md` (historical name preserved)

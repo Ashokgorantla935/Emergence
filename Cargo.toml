@@ -1,16 +1,16 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/swarm-core",
-    "crates/swarm-viewer",
-    "crates/swarm-worlds",
-    "crates/swarm-app",
+    "crates/emergence-core",
+    "crates/emergence-viewer",
+    "crates/emergence-worlds",
+    "crates/emergence-app",
 ]
 
 [workspace.dependencies]
-swarm-core = { path = "crates/swarm-core" }
-swarm-viewer = { path = "crates/swarm-viewer" }
-swarm-worlds = { path = "crates/swarm-worlds" }
+emergence-core = { path = "crates/emergence-core" }
+emergence-viewer = { path = "crates/emergence-viewer" }
+emergence-worlds = { path = "crates/emergence-worlds" }
 noise = "0.9"
 rayon = "1.10"
 fastrand = "2.3"
@@ -22,3 +22,6 @@ winit = "0.30"
 bytemuck = "1.21"
 half = "2.4"
 pollster = "0.4"
+smallvec = "1"
+bitcode = "0.6"
+serde = { version = "1", features = ["derive"] }

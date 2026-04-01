@@ -1,0 +1,8 @@
+[package]
+name = "emergence-worlds"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+emergence-core = { workspace = true }
+fastrand = { workspace = true }

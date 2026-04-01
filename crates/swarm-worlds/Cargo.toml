@@ -1,8 +1,0 @@
-[package]
-name = "swarm-worlds"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-swarm-core = { workspace = true }
-fastrand = { workspace = true }

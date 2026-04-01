@@ -1,0 +1,264 @@
+{
+  "project": "Emergence",
+  "updated": "2026-04-01T06:05:00Z",
+  "mode": "AUTONOMOUS OVERNIGHT BUILD",
+  "current_wave": 2,
+  "total_waves": 4,
+
+  "stages": [
+    {
+      "id": "spec",
+      "type": "phase",
+      "label": "SPEC PHASE",
+      "status": "DONE",
+      "children": [
+        {
+          "id": "spec-writing",
+          "type": "parallel_group",
+          "label": "11 SPEC PARTS WRITTEN",
+          "status": "DONE",
+          "agents": [
+            { "id": "spec-1", "name": "Spec Writer 1", "detail": "Parts 1-7 (core engine)", "status": "DONE" },
+            { "id": "spec-2", "name": "Spec Writer 2", "detail": "Parts 8-9 (kingdoms, warfare)", "status": "DONE" },
+            { "id": "spec-3", "name": "Spec Writer 3", "detail": "Parts 10-11 (lifecycle, newsfeed)", "status": "DONE" },
+            { "id": "spec-4", "name": "Atoms Auditor", "detail": "10 civilization atoms", "status": "DONE" },
+            { "id": "spec-5", "name": "Map Designer", "detail": "Part 12 (8 maps)", "status": "DONE" },
+            { "id": "spec-6", "name": "WorldBox Gap Fixer", "detail": "Visual punch + onboarding", "status": "DONE" }
+          ]
+        },
+        {
+          "id": "spec-total",
+          "type": "metric",
+          "label": "Total: 11,000+ lines of spec"
+        }
+      ]
+    },
+
+    {
+      "id": "spec-review-gate",
+      "type": "gate",
+      "label": "GATE: All 7 reviews must pass",
+      "status": "PASS"
+    },
+
+    {
+      "id": "spec-review",
+      "type": "parallel_group",
+      "label": "7 REVIEWERS IN PARALLEL",
+      "status": "DONE",
+      "agents": [
+        { "id": "rev-sawyer", "name": "Sawyer (Perf)", "detail": "5.6ms headroom confirmed", "status": "PASS" },
+        { "id": "rev-sawyer-vis", "name": "Sawyer (Visual)", "detail": "0.76ms for all gap-fixes", "status": "PASS" },
+        { "id": "rev-worldbox", "name": "WorldBox Dev", "detail": "Visual punch gaps identified", "status": "PASS" },
+        { "id": "rev-civbuilder", "name": "Civ Builder", "detail": "SHIP IT — 8 days to alpha", "status": "PASS" },
+        { "id": "rev-tarn", "name": "Tarn Adams", "detail": "10 emergence fixes applied", "status": "PASS" },
+        { "id": "rev-redteam", "name": "Red Team", "detail": "3 crit + 7 high found & fixed", "status": "PASS" },
+        { "id": "rev-engage", "name": "Engagement", "detail": "7.5/10, tooltip + milestones", "status": "PASS" }
+      ]
+    },
+
+    {
+      "id": "impl-plan",
+      "type": "phase",
+      "label": "IMPLEMENTATION PLAN",
+      "status": "DONE",
+      "children": [
+        {
+          "id": "plan-writers",
+          "type": "parallel_group",
+          "label": "4 CARMACKS IN PARALLEL",
+          "status": "DONE",
+          "agents": [
+            { "id": "carmack-1", "name": "Carmack Engine", "detail": "1,872 lines — 8 phases", "status": "DONE" },
+            { "id": "carmack-2", "name": "Carmack Viewer", "detail": "1,244 lines — 7 phases", "status": "DONE" },
+            { "id": "carmack-3", "name": "Carmack Gameplay", "detail": "1,498 lines — 78 powers", "status": "DONE" },
+            { "id": "carmack-4", "name": "Carmack Maps", "detail": "1,113 lines — 8 maps", "status": "DONE" }
+          ]
+        },
+        {
+          "id": "plan-combiner",
+          "type": "single",
+          "label": "Combiner",
+          "detail": "Merged 4 parts into 553-line final plan",
+          "status": "DONE"
+        },
+        {
+          "id": "plan-fixer",
+          "type": "single",
+          "label": "Plan Fixer",
+          "detail": "Applied red team + Tarn fixes to plan files",
+          "status": "DONE"
+        }
+      ]
+    },
+
+    {
+      "id": "wave1",
+      "type": "wave",
+      "label": "WAVE 1: Foundation",
+      "status": "DONE",
+      "children": [
+        {
+          "id": "w1-impl",
+          "type": "parallel_group",
+          "label": "PARALLEL IMPLEMENTATION",
+          "status": "DONE",
+          "agents": [
+            { "id": "w1-engine", "name": "Engine Agent", "detail": "E0 survival + E1 Sawyer constraints", "status": "DONE", "metrics": "37/38 tests" },
+            { "id": "w1-viewer", "name": "Viewer Agent", "detail": "V0 sprite atlas + renderer", "status": "DONE", "metrics": "810-line atlas gen" },
+            { "id": "w1-maps", "name": "Maps Agent", "detail": "M0 data model + M1 6 algorithms", "status": "DONE", "metrics": "38/38 tests" },
+            { "id": "w1-assets", "name": "Assets Agent", "detail": "M2 Earth + Mars heightmaps", "status": "DONE", "metrics": "139KB total" }
+          ]
+        },
+        {
+          "id": "w1-gate",
+          "type": "gate",
+          "label": "BUILD GATE",
+          "status": "PASS",
+          "detail": "cargo build 5.12s | cargo test 38/0/1 | 0 errors"
+        }
+      ]
+    },
+
+    {
+      "id": "wave2",
+      "type": "wave",
+      "label": "WAVE 2: Core Systems",
+      "status": "IN_PROGRESS",
+      "now": true,
+      "children": [
+        {
+          "id": "w2-impl",
+          "type": "parallel_group",
+          "label": "PARALLEL IMPLEMENTATION",
+          "status": "IN_PROGRESS",
+          "agents": [
+            { "id": "w2-engine", "name": "Engine Agent", "detail": "E2 fauna + creature partitioning", "status": "DONE", "metrics": "46/46 tests, 7 fauna types" },
+            { "id": "w2-viewer", "name": "Viewer Agent", "detail": "V1 objects + V2 particles + V3 post", "status": "DONE", "metrics": "1141 lines, 7 draw calls" },
+            { "id": "w2-gameplay-a", "name": "Gameplay Agent A", "detail": "G0 god tools (82 variants, 8 tabs)", "status": "DONE", "metrics": "1282+805 lines" },
+            { "id": "w2-gameplay-b", "name": "Gameplay Agent B", "detail": "G1 scenarios + save/load + onboard", "status": "DONE", "metrics": "636 save + 400 scenario + 495 screen" },
+            { "id": "w2-maps", "name": "Maps Agent", "detail": "M3-M5 thumbnails + custom maps", "status": "DONE", "metrics": "42/42 tests" },
+            { "id": "w2-ui", "name": "UI Agent", "detail": "V5 egui panels + inspector + minimap", "status": "DONE", "metrics": "2492 lines, 14 files" }
+          ]
+        },
+        {
+          "id": "w2-review",
+          "type": "single",
+          "label": "Red Team Code Review",
+          "detail": "Hunt stubs, fakes, hallucinated APIs",
+          "status": "WAITING"
+        },
+        {
+          "id": "w2-gate",
+          "type": "gate",
+          "label": "BUILD GATE",
+          "status": "WAITING",
+          "detail": "cargo build --release && cargo test --release"
+        },
+        {
+          "id": "w2-qa",
+          "type": "loop",
+          "label": "QA LOOP — until clean",
+          "status": "WAITING",
+          "iteration": 0,
+          "bugs_found": 0,
+          "bugs_fixed": 0,
+          "children": [
+            { "id": "w2-qa-review", "name": "Red Team QA + Code Review", "status": "WAITING" },
+            { "id": "w2-qa-fix", "name": "Fix Issues", "status": "WAITING", "bugs_remaining": 0 },
+            { "id": "w2-qa-smoke", "name": "Smoke Test", "detail": "cargo test full suite", "status": "WAITING" },
+            { "id": "w2-qa-clean", "name": "Clean?", "detail": "exit loop or iterate", "status": "WAITING" }
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "wave3",
+      "type": "wave",
+      "label": "WAVE 3: Civilization + Polish",
+      "status": "BLOCKED",
+      "blocked_by": "wave2",
+      "children": [
+        {
+          "id": "w3-impl",
+          "type": "parallel_group",
+          "label": "PARALLEL IMPLEMENTATION",
+          "status": "PENDING",
+          "agents": [
+            { "id": "w3-engine-a", "name": "Engine Agent A", "detail": "E3 civ atoms + E4 construction", "status": "PENDING" },
+            { "id": "w3-engine-b", "name": "Engine Agent B", "detail": "E5 kingdoms + E6 laws + E7 save", "status": "PENDING" },
+            { "id": "w3-viewer", "name": "Viewer Agent", "detail": "V4 kingdom visuals + V6 sound", "status": "PENDING" },
+            { "id": "w3-gameplay-a", "name": "Gameplay Agent A", "detail": "G2 news feed + G3 kingdom UI", "status": "PENDING" },
+            { "id": "w3-gameplay-b", "name": "Gameplay Agent B", "detail": "G4 stats + G5 laws UI + G6 encyclopedia", "status": "PENDING" },
+            { "id": "w3-maps", "name": "Maps Agent", "detail": "M6 map selection UI", "status": "PENDING" }
+          ]
+        },
+        {
+          "id": "w3-gate",
+          "type": "gate",
+          "label": "BUILD + INTEGRATION GATE",
+          "status": "PENDING"
+        },
+        {
+          "id": "w3-qa",
+          "type": "loop",
+          "label": "QA LOOP — until clean",
+          "status": "PENDING"
+        }
+      ]
+    },
+
+    {
+      "id": "wave4",
+      "type": "wave",
+      "label": "WAVE 4: Stress Test + Ship",
+      "status": "BLOCKED",
+      "blocked_by": "wave3",
+      "children": [
+        {
+          "id": "w4-stress",
+          "type": "parallel_group",
+          "label": "STRESS TESTS",
+          "status": "PENDING",
+          "agents": [
+            { "id": "w4-perf", "name": "Perf Check", "detail": "60fps at 1x, 10K beings", "status": "PENDING" },
+            { "id": "w4-save", "name": "Save/Load", "detail": "Roundtrip all systems", "status": "PENDING" },
+            { "id": "w4-laws", "name": "Laws Test", "detail": "28 world laws toggle", "status": "PENDING" },
+            { "id": "w4-powers", "name": "Powers Test", "detail": "78 god powers functional", "status": "PENDING" },
+            { "id": "w4-redteam", "name": "Final Red Team", "detail": "Hunt remaining stubs/fakes", "status": "PENDING" }
+          ]
+        },
+        {
+          "id": "w4-ship-gate",
+          "type": "gate",
+          "label": "SHIP GATE — ALL PASS",
+          "status": "PENDING",
+          "detail": "commit → tag v2.0 → launch"
+        }
+      ]
+    }
+  ],
+
+  "performance_budget": {
+    "engine_tick_ms": { "budget": 7.4, "actual": null },
+    "render_frame_ms": { "budget": 4.85, "actual": null },
+    "total_frame_ms": { "budget": 16.6, "actual": null },
+    "headroom_ms": { "budget": 3.0, "actual": null },
+    "memory_mb": { "budget": 200, "actual": null },
+    "vram_mb": { "budget": 50, "actual": null },
+    "draw_calls": { "budget": 13, "actual": 7 }
+  },
+
+  "behavioral_constraints": [
+    "Main session = command center ONLY",
+    "Parallel agents for all bulk work",
+    "Every file write verified with wc -l",
+    "Red team after every wave",
+    "No hallucinated crates",
+    "Sawyer 9 constraints non-negotiable",
+    "Build gate between waves",
+    "bitcode NOT bincode",
+    "Default speed 10x"
+  ]
+}

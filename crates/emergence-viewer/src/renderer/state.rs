@@ -1,0 +1,549 @@
+use std::sync::Arc;
+use wgpu::util::DeviceExt;
+
+use super::super::camera::CameraUniform;
+use crate::atlas::Atlas;
+
+/// Extended camera uniform including sprite rendering fields.
+/// Kept backward-compatible: the original view_proj is always binding 0.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ExtCameraUniform {
+    pub view_proj:       [[f32; 4]; 4],
+    pub pixels_per_unit: f32,
+    pub _pad0:           f32,
+    pub _pad1:           f32,
+    pub _pad2:           f32,
+}
+
+impl ExtCameraUniform {
+    pub fn from_basic(basic: &CameraUniform, pixels_per_unit: f32) -> Self {
+        ExtCameraUniform {
+            view_proj: basic.view_proj,
+            pixels_per_unit,
+            _pad0: 0.0,
+            _pad1: 0.0,
+            _pad2: 0.0,
+        }
+    }
+}
+
+pub struct RenderState {
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
+    pub surface: wgpu::Surface<'static>,
+    pub surface_config: wgpu::SurfaceConfiguration,
+    pub camera_buffer: wgpu::Buffer,
+    pub camera_bind_group_layout: wgpu::BindGroupLayout,
+    pub camera_bind_group: wgpu::BindGroup,
+    pub texture_bind_group_layout: wgpu::BindGroupLayout,
+    pub terrain_pipeline: wgpu::RenderPipeline,
+    /// Sprite pipeline (replaces old circle SDF being pipeline).
+    pub sprite_pipeline: wgpu::RenderPipeline,
+    pub heatmap_pipeline: wgpu::RenderPipeline,
+    /// Atlas texture + bind group, shared across all sprite pipelines.
+    pub atlas: Atlas,
+    /// V1: World objects (resources + structures) — single instanced draw call.
+    pub object_pipeline: wgpu::RenderPipeline,
+    /// V2: Unified particle system — single instanced draw call for ALL particles.
+    pub particle_pipeline: wgpu::RenderPipeline,
+    /// V3: Post-processing (day/night + screen shake).
+    pub postprocess: super::post_process::PostProcessRenderer,
+}
+
+impl RenderState {
+    pub async fn new(window: Arc<winit::window::Window>) -> Self {
+        let size = window.inner_size();
+
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::METAL | wgpu::Backends::VULKAN | wgpu::Backends::GL,
+            ..Default::default()
+        });
+
+        let surface = instance.create_surface(window).unwrap();
+
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            })
+            .await
+            .expect("Failed to find GPU adapter");
+
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("Emergence Device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                ..Default::default()
+            }, None)
+            .await
+            .expect("Failed to create device");
+
+        let surface_caps = surface.get_capabilities(&adapter);
+        let surface_format = surface_caps
+            .formats
+            .iter()
+            .find(|f| f.is_srgb())
+            .copied()
+            .unwrap_or(surface_caps.formats[0]);
+
+        let surface_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: surface_format,
+            width: size.width.max(1),
+            height: size.height.max(1),
+            present_mode: wgpu::PresentMode::AutoVsync,
+            alpha_mode: surface_caps.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &surface_config);
+
+        // ── Atlas ──────────────────────────────────────────────────────────
+        let atlas = Atlas::new(&device, &queue);
+
+        // ── Camera uniform buffer (extended) ──────────────────────────────
+        let default_ext_cam = ExtCameraUniform {
+            view_proj: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            pixels_per_unit: 32.0,
+            _pad0: 0.0,
+            _pad1: 0.0,
+            _pad2: 0.0,
+        };
+
+        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label:    Some("Camera Buffer"),
+            contents: bytemuck::cast_slice(&[default_ext_cam]),
+            usage:    wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Camera BGL"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label:  Some("Camera BG"),
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding:  0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+        });
+
+        // ── Texture bind group layout (terrain + heatmap) ─────────────────
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Texture BGL"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
+        // ── Terrain pipeline ───────────────────────────────────────────────
+        let terrain_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label:  Some("Terrain Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/terrain.wgsl").into()),
+        });
+
+        let terrain_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Terrain Pipeline Layout"),
+                bind_group_layouts: &[&camera_bind_group_layout, &texture_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let terrain_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label:  Some("Terrain Pipeline"),
+                layout: Some(&terrain_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module:      &terrain_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[wgpu::VertexBufferLayout {
+                        array_stride: 16,
+                        step_mode:    wgpu::VertexStepMode::Vertex,
+                        attributes: &[
+                            wgpu::VertexAttribute {
+                                offset:           0,
+                                shader_location:  0,
+                                format:           wgpu::VertexFormat::Float32x2,
+                            },
+                            wgpu::VertexAttribute {
+                                offset:           8,
+                                shader_location:  1,
+                                format:           wgpu::VertexFormat::Float32x2,
+                            },
+                        ],
+                    }],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module:      &terrain_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format:     surface_format,
+                        blend:      Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample:   wgpu::MultisampleState::default(),
+                multiview:     None,
+                cache:         None,
+            });
+
+        // ── Sprite pipeline (replaces old being SDF pipeline) ──────────────
+        let sprite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label:  Some("Being Sprite Shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("shaders/being_sprite.wgsl").into(),
+            ),
+        });
+
+        let sprite_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Sprite Pipeline Layout"),
+                bind_group_layouts: &[
+                    &camera_bind_group_layout,
+                    &atlas.bind_group_layout,
+                ],
+                push_constant_ranges: &[],
+            });
+
+        // BeingInstance is 64 bytes.
+        // Offsets:
+        //   0  position      vec2  8B
+        //   8  atlas_uv      vec2  8B
+        //   16 atlas_size    vec2  8B
+        //   24 emotion_tint  vec3  12B
+        //   36 skin_tone     vec3  12B
+        //   48 size          f32   4B
+        //   52 brightness    f32   4B
+        //   56 alpha         f32   4B
+        //   60 _pad          f32   4B  (total 64)
+        let sprite_instance_layout = wgpu::VertexBufferLayout {
+            array_stride: 64,
+            step_mode:    wgpu::VertexStepMode::Instance,
+            attributes: &[
+                wgpu::VertexAttribute { offset:  0, shader_location: 1, format: wgpu::VertexFormat::Float32x2 }, // world_pos
+                wgpu::VertexAttribute { offset:  8, shader_location: 2, format: wgpu::VertexFormat::Float32x2 }, // atlas_uv
+                wgpu::VertexAttribute { offset: 16, shader_location: 3, format: wgpu::VertexFormat::Float32x2 }, // atlas_size
+                wgpu::VertexAttribute { offset: 24, shader_location: 4, format: wgpu::VertexFormat::Float32x3 }, // emotion_tint
+                wgpu::VertexAttribute { offset: 36, shader_location: 5, format: wgpu::VertexFormat::Float32x3 }, // skin_tone
+                wgpu::VertexAttribute { offset: 48, shader_location: 6, format: wgpu::VertexFormat::Float32   }, // size
+                wgpu::VertexAttribute { offset: 52, shader_location: 7, format: wgpu::VertexFormat::Float32   }, // brightness
+                wgpu::VertexAttribute { offset: 56, shader_location: 8, format: wgpu::VertexFormat::Float32   }, // alpha
+                wgpu::VertexAttribute { offset: 60, shader_location: 9, format: wgpu::VertexFormat::Float32   }, // _pad
+            ],
+        };
+
+        let sprite_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label:  Some("Sprite Pipeline"),
+                layout: Some(&sprite_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module:      &sprite_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[
+                        // Vertex buffer: unit quad position
+                        wgpu::VertexBufferLayout {
+                            array_stride: 8,
+                            step_mode:    wgpu::VertexStepMode::Vertex,
+                            attributes: &[wgpu::VertexAttribute {
+                                offset:          0,
+                                shader_location: 0,
+                                format:          wgpu::VertexFormat::Float32x2,
+                            }],
+                        },
+                        sprite_instance_layout,
+                    ],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module:      &sprite_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format:     surface_format,
+                        blend:      Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample:   wgpu::MultisampleState::default(),
+                multiview:     None,
+                cache:         None,
+            });
+
+        // ── Heatmap pipeline ───────────────────────────────────────────────
+        let heatmap_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label:  Some("Heatmap Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/heatmap.wgsl").into()),
+        });
+
+        let heatmap_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label:  Some("Heatmap Pipeline"),
+                layout: Some(&terrain_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module:      &heatmap_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[wgpu::VertexBufferLayout {
+                        array_stride: 16,
+                        step_mode:    wgpu::VertexStepMode::Vertex,
+                        attributes: &[
+                            wgpu::VertexAttribute {
+                                offset:          0,
+                                shader_location: 0,
+                                format:          wgpu::VertexFormat::Float32x2,
+                            },
+                            wgpu::VertexAttribute {
+                                offset:          8,
+                                shader_location: 1,
+                                format:          wgpu::VertexFormat::Float32x2,
+                            },
+                        ],
+                    }],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module:      &heatmap_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format:     surface_format,
+                        blend:      Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample:   wgpu::MultisampleState::default(),
+                multiview:     None,
+                cache:         None,
+            });
+
+        // ── Object sprite pipeline (world objects: resources + structures) ──
+        // ObjectInstance: 48 bytes
+        //   0  world_pos   vec2   8B
+        //   8  atlas_uv    vec2   8B
+        //   16 atlas_size  vec2   8B
+        //   24 tint        vec3  12B
+        //   36 size        f32    4B
+        //   40 alpha       f32    4B
+        //   44 _pad        f32    4B
+        let object_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label:  Some("Object Sprite Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/object_sprite.wgsl").into()),
+        });
+
+        let object_instance_layout = wgpu::VertexBufferLayout {
+            array_stride: 48,
+            step_mode:    wgpu::VertexStepMode::Instance,
+            attributes: &[
+                wgpu::VertexAttribute { offset:  0, shader_location: 1, format: wgpu::VertexFormat::Float32x2 }, // world_pos
+                wgpu::VertexAttribute { offset:  8, shader_location: 2, format: wgpu::VertexFormat::Float32x2 }, // atlas_uv
+                wgpu::VertexAttribute { offset: 16, shader_location: 3, format: wgpu::VertexFormat::Float32x2 }, // atlas_size
+                wgpu::VertexAttribute { offset: 24, shader_location: 4, format: wgpu::VertexFormat::Float32x3 }, // tint
+                wgpu::VertexAttribute { offset: 36, shader_location: 5, format: wgpu::VertexFormat::Float32   }, // size
+                wgpu::VertexAttribute { offset: 40, shader_location: 6, format: wgpu::VertexFormat::Float32   }, // alpha
+                wgpu::VertexAttribute { offset: 44, shader_location: 7, format: wgpu::VertexFormat::Float32   }, // _pad
+            ],
+        };
+
+        let object_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Object Pipeline Layout"),
+                bind_group_layouts: &[&camera_bind_group_layout, &atlas.bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let object_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label:  Some("Object Pipeline"),
+                layout: Some(&object_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module:      &object_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[
+                        wgpu::VertexBufferLayout {
+                            array_stride: 8,
+                            step_mode:    wgpu::VertexStepMode::Vertex,
+                            attributes: &[wgpu::VertexAttribute {
+                                offset:          0,
+                                shader_location: 0,
+                                format:          wgpu::VertexFormat::Float32x2,
+                            }],
+                        },
+                        object_instance_layout,
+                    ],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module:      &object_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format:     surface_format,
+                        blend:      Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive:     wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+                depth_stencil: None,
+                multisample:   wgpu::MultisampleState::default(),
+                multiview:     None,
+                cache:         None,
+            });
+
+        // ── Particle pipeline (ALL particles, one draw call) ─────────────
+        // ParticleInstance: 48 bytes
+        //   0  world_pos   vec2   8B
+        //   8  atlas_uv    vec2   8B
+        //   16 atlas_size  vec2   8B
+        //   24 color       vec4  16B
+        //   40 size        f32    4B
+        //   44 _pad        f32    4B
+        let particle_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label:  Some("Particle Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/particle.wgsl").into()),
+        });
+
+        let particle_instance_layout = wgpu::VertexBufferLayout {
+            array_stride: 48,
+            step_mode:    wgpu::VertexStepMode::Instance,
+            attributes: &[
+                wgpu::VertexAttribute { offset:  0, shader_location: 1, format: wgpu::VertexFormat::Float32x2 }, // world_pos
+                wgpu::VertexAttribute { offset:  8, shader_location: 2, format: wgpu::VertexFormat::Float32x2 }, // atlas_uv
+                wgpu::VertexAttribute { offset: 16, shader_location: 3, format: wgpu::VertexFormat::Float32x2 }, // atlas_size
+                wgpu::VertexAttribute { offset: 24, shader_location: 4, format: wgpu::VertexFormat::Float32x4 }, // color
+                wgpu::VertexAttribute { offset: 40, shader_location: 5, format: wgpu::VertexFormat::Float32   }, // size
+                wgpu::VertexAttribute { offset: 44, shader_location: 6, format: wgpu::VertexFormat::Float32   }, // _pad
+            ],
+        };
+
+        let particle_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label:  Some("Particle Pipeline"),
+                layout: Some(&object_pipeline_layout), // same layout as objects
+                vertex: wgpu::VertexState {
+                    module:      &particle_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[
+                        wgpu::VertexBufferLayout {
+                            array_stride: 8,
+                            step_mode:    wgpu::VertexStepMode::Vertex,
+                            attributes: &[wgpu::VertexAttribute {
+                                offset:          0,
+                                shader_location: 0,
+                                format:          wgpu::VertexFormat::Float32x2,
+                            }],
+                        },
+                        particle_instance_layout,
+                    ],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module:      &particle_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format:     surface_format,
+                        blend:      Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive:     wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+                depth_stencil: None,
+                multisample:   wgpu::MultisampleState::default(),
+                multiview:     None,
+                cache:         None,
+            });
+
+        // ── Post-process renderer ─────────────────────────────────────────
+        let mut postprocess = super::post_process::PostProcessRenderer::new(&device, surface_format);
+        postprocess.resize(&device, size.width.max(1), size.height.max(1), surface_format);
+
+        RenderState {
+            device,
+            queue,
+            surface,
+            surface_config,
+            camera_buffer,
+            camera_bind_group_layout,
+            camera_bind_group,
+            texture_bind_group_layout,
+            terrain_pipeline,
+            sprite_pipeline,
+            heatmap_pipeline,
+            atlas,
+            object_pipeline,
+            particle_pipeline,
+            postprocess,
+        }
+    }
+
+    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+        if new_size.width > 0 && new_size.height > 0 {
+            self.surface_config.width  = new_size.width;
+            self.surface_config.height = new_size.height;
+            self.surface.configure(&self.device, &self.surface_config);
+            self.postprocess.resize(
+                &self.device,
+                new_size.width,
+                new_size.height,
+                self.surface_config.format,
+            );
+        }
+    }
+
+    pub fn update_camera(&self, uniform: &CameraUniform, pixels_per_unit: f32) {
+        let ext = ExtCameraUniform::from_basic(uniform, pixels_per_unit);
+        self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[ext]));
+    }
+}

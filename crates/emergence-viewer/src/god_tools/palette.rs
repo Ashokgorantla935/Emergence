@@ -2,42 +2,95 @@ use egui::{Color32, RichText, Ui};
 use super::mod_types::{GodToolState, ToolTab, PowerDef};
 use super::power_catalog::POWER_CATALOG;
 
-/// Left-panel egui rendering: 8 tabs + 78 power buttons.
+/// Left-panel egui rendering: collapsible category tree + 78 power buttons.
 pub fn render_palette(ui: &mut Ui, state: &mut GodToolState) {
     ui.vertical(|ui| {
-        ui.set_width(180.0);
-        ui.heading("God Tools");
-        ui.separator();
+        ui.set_width(190.0);
 
-        // Tab strip
-        render_tab_strip(ui, state);
+        ui.add_space(2.0);
+        ui.label(RichText::new("GOD TOOLS").strong().size(13.0).color(Color32::from_rgb(200, 170, 80)));
         ui.separator();
-
-        // Power buttons for active tab
-        let tab = state.active_tab;
 
         egui::ScrollArea::vertical()
             .id_salt("god_palette_scroll")
-            .max_height(400.0)
             .show(ui, |ui| {
-                if tab == ToolTab::Creation {
-                    render_creation_tab(ui, state);
-                } else {
-                    let powers: Vec<&PowerDef> = POWER_CATALOG
-                        .iter()
-                        .filter(|p| p.tab == tab)
-                        .collect();
-                    ui.vertical(|ui| {
-                        for power in powers {
-                            render_power_button(ui, state, power);
-                        }
-                    });
-                }
+                render_creation_section(ui, state);
+                render_tab_section(ui, state, ToolTab::Destruction, "[D] Destruction",
+                    Color32::from_rgb(220, 80, 60));
+                render_tab_section(ui, state, ToolTab::Blessing, "[G] Blessing",
+                    Color32::from_rgb(220, 200, 60));
+                render_tab_section(ui, state, ToolTab::Terrain, "[T] Terrain",
+                    Color32::from_rgb(160, 200, 100));
+                render_tab_section(ui, state, ToolTab::Weather, "[W] Weather",
+                    Color32::from_rgb(80, 160, 220));
+                render_tab_section(ui, state, ToolTab::Curse, "[X] Curse",
+                    Color32::from_rgb(180, 80, 200));
+                render_tab_section(ui, state, ToolTab::Kingdom, "[K] Kingdom",
+                    Color32::from_rgb(80, 200, 200));
+                render_tab_section(ui, state, ToolTab::World, "[L] World",
+                    Color32::from_rgb(180, 180, 180));
             });
 
         ui.separator();
         render_brush_size(ui, state);
     });
+}
+
+fn render_creation_section(ui: &mut Ui, state: &mut GodToolState) {
+    let is_active_tab = state.active_tab == ToolTab::Creation;
+    let color = Color32::from_rgb(120, 200, 80);
+    let id = ui.make_persistent_id("section_creation");
+
+    let mut cs = egui::collapsing_header::CollapsingState::load_with_default_open(
+        ui.ctx(), id, true,
+    );
+    // If keyboard switched to this tab, force open
+    if is_active_tab {
+        cs.set_open(true);
+        cs.store(ui.ctx());
+    }
+
+    let (toggle_resp, _header_resp, _body) = cs.show_header(ui, |ui| {
+        ui.label(RichText::new("[C] Creation").color(color).strong());
+    }).body(|ui| {
+        render_creation_tab(ui, state);
+    });
+
+    if toggle_resp.clicked() {
+        state.active_tab = ToolTab::Creation;
+    }
+}
+
+fn render_tab_section(ui: &mut Ui, state: &mut GodToolState, tab: ToolTab, label: &str, color: Color32) {
+    let is_active_tab = state.active_tab == tab;
+    let id = ui.make_persistent_id(label);
+
+    let mut cs = egui::collapsing_header::CollapsingState::load_with_default_open(
+        ui.ctx(), id, false,
+    );
+    // If keyboard switched to this tab, force open
+    if is_active_tab {
+        cs.set_open(true);
+        cs.store(ui.ctx());
+    }
+
+    let (toggle_resp, _header_resp, _body) = cs.show_header(ui, |ui| {
+        ui.label(RichText::new(label).color(color).strong());
+    }).body(|ui| {
+        let powers: Vec<&PowerDef> = POWER_CATALOG
+            .iter()
+            .filter(|p| p.tab == tab)
+            .collect();
+        ui.vertical(|ui| {
+            for power in powers {
+                render_power_button(ui, state, power);
+            }
+        });
+    });
+
+    if toggle_resp.clicked() {
+        state.active_tab = tab;
+    }
 }
 
 /// Creation tab with "SPAWN HUMAN" prominently at the top, then fauna, then shelter.
@@ -51,7 +104,7 @@ fn render_creation_tab(ui: &mut Ui, state: &mut GodToolState) {
                 .strong(),
         );
 
-        // Prominent "Spawn Human" button — bigger, highlighted
+        // Prominent "Spawn Human" button
         let spawn_being = POWER_CATALOG.iter().find(|p| p.id == 0).unwrap();
         render_spawn_human_button(ui, state, spawn_being);
 
@@ -70,7 +123,6 @@ fn render_creation_tab(ui: &mut Ui, state: &mut GodToolState) {
                         ui.end_row();
                     }
                 }
-                // End row if odd count
                 if presets.len() % 2 != 0 {
                     ui.end_row();
                 }
@@ -118,33 +170,6 @@ fn render_creation_tab(ui: &mut Ui, state: &mut GodToolState) {
     });
 }
 
-fn render_tab_strip(ui: &mut Ui, state: &mut GodToolState) {
-    let tabs = [
-        (ToolTab::Creation,    "C", "Creation"),
-        (ToolTab::Terrain,     "T", "Terrain"),
-        (ToolTab::Weather,     "W", "Weather"),
-        (ToolTab::Destruction, "D", "Destruction"),
-        (ToolTab::Blessing,    "G", "Blessing"),
-        (ToolTab::Curse,       "X", "Curse"),
-        (ToolTab::Kingdom,     "K", "Kingdom"),
-        (ToolTab::World,       "L", "World"),
-    ];
-
-    ui.horizontal_wrapped(|ui| {
-        for (tab, shortcut, label) in tabs {
-            let active = state.active_tab == tab;
-            let color = if active { Color32::GOLD } else { Color32::GRAY };
-            let btn = egui::Button::new(
-                RichText::new(format!("[{}] {}", shortcut, label)).color(color)
-            );
-            if ui.add(btn).clicked() {
-                state.active_tab = tab;
-                state.active_power = None;
-            }
-        }
-    });
-}
-
 /// Large, prominent button for "Spawn Human" — the primary action.
 fn render_spawn_human_button(ui: &mut Ui, state: &mut GodToolState, power: &PowerDef) {
     let is_active = state.active_power == Some(power.id);
@@ -170,11 +195,11 @@ fn render_spawn_human_button(ui: &mut Ui, state: &mut GodToolState, power: &Powe
         egui::RichText::new("+ SPAWN HUMAN")
             .color(text_color)
             .strong()
-            .size(14.0),
+            .size(13.0),
     )
     .fill(bg)
     .stroke(egui::Stroke::new(if is_active { 2.0 } else { 1.0 }, border))
-    .min_size(egui::vec2(170.0, 36.0));
+    .min_size(egui::vec2(178.0, 34.0));
 
     let resp = ui.add_enabled(is_ready, btn);
 
@@ -242,7 +267,7 @@ fn render_power_button(ui: &mut Ui, state: &mut GodToolState, power: &PowerDef) 
 
     if resp.clicked() {
         if is_active {
-            state.active_power = None; // deselect
+            state.active_power = None;
         } else {
             state.active_power = Some(power.id);
         }
@@ -266,7 +291,7 @@ fn render_power_button(ui: &mut Ui, state: &mut GodToolState, power: &PowerDef) 
 }
 
 fn render_brush_size(ui: &mut Ui, state: &mut GodToolState) {
-    ui.label("Brush size:");
+    ui.label("Brush:");
     ui.horizontal(|ui| {
         for &size in &[1u8, 3, 5, 10] {
             let active = state.brush_size == size;

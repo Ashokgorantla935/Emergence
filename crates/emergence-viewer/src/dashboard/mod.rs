@@ -1,6 +1,15 @@
 use emergence_core::being::data::*;
 use emergence_core::sim::world_state::EventLog;
-use emergence_core::world::climate::Climate;
+use emergence_core::world::climate::{Climate, Season};
+
+fn season_color(climate: &Climate) -> egui::Color32 {
+    match climate.season() {
+        Season::Spring => egui::Color32::from_rgb(120, 200, 100),
+        Season::Summer => egui::Color32::from_rgb(220, 180, 60),
+        Season::Autumn => egui::Color32::from_rgb(200, 120, 50),
+        Season::Winter => egui::Color32::from_rgb(140, 180, 220),
+    }
+}
 
 pub struct Dashboard {
     pub population: u32,
@@ -112,46 +121,76 @@ impl Dashboard {
     }
 
     pub fn ui(&self, egui_ctx: &egui::Context, climate: &Climate, current_tick: u32) {
-        let _ = current_tick;
         egui::TopBottomPanel::bottom("dashboard")
-            .default_height(44.0)
+            .exact_height(50.0)
             .show(egui_ctx, |ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_centered(|ui| {
+                    // Tick counter
+                    ui.label(
+                        egui::RichText::new(format!("Tick {}", current_tick))
+                            .size(11.0)
+                            .color(egui::Color32::from_rgb(130, 120, 100)),
+                    );
+                    ui.separator();
+
                     // Population — large and prominent, lerped for smooth roll effect
                     ui.label(
-                        egui::RichText::new(format!("{}", self.displayed_pop as u32))
+                        egui::RichText::new(format!("Pop: {}", self.displayed_pop as u32))
                             .strong()
-                            .size(22.0),
+                            .size(16.0),
                     );
-                    ui.label(egui::RichText::new("people").size(12.0).color(egui::Color32::GRAY));
                     ui.separator();
 
-                    // Happiness — bar only, no decimal
+                    // Happiness — colored bar
                     let happiness = (self.avg_needs[1] + self.avg_needs[3] + self.avg_needs[4]) / 3.0;
-                    ui.label("Happiness");
-                    ui.add(egui::ProgressBar::new(happiness).desired_width(80.0));
+                    let happiness_color = if happiness > 0.65 {
+                        egui::Color32::from_rgb(80, 200, 80)
+                    } else if happiness > 0.35 {
+                        egui::Color32::from_rgb(220, 180, 40)
+                    } else {
+                        egui::Color32::from_rgb(200, 60, 60)
+                    };
+                    ui.label(egui::RichText::new("Happy").size(12.0).color(egui::Color32::GRAY));
+                    ui.add(
+                        egui::ProgressBar::new(happiness)
+                            .desired_width(80.0)
+                            .fill(happiness_color),
+                    );
                     ui.separator();
 
-                    // Season and Time
-                    ui.label(format!("{:?}", climate.season()));
+                    // Season and Time of Day
+                    ui.label(
+                        egui::RichText::new(format!("{:?}", climate.season()))
+                            .size(13.0)
+                            .color(season_color(climate)),
+                    );
                     ui.separator();
-                    ui.label(format!("{:?}", climate.day_phase()));
+                    ui.label(
+                        egui::RichText::new(format!("{:?}", climate.day_phase()))
+                            .size(12.0)
+                            .color(egui::Color32::from_rgb(180, 170, 140)),
+                    );
 
                     // Weather if active
                     if let Some(ref w) = climate.active_weather {
                         ui.separator();
-                        ui.label(format!("{:?}", w.kind));
+                        ui.label(
+                            egui::RichText::new(format!("{:?}", w.kind))
+                                .size(12.0)
+                                .color(egui::Color32::from_rgb(120, 160, 220)),
+                        );
                     }
 
                     // Perf warning only when critical
                     if self.population > 15000 && self.tick_rate < 45.0 {
                         ui.separator();
-                        ui.colored_label(egui::Color32::RED, "PERF WARNING");
+                        ui.colored_label(egui::Color32::RED, "PERF LOW");
                     }
                 });
             });
     }
 
+    #[allow(dead_code)]
     fn render_sparkline(
         &self,
         ui: &mut egui::Ui,

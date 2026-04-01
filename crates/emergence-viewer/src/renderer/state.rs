@@ -336,18 +336,34 @@ impl RenderState {
             }],
         });
 
-        // ── Terrain pipeline ───────────────────────────────────────────────
+        // ── Terrain pipeline (instanced quad tilemap) ──────────────────────
+        // TerrainInstance: 24 bytes
+        //   0  world_pos  vec2  8B
+        //   8  tile_uv    vec2  8B
+        //  16  flags      f32   4B
+        //  20  _pad       f32   4B
         let terrain_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label:  Some("Terrain Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/terrain.wgsl").into()),
         });
+
+        let terrain_instance_layout = wgpu::VertexBufferLayout {
+            array_stride: 24,
+            step_mode:    wgpu::VertexStepMode::Instance,
+            attributes: &[
+                wgpu::VertexAttribute { offset:  0, shader_location: 2, format: wgpu::VertexFormat::Float32x2 }, // world_pos
+                wgpu::VertexAttribute { offset:  8, shader_location: 3, format: wgpu::VertexFormat::Float32x2 }, // tile_uv
+                wgpu::VertexAttribute { offset: 16, shader_location: 4, format: wgpu::VertexFormat::Float32   }, // flags
+                wgpu::VertexAttribute { offset: 20, shader_location: 5, format: wgpu::VertexFormat::Float32   }, // _pad
+            ],
+        };
 
         let terrain_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Terrain Pipeline Layout"),
                 bind_group_layouts: &[
                     &camera_bind_group_layout,
-                    &texture_bind_group_layout,
+                    &atlas.bind_group_layout,
                     &water_time_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
@@ -360,22 +376,25 @@ impl RenderState {
                 vertex: wgpu::VertexState {
                     module:      &terrain_shader,
                     entry_point: Some("vs_main"),
-                    buffers: &[wgpu::VertexBufferLayout {
-                        array_stride: 16,
-                        step_mode:    wgpu::VertexStepMode::Vertex,
-                        attributes: &[
-                            wgpu::VertexAttribute {
-                                offset:           0,
-                                shader_location:  0,
-                                format:           wgpu::VertexFormat::Float32x2,
-                            },
-                            wgpu::VertexAttribute {
-                                offset:           8,
-                                shader_location:  1,
-                                format:           wgpu::VertexFormat::Float32x2,
-                            },
-                        ],
-                    }],
+                    buffers: &[
+                        wgpu::VertexBufferLayout {
+                            array_stride: 16,
+                            step_mode:    wgpu::VertexStepMode::Vertex,
+                            attributes: &[
+                                wgpu::VertexAttribute {
+                                    offset:           0,
+                                    shader_location:  0,
+                                    format:           wgpu::VertexFormat::Float32x2,
+                                },
+                                wgpu::VertexAttribute {
+                                    offset:           8,
+                                    shader_location:  1,
+                                    format:           wgpu::VertexFormat::Float32x2,
+                                },
+                            ],
+                        },
+                        terrain_instance_layout,
+                    ],
                     compilation_options: Default::default(),
                 },
                 fragment: Some(wgpu::FragmentState {

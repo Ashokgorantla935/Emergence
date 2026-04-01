@@ -341,18 +341,19 @@ impl ObjectRenderer {
                     // Each seed produces an independent hash for this cell slot.
                     let hash = cell_hash(x ^ seed.wrapping_mul(2654435761), y ^ seed.wrapping_mul(2246822519));
 
-                    // Per-slot density threshold. Later slots are sparser.
+                    // Per-slot density threshold. Reduced for visual clarity —
+                    // terrain tiles now provide ground detail, so fewer decorations needed.
                     let threshold: usize = match (biome, seed) {
-                        (Biome::Forest,    0) => 900, // slot 0: 90% — nearly every cell
-                        (Biome::Forest,    1) => 750, // slot 1: 75% — dense second layer
-                        (Biome::Forest,    _) => 400, // slot 2: 40% — undergrowth
-                        (Biome::Grassland, 0) => 600, // slot 0: 60%
-                        (Biome::Grassland, _) => 250, // slot 1: 25%
-                        (Biome::Mountain,  0) => 700, // slot 0: 70%
-                        (Biome::Mountain,  _) => 300, // slot 1: 30%
-                        (Biome::Wetland,   0) => 650,
-                        (Biome::Wetland,   _) => 250,
-                        (Biome::Desert,    _) => 120, // sparse: 12%
+                        (Biome::Forest,    0) => 50,  // slot 0: 5% — scattered trees
+                        (Biome::Forest,    1) => 30,  // slot 1: 3% — sparse second layer
+                        (Biome::Forest,    _) => 15,  // slot 2: 1.5% — rare undergrowth
+                        (Biome::Grassland, 0) => 30,  // slot 0: 3%
+                        (Biome::Grassland, _) => 15,  // slot 1: 1.5%
+                        (Biome::Mountain,  0) => 40,  // slot 0: 4%
+                        (Biome::Mountain,  _) => 20,  // slot 1: 2%
+                        (Biome::Wetland,   0) => 35,  // slot 0: 3.5%
+                        (Biome::Wetland,   _) => 15,  // slot 1: 1.5%
+                        (Biome::Desert,    _) => 10,  // sparse: 1%
                         (Biome::Water,     _) => continue,
                     };
 

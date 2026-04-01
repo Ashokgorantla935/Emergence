@@ -297,7 +297,6 @@ impl App {
                     &rs.device,
                     &rs.queue,
                     &w.terrain,
-                    &rs.texture_bind_group_layout,
                 )
             };
             let heatmap_renderer = {
@@ -356,7 +355,6 @@ impl App {
                             &rs.device,
                             &rs.queue,
                             &w_ref.terrain,
-                            &rs.texture_bind_group_layout,
                         )
                     };
                     let heatmap_renderer = {
@@ -455,7 +453,6 @@ impl ApplicationHandler for App {
                 &render_state.device,
                 &render_state.queue,
                 &world.terrain,
-                &render_state.texture_bind_group_layout,
             ));
             self.heatmap_renderer = Some(HeatmapRenderer::new(
                 &render_state.device,
@@ -1326,6 +1323,23 @@ impl ApplicationHandler for App {
 
                 TopBar::show(&self.egui_ctx, &mut self.speed, tick, population);
 
+                // Mute toggle button — top-right corner
+                {
+                    let muted = self.sound_engine.is_muted();
+                    let mute_label = if muted { "Muted" } else { "Sound" };
+                    let mut toggle = false;
+                    egui::Area::new(egui::Id::new("mute_btn"))
+                        .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-8.0, 4.0))
+                        .show(&self.egui_ctx, |ui| {
+                            if ui.small_button(mute_label).clicked() {
+                                toggle = true;
+                            }
+                        });
+                    if toggle {
+                        self.sound_engine.toggle_mute();
+                    }
+                }
+
                 // God tool palette — left side panel, always rendered while Playing
                 let power_before = self.god_tool_state.active_power;
                 egui::SidePanel::left("god_palette_panel")
@@ -2187,18 +2201,34 @@ impl ApplicationHandler for App {
                         ..Default::default()
                     });
 
+                    // Rebuild terrain instances for current viewport
+                    if let Some(ref mut terrain_r) = self.terrain_renderer {
+                        if let Some(ref world) = self.world {
+                            let world = world.read().unwrap();
+                            terrain_r.rebuild_instances_viewport(
+                                &rs.queue,
+                                &world.terrain,
+                                self.camera.position[0],
+                                self.camera.position[1],
+                                self.camera.zoom,
+                                self.camera.aspect,
+                            );
+                        }
+                    }
+
                     // Terrain
                     if let Some(ref terrain_r) = self.terrain_renderer {
                         render_pass.set_pipeline(&rs.terrain_pipeline);
                         render_pass.set_bind_group(0, &rs.camera_bind_group, &[]);
-                        render_pass.set_bind_group(1, &terrain_r.bind_group, &[]);
+                        render_pass.set_bind_group(1, &rs.atlas.bind_group, &[]);
                         render_pass.set_bind_group(2, &rs.water_time_bind_group, &[]);
                         render_pass.set_vertex_buffer(0, terrain_r.vertex_buffer.slice(..));
+                        render_pass.set_vertex_buffer(1, terrain_r.instance_buffer.slice(..));
                         render_pass.set_index_buffer(
                             terrain_r.index_buffer.slice(..),
                             wgpu::IndexFormat::Uint16,
                         );
-                        render_pass.draw_indexed(0..terrain_r.index_count, 0, 0..1);
+                        render_pass.draw_indexed(0..6, 0, 0..terrain_r.instance_count);
                     }
 
                     // Heatmap

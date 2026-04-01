@@ -87,14 +87,14 @@ impl Dashboard {
             }
         }
 
-        // Emotion distribution (fraction with emotion > 0.5)
+        // Emotion distribution (fraction with emotion > 0.1 — visible threshold)
         let mut emo_count = [0u32; 6];
         for i in 0..beings.count {
             if beings.states[i] == BeingState::Dead {
                 continue;
             }
             for e in 0..6 {
-                if beings.emotions[i][e] > 0.5 {
+                if beings.emotions[i][e] > 0.1 {
                     emo_count[e] += 1;
                 }
             }

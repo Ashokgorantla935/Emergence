@@ -9,8 +9,8 @@ pub const FIXED_DT: f32 = 1.0;
 
 use crate::being::actions::{score_actions, ScoredAction};
 use crate::being::data::*;
-use crate::being::emotions::{decay_emotions, trigger_emotion};
-use crate::being::lifecycle::{age_beings, check_death_conditions, drift_personality_humans, generate_personality};
+use crate::being::emotions::{decay_emotions, trigger_emotion, update_emotions_from_needs};
+use crate::being::lifecycle::{age_beings, age_beings_no_death, check_death_conditions, drift_personality_humans, generate_personality};
 use crate::being::needs::decay_needs;
 use crate::being::social::{deposit_emotion_signals, init_kinship_warmth};
 use crate::sim::movement::execute_action;
@@ -90,6 +90,7 @@ pub fn tick(world: &mut World) {
     }
 
     decay_emotions(&mut world.beings);
+    update_emotions_from_needs(&mut world.beings);
 
     // 5d. Age + death checks
     if world.laws.fast_aging {
@@ -100,13 +101,20 @@ pub fn tick(world: &mut World) {
             }
         }
     }
-    age_beings(&mut world.beings);
-    let newly_dead = if world.laws.immortal || world.laws.invulnerable {
+    // age_beings returns old-age deaths so they receive grief/events like other deaths
+    let age_dead = if world.laws.immortal || world.laws.invulnerable {
+        age_beings_no_death(&mut world.beings)
+    } else {
+        age_beings(&mut world.beings)
+    };
+    let condition_dead = if world.laws.immortal || world.laws.invulnerable {
         // Skip natural death checks (beings still die from combat/explicit kill)
         Vec::new()
     } else {
         check_death_conditions(&mut world.beings, world.climate.season())
     };
+    // Merge old-age and condition deaths — all receive the same grief/event treatment
+    let newly_dead: Vec<usize> = age_dead.into_iter().chain(condition_dead).collect();
 
     // Handle death consequences
     for &dead_idx in &newly_dead {
@@ -506,8 +514,14 @@ fn process_births(world: &mut World) {
                 continue;
             }
 
-            // Stochastic: 1% chance per tick per qualifying pair
-            if world.rng.f32() > 0.01 {
+            // Stochastic birth: base 0.5% per tick per eligible pair, scaled by carrying capacity.
+            // Carrying capacity = map_size / 10. Uses human-only count so fauna don't inflate the cap.
+            // At low population: near full rate. Near capacity: rate drops to near zero.
+            let human_alive = world.beings.human_count as f32;
+            let carrying_capacity = (world.config.size.0 * world.config.size.1) as f32 / 10.0;
+            let density_factor = (1.0 - human_alive / carrying_capacity).max(0.0);
+            let birth_prob = 0.005 * density_factor;
+            if world.rng.f32() > birth_prob {
                 continue;
             }
 
@@ -542,6 +556,8 @@ fn process_births(world: &mut World) {
     // Spawn new beings
     for (pos, personality, lifespan, parents) in new_beings {
         let idx = world.beings.spawn(pos, personality, lifespan, parents);
+        // New births are human by default; keep human_count in sync so capacity check stays accurate.
+        world.beings.human_count += 1;
         // Kinship warmth: siblings start with warmth 0.3 / trust 0.2
         init_kinship_warmth(&mut world.beings, idx, tick);
         world.events.push(Event {
@@ -622,16 +638,33 @@ mod tests {
 
     #[test]
     fn test_population_dynamics() {
-        let config = test_config(200);
+        // Small world, no fauna — isolates human population dynamics and runs fast in debug.
+        let config = WorldConfig {
+            size: (64, 64),
+            initial_beings: 50,
+            signal_channels: 7,
+            terrain_seed: 42,
+            has_water: false,
+            has_shelters: false,
+            has_predators: false,
+            predator_fraction: 0.0,
+            seasons: false,
+            day_night: false,
+            map: crate::world::map::MapSelection::Default,
+        };
         let mut world = crate::create_world(config);
 
-        let initial_alive = world.beings.alive_count;
-        crate::step_n(&mut world, 2000); // ~3 seconds of sim time
+        // Rebuild partition indices so human_count is accurate
+        world.beings.rebuild_partition_indices();
+        let initial_humans = world.beings.human_count;
+        crate::step_n(&mut world, 2000);
 
-        // Simulation should run without panicking and population should be manageable
+        world.beings.rebuild_partition_indices();
+        // Carrying capacity = 64*64/10 = 409. Population should not grow unboundedly.
         assert!(
-            world.beings.alive_count <= initial_alive + 200,
-            "population should not grow unboundedly"
+            world.beings.human_count <= initial_humans + 200,
+            "population should not grow unboundedly: {} humans (started {})",
+            world.beings.human_count, initial_humans
         );
     }
 

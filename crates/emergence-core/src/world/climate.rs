@@ -148,8 +148,10 @@ impl Climate {
         world_size: (u32, u32),
     ) -> WeatherEvent {
         let duration = 50 + rng.u32(0..151); // 50-200 ticks
-        let rx = rng.u32(0..world_size.0.saturating_sub(64));
-        let ry = rng.u32(0..world_size.1.saturating_sub(64));
+        let max_rx = world_size.0.saturating_sub(64).max(1);
+        let max_ry = world_size.1.saturating_sub(64).max(1);
+        let rx = rng.u32(0..max_rx);
+        let ry = rng.u32(0..max_ry);
         let rw = 32 + rng.u32(0..33);
         let rh = 32 + rng.u32(0..33);
         WeatherEvent {

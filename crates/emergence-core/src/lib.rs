@@ -77,10 +77,14 @@ pub fn create_world(config: WorldConfig) -> World {
             generate_initial_personality(&mut rng)
         };
 
-        let lifespan = 86000 + rng.u32(0..58001); // 3-5 years
+        // Varied lifespan: 60-90 sim-year range (using tick scale: 1 sim-year ≈ 28800 ticks)
+        // Base 86400 (3 years) + 0–57600 (0-2 years) = 86400–144000 ticks ~ 3-5 sim-years
+        // We distribute 60-90% of max across beings for natural variety
+        let lifespan = 86400 + rng.u32(0..57601); // 3-5 sim-years
         let idx = beings.spawn([x, y], personality, lifespan, [u32::MAX, u32::MAX]);
-        // Random starting age across full lifespan so some beings are already adults/elders
-        beings.ages[idx] = rng.u32(0..lifespan);
+        // Starting ages: mix of children, young adults, adults (0..~50% of lifespan).
+        // No elders at world start — population begins in its reproductive prime.
+        beings.ages[idx] = rng.u32(0..(lifespan / 2));
     }
 
     // Spawn fauna distributed by biome (1,500 total)

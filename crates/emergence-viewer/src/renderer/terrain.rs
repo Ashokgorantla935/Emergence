@@ -53,49 +53,134 @@ impl TerrainRenderer {
         let th_usize = th as usize;
         let mut pixels = vec![0u8; (tw * th * 4) as usize];
 
-        // FIX 2: vivid, saturated biome colors (WorldBox-level contrast)
-        // FIX 2: tight elevation shading — 0.82-1.0 keeps saturation
-        for i in 0..(tw * th) as usize {
-            let (r, g, b) = match terrain.biome[i] {
-                Biome::Water     => (24u8,  120,  220),  // vivid ocean blue
-                Biome::Grassland => (80,    190,   50),  // bright lime green
-                Biome::Forest    => (20,    110,   20),  // deep forest green
-                Biome::Desert    => (230,   195,  110),  // warm sand
-                Biome::Mountain  => (140,   135,  130),  // cool gray
-                Biome::Wetland   => (40,    150,  110),  // vivid teal
-            };
-            let elev = terrain.elevation[i];
-            let shade = 0.82 + elev * 0.18;  // was 0.6+0.4 — preserves saturation
-            let base = i * 4;
-            pixels[base]     = (r as f32 * shade) as u8;
-            pixels[base + 1] = (g as f32 * shade) as u8;
-            pixels[base + 2] = (b as f32 * shade) as u8;
-            pixels[base + 3] = 255;
+        // Pass 1: base biome color + noise variants + snow caps + elevation shading
+        for y in 0..th_usize {
+            for x in 0..tw_usize {
+                let i = y * tw_usize + x;
+                let elev = terrain.elevation[i];
+
+                // Per-biome 3-variant noise using cell hash
+                let variant = ((x as u32).wrapping_mul(7).wrapping_add((y as u32).wrapping_mul(13)) % 3) as usize;
+
+                let (r, g, b) = match terrain.biome[i] {
+                    Biome::Water => [
+                        (24u8, 120u8, 220u8),
+                        (18,   110,   210),
+                        (30,   130,   235),
+                    ][variant],
+                    Biome::Grassland => [
+                        (80u8, 190u8, 50u8),
+                        (70,   180,   45),
+                        (90,   200,   55),
+                    ][variant],
+                    Biome::Forest => [
+                        (20u8, 110u8, 20u8),
+                        (15,   100,   15),
+                        (25,   120,   25),
+                    ][variant],
+                    Biome::Desert => [
+                        (230u8, 195u8, 110u8),
+                        (220,   185,   100),
+                        (240,   205,   120),
+                    ][variant],
+                    Biome::Mountain => [
+                        (140u8, 135u8, 130u8),
+                        (130,   125,   120),
+                        (150,   145,   140),
+                    ][variant],
+                    Biome::Wetland => [
+                        (40u8, 150u8, 110u8),
+                        (35,   140,   100),
+                        (45,   160,   120),
+                    ][variant],
+                };
+
+                // Elevation shading: tight range preserves saturation
+                let shade = 0.82 + elev * 0.18;
+                let mut fr = r as f32 * shade;
+                let mut fg = g as f32 * shade;
+                let mut fb = b as f32 * shade;
+
+                // Snow caps: elevation > 0.85 lerp 60% toward white
+                if elev > 0.85 && terrain.biome[i] != Biome::Water {
+                    let snow_t = ((elev - 0.85) / 0.15).min(1.0) * 0.6;
+                    fr = fr + (255.0 - fr) * snow_t;
+                    fg = fg + (255.0 - fg) * snow_t;
+                    fb = fb + (255.0 - fb) * snow_t;
+                }
+
+                let base = i * 4;
+                pixels[base]     = fr.min(255.0) as u8;
+                pixels[base + 1] = fg.min(255.0) as u8;
+                pixels[base + 2] = fb.min(255.0) as u8;
+                pixels[base + 3] = 255;
+            }
         }
 
-        // FIX 7: coastline darkening — land pixels adjacent to water get 25% darker
-        // Creates a crisp shoreline edge without shader changes.
+        // Pass 2: beach transitions — land near water + elevation < 0.35 = sand
         for y in 0..th_usize {
             for x in 0..tw_usize {
                 let i = y * tw_usize + x;
                 if terrain.biome[i] == Biome::Water {
                     continue;
                 }
-                let neighbors = [
-                    (x.wrapping_sub(1), y),
-                    (x + 1, y),
-                    (x, y.wrapping_sub(1)),
-                    (x, y + 1),
-                ];
-                let has_water_neighbor = neighbors.iter().any(|&(nx, ny)| {
+                let elev = terrain.elevation[i];
+                if elev >= 0.35 {
+                    continue;
+                }
+                // Check 4 neighbors within 2 cells for water
+                let is_beach = [
+                    (x.wrapping_sub(1), y), (x.wrapping_sub(2), y),
+                    (x + 1, y), (x + 2, y),
+                    (x, y.wrapping_sub(1)), (x, y.wrapping_sub(2)),
+                    (x, y + 1), (x, y + 2),
+                ].iter().any(|&(nx, ny)| {
                     nx < tw_usize && ny < th_usize
                         && terrain.biome[ny * tw_usize + nx] == Biome::Water
                 });
-                if has_water_neighbor {
+                if is_beach {
                     let base = i * 4;
-                    pixels[base]     = (pixels[base]     as f32 * 0.72) as u8;
-                    pixels[base + 1] = (pixels[base + 1] as f32 * 0.72) as u8;
-                    pixels[base + 2] = (pixels[base + 2] as f32 * 0.72) as u8;
+                    pixels[base]     = 210;
+                    pixels[base + 1] = 190;
+                    pixels[base + 2] = 130;
+                    // pixels[base + 3] already 255
+                }
+            }
+        }
+
+        // Pass 3: directional shadow — sun from northwest
+        // Copy pixels to read from while writing to original
+        let shadow_src = pixels.clone();
+        for y in 0..th_usize {
+            for x in 0..tw_usize {
+                let i = y * tw_usize + x;
+                let elev = terrain.elevation[i];
+
+                // NW neighbor higher by > 0.1 → darken 15%
+                let nw_x = x.wrapping_sub(1);
+                let nw_y = y.wrapping_sub(1);
+                if nw_x < tw_usize && nw_y < th_usize {
+                    let nw_elev = terrain.elevation[nw_y * tw_usize + nw_x];
+                    if nw_elev > elev + 0.1 {
+                        let base = i * 4;
+                        pixels[base]     = (shadow_src[base]     as f32 * 0.85) as u8;
+                        pixels[base + 1] = (shadow_src[base + 1] as f32 * 0.85) as u8;
+                        pixels[base + 2] = (shadow_src[base + 2] as f32 * 0.85) as u8;
+                        continue;
+                    }
+                }
+
+                // SE neighbor lower by > 0.1 → lighten 5%
+                let se_x = x + 1;
+                let se_y = y + 1;
+                if se_x < tw_usize && se_y < th_usize {
+                    let se_elev = terrain.elevation[se_y * tw_usize + se_x];
+                    if elev > se_elev + 0.1 {
+                        let base = i * 4;
+                        pixels[base]     = (shadow_src[base]     as f32 * 1.05).min(255.0) as u8;
+                        pixels[base + 1] = (shadow_src[base + 1] as f32 * 1.05).min(255.0) as u8;
+                        pixels[base + 2] = (shadow_src[base + 2] as f32 * 1.05).min(255.0) as u8;
+                    }
                 }
             }
         }

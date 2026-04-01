@@ -38,11 +38,11 @@ const UV_HUT:         [f32; 2] = [15.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
 const UV_WALL:        [f32; 2] = [16.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
 const UV_FOOD_CACHE:  [f32; 2] = [17.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
 
-/// Max objects: 10K resources + 12K decorations + 500 structures
-const MAX_OBJECTS: usize = 24_000;
+/// Max objects: 10K resources + 40K decorations + 500 structures
+const MAX_OBJECTS: usize = 52_000;
 
-/// Max decorative terrain objects — raised for WorldBox-level density
-const MAX_DECORATIONS: usize = 12_000;
+/// Max decorative terrain objects — WorldBox-level density (2-3 per forest cell)
+const MAX_DECORATIONS: usize = 40_000;
 
 /// 44-byte instance — resources and structures share this layout.
 #[repr(C)]
@@ -192,103 +192,134 @@ impl ObjectRenderer {
         }
 
         // --- Biome-driven decorative terrain objects ---
-        // Use deterministic hash of cell position for stable placement between frames.
+        // Multi-object per cell: forest 2-3, grassland 1-2, mountain 1-2, desert 0-1.
+        // Each sub-object uses a different hash seed for independent variety and jitter.
         let mut decor_count = 0usize;
         let mut tree_count = 0usize;
         let mut bush_count = 0usize;
         let mut rock_count = 0usize;
         let resource_count = instances.len();
-        for y in 0..h {
+
+        'outer: for y in 0..h {
             for x in 0..w {
-                if decor_count >= MAX_DECORATIONS {
-                    break;
-                }
                 let idx = y * w + x;
                 if terrain.water[idx] {
                     continue;
                 }
 
                 let biome = terrain.biome[idx];
-
-                // Deterministic hash: mix x and y to get a stable pseudo-random value per cell.
-                let hash = cell_hash(x, y);
-
-                // FIX 4: raised density — forests are solid canopy like WorldBox
-                let threshold = match biome {
-                    Biome::Forest    => 550, // 55% — dense canopy, no bare gaps
-                    Biome::Grassland => 200, // 20% — visible bushes/flowers
-                    Biome::Mountain  => 250, // 25% — rocky outcrops
-                    Biome::Wetland   => 180, // 18% — reed clusters
-                    Biome::Desert    =>  60, //  6% — sparse cacti
-                    Biome::Water     => continue,
-                };
-
-                if (hash % 1000) as u32 >= threshold {
+                if biome == Biome::Water {
                     continue;
                 }
 
                 // Skip cells rendered as a resource (checkerboard cells with food).
-                // Decorations show on the interleaved cells and on low-capacity land.
                 if (x + y) % 2 == 0 && resources.food_capacity[idx] >= 0.3 {
                     continue;
                 }
 
-                // FIX 5: larger objects — trees exceed cell size to overlap like WorldBox
-                let (atlas_uv, tint, size) = match biome {
-                    Biome::Forest => {
-                        tree_count += 1;
-                        if hash % 3 == 0 {
-                            (UV_DECOR_TREE, [0.08f32, 0.38, 0.12], 1.4)
-                        } else {
-                            (UV_DECOR_TREE, [0.13f32, 0.52, 0.18], 1.1)
-                        }
-                    }
-                    Biome::Grassland => {
-                        bush_count += 1;
-                        if hash % 4 == 0 {
-                            (UV_DECOR_BUSH, [0.9f32, 0.8, 0.2], 0.65)
-                        } else {
-                            (UV_DECOR_BUSH, [0.22f32, 0.65, 0.22], 0.70)
-                        }
-                    }
-                    Biome::Mountain => {
-                        rock_count += 1;
-                        if hash % 2 == 0 {
-                            (UV_DECOR_ROCK, [0.55f32, 0.52, 0.50], 0.85)
-                        } else {
-                            (UV_DECOR_ROCK, [0.45f32, 0.43, 0.40], 0.65)
-                        }
-                    }
-                    Biome::Wetland => {
-                        (UV_DECOR_REED, [0.35f32, 0.58, 0.30], 0.75)
-                    }
-                    Biome::Desert => {
-                        if hash % 3 == 0 {
-                            (UV_DECOR_CACTUS, [0.35f32, 0.52, 0.22], 0.80)
-                        } else {
-                            (UV_DECOR_CACTUS, [0.52f32, 0.42, 0.25], 0.55)
-                        }
-                    }
-                    Biome::Water => continue,
+                // How many decoration slots this cell offers (primary + extras).
+                // Each slot is gated by its own hash threshold.
+                let max_slots: usize = match biome {
+                    Biome::Forest    => 3,
+                    Biome::Grassland => 2,
+                    Biome::Mountain  => 2,
+                    Biome::Wetland   => 2,
+                    Biome::Desert    => 1,
+                    Biome::Water     => continue,
                 };
 
-                // Slight sub-cell offset so objects don't all sit at exact cell centers
-                let off_x = ((hash >> 4) % 8) as f32 * 0.1 - 0.35;
-                let off_y = ((hash >> 8) % 8) as f32 * 0.1 - 0.35;
+                for seed in 0..max_slots {
+                    if decor_count >= MAX_DECORATIONS {
+                        break 'outer;
+                    }
 
-                instances.push(ObjectInstance {
-                    position:   [x as f32 + 0.5 + off_x, y as f32 + 0.5 + off_y],
-                    atlas_uv,
-                    atlas_size: [ATLAS_CELL, ATLAS_CELL],
-                    tint,
-                    size,
-                    alpha:      1.0,
-                    _pad:       0.0,
-                });
-                decor_count += 1;
-            }
-            if decor_count >= MAX_DECORATIONS {
-                break;
+                    // Each seed produces an independent hash for this cell slot.
+                    let hash = cell_hash(x ^ seed.wrapping_mul(2654435761), y ^ seed.wrapping_mul(2246822519));
+
+                    // Per-slot density threshold. Later slots are sparser.
+                    let threshold: usize = match (biome, seed) {
+                        (Biome::Forest,    0) => 900, // slot 0: 90% — nearly every cell
+                        (Biome::Forest,    1) => 750, // slot 1: 75% — dense second layer
+                        (Biome::Forest,    _) => 400, // slot 2: 40% — undergrowth
+                        (Biome::Grassland, 0) => 600, // slot 0: 60%
+                        (Biome::Grassland, _) => 250, // slot 1: 25%
+                        (Biome::Mountain,  0) => 700, // slot 0: 70%
+                        (Biome::Mountain,  _) => 300, // slot 1: 30%
+                        (Biome::Wetland,   0) => 650,
+                        (Biome::Wetland,   _) => 250,
+                        (Biome::Desert,    _) => 120, // sparse: 12%
+                        (Biome::Water,     _) => continue,
+                    };
+
+                    if (hash % 1000) >= threshold {
+                        continue;
+                    }
+
+                    // Full 0.0–1.0 sub-cell jitter using different hash bits per axis/seed.
+                    let jitter_x = ((hash >> (4 + seed * 3)) % 100) as f32 * 0.01 - 0.5;
+                    let jitter_y = ((hash >> (10 + seed * 3)) % 100) as f32 * 0.01 - 0.5;
+
+                    // Biome + seed -> sprite type, tint, size.
+                    let (atlas_uv, tint, size) = match biome {
+                        Biome::Forest => {
+                            tree_count += 1;
+                            match hash % 4 {
+                                0 => (UV_DECOR_TREE, [0.07f32, 0.35, 0.10], 1.5), // dark conifer
+                                1 => (UV_DECOR_TREE, [0.14f32, 0.55, 0.18], 1.2), // bright oak
+                                2 => (UV_DECOR_BUSH, [0.10f32, 0.42, 0.14], 0.80), // understory bush
+                                _ => (UV_DECOR_BUSH, [0.18f32, 0.60, 0.22], 0.65), // undergrowth
+                            }
+                        }
+                        Biome::Grassland => {
+                            bush_count += 1;
+                            match hash % 5 {
+                                0 => (UV_DECOR_BUSH, [0.90f32, 0.80, 0.20], 0.55), // flower yellow
+                                1 => (UV_DECOR_BUSH, [0.85f32, 0.30, 0.60], 0.50), // flower pink
+                                2 => (UV_DECOR_BUSH, [0.25f32, 0.70, 0.25], 0.65), // grass tuft
+                                3 => (UV_DECOR_BUSH, [0.30f32, 0.75, 0.30], 0.60), // grass tuft 2
+                                _ => (UV_DECOR_TREE, [0.18f32, 0.55, 0.20], 1.10), // lone tree
+                            }
+                        }
+                        Biome::Mountain => {
+                            rock_count += 1;
+                            // Snow patches at elevated cells (use y as proxy for elevation)
+                            let elevation_hint = (y as f32 / h as f32) * 0.5 + (hash % 100) as f32 * 0.005;
+                            if elevation_hint > 0.6 && hash % 3 == 0 {
+                                (UV_DECOR_ROCK, [0.90f32, 0.92, 0.95], 0.70) // snow patch
+                            } else if hash % 2 == 0 {
+                                (UV_DECOR_ROCK, [0.58f32, 0.54, 0.52], 0.90) // large rock
+                            } else {
+                                (UV_DECOR_ROCK, [0.44f32, 0.41, 0.38], 0.60) // small rock
+                            }
+                        }
+                        Biome::Wetland => {
+                            if hash % 3 == 0 {
+                                (UV_DECOR_REED, [0.30f32, 0.50, 0.25], 0.90) // cattail
+                            } else {
+                                (UV_DECOR_REED, [0.38f32, 0.62, 0.32], 0.70) // reed
+                            }
+                        }
+                        Biome::Desert => {
+                            if hash % 4 == 0 {
+                                (UV_DECOR_CACTUS, [0.38f32, 0.55, 0.22], 0.85) // cactus
+                            } else {
+                                (UV_DECOR_CACTUS, [0.52f32, 0.40, 0.22], 0.50) // dead scrub
+                            }
+                        }
+                        Biome::Water => continue,
+                    };
+
+                    instances.push(ObjectInstance {
+                        position:   [x as f32 + 0.5 + jitter_x, y as f32 + 0.5 + jitter_y],
+                        atlas_uv,
+                        atlas_size: [ATLAS_CELL, ATLAS_CELL],
+                        tint,
+                        size,
+                        alpha:      1.0,
+                        _pad:       0.0,
+                    });
+                    decor_count += 1;
+                }
             }
         }
 

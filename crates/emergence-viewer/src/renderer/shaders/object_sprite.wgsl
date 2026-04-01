@@ -40,7 +40,13 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     let screen_size = max(inst.size * camera.pixels_per_unit, 6.0);
     let final_size  = screen_size / camera.pixels_per_unit;
     let world       = inst.world_pos + vertex.vertex_pos * final_size;
-    out.clip_position = camera.view_proj * vec4<f32>(world, 0.0, 1.0);
+    var clip        = camera.view_proj * vec4<f32>(world, 0.0, 1.0);
+    // Y-sort depth bias: objects further south (higher world Y) render behind northern ones.
+    // Map world_pos.y into a small z offset [0, 0.9] within NDC depth range.
+    // Clamp world Y to a max of 512 to handle any world size gracefully.
+    let depth_bias  = clamp(inst.world_pos.y / 512.0, 0.0, 1.0) * 0.9;
+    clip.z          = depth_bias * clip.w; // perspective-correct z write
+    out.clip_position = clip;
     out.uv    = inst.atlas_uv + (vertex.vertex_pos + 0.5) * inst.atlas_size;
     out.tint  = inst.tint;
     out.alpha = inst.alpha;

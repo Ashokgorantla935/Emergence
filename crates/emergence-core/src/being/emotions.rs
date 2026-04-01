@@ -6,8 +6,93 @@ pub fn decay_emotions(beings: &mut Beings) {
             continue;
         }
         for e in 0..6 {
-            beings.emotions[i][e] = (beings.emotions[i][e] - 0.005).max(0.0);
+            // Multiplicative decay (0.995/tick): gentler at low values so emotions
+            // don't instantly collapse — they linger naturally and are still visible.
+            beings.emotions[i][e] *= 0.995;
         }
+    }
+}
+
+/// Drive emotions continuously from need states each tick.
+/// This is the primary source of sustained emotion — without this, emotions
+/// only spike on rare events (eating, dying nearby, storms) then decay to 0.
+///
+/// Design rules:
+/// - Each emotion has a "pressure" derived from need levels.
+/// - Pressure adds to emotion each tick at a small rate (0.002–0.008).
+/// - Net steady-state = pressure_rate / decay_rate (0.005).
+/// - Example: fear at pressure 0.006 → steady state 0.006/0.005 = 1.2 → clamped to 1.0.
+/// - This produces visible emotion within 50-100 ticks of a need changing.
+pub fn update_emotions_from_needs(beings: &mut Beings) {
+    for i in 0..beings.count {
+        if beings.states[i] == BeingState::Dead {
+            continue;
+        }
+
+        let needs = &beings.needs[i];
+        let hunger    = needs[NEED_HUNGER];    // 1.0 = full, 0.0 = starving
+        let _warmth   = needs[NEED_WARMTH]; // available for cold-fear extension
+        let safety    = needs[NEED_SAFETY];
+        let belonging = needs[NEED_BELONGING];
+        let purpose   = needs[NEED_PURPOSE];
+        let rest      = needs[NEED_REST];
+
+        // --- FEAR: rises when safety is low or hunger is critical ---
+        // Low safety → fear; hunger < 0.3 triggers stress, < 0.1 is life-threatening
+        let fear_pressure = {
+            let safety_threat = (1.0 - safety).max(0.0);
+            let hunger_crisis = if hunger < 0.3 { (0.3 - hunger) * 3.0 } else { 0.0 };
+            (safety_threat * 0.006 + hunger_crisis * 0.004).min(0.012)
+        };
+        beings.emotions[i][EMO_FEAR] =
+            (beings.emotions[i][EMO_FEAR] + fear_pressure).min(1.0);
+
+        // --- GRIEF: rises when belonging is low (isolation) ---
+        let grief_pressure = {
+            let isolation = (1.0 - belonging).max(0.0);
+            isolation * 0.005
+        };
+        beings.emotions[i][EMO_GRIEF] =
+            (beings.emotions[i][EMO_GRIEF] + grief_pressure).min(1.0);
+
+        // --- ANGER: rises when hunger is low (unfulfilled need) + low purpose ---
+        let anger_pressure = {
+            let hunger_frustration = (1.0 - hunger).max(0.0);
+            let purpose_frustration = (1.0 - purpose).max(0.0);
+            (hunger_frustration * 0.003 + purpose_frustration * 0.002).min(0.008)
+        };
+        beings.emotions[i][EMO_ANGER] =
+            (beings.emotions[i][EMO_ANGER] + anger_pressure).min(1.0);
+
+        // --- JOY: rises when hunger AND belonging are both well-satisfied ---
+        let joy_pressure = {
+            let fed_bonus = if hunger > 0.6 { (hunger - 0.6) * 0.012 } else { 0.0 };
+            let social_bonus = if belonging > 0.6 { (belonging - 0.6) * 0.008 } else { 0.0 };
+            (fed_bonus + social_bonus).min(0.01)
+        };
+        beings.emotions[i][EMO_JOY] =
+            (beings.emotions[i][EMO_JOY] + joy_pressure).min(1.0);
+
+        // --- CURIOSITY: rises when rested and purpose is depleted (seeking meaning) ---
+        let curiosity_pressure = {
+            let rested_bonus = if rest > 0.5 { (rest - 0.5) * 0.006 } else { 0.0 };
+            let purpose_gap = (1.0 - purpose).max(0.0) * 0.003;
+            (rested_bonus + purpose_gap).min(0.006)
+        };
+        beings.emotions[i][EMO_CURIOSITY] =
+            (beings.emotions[i][EMO_CURIOSITY] + curiosity_pressure).min(1.0);
+
+        // --- CONTENTMENT: rises when ALL needs are well-satisfied ---
+        let contentment_pressure = {
+            let min_need = needs.iter().copied().fold(f32::MAX, f32::min);
+            if min_need > 0.5 {
+                (min_need - 0.5) * 0.014
+            } else {
+                0.0
+            }
+        };
+        beings.emotions[i][EMO_CONTENTMENT] =
+            (beings.emotions[i][EMO_CONTENTMENT] + contentment_pressure).min(1.0);
     }
 }
 

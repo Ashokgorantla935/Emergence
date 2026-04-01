@@ -1,7 +1,19 @@
 use super::data::*;
 use crate::world::climate::Season;
 
-pub fn age_beings(beings: &mut Beings) {
+/// Age all living beings by one tick without killing them (for immortal/invulnerable laws).
+pub fn age_beings_no_death(beings: &mut Beings) -> Vec<usize> {
+    for i in 0..beings.count {
+        if beings.states[i] != BeingState::Dead {
+            beings.ages[i] += 1;
+        }
+    }
+    Vec::new()
+}
+
+/// Age all living beings by one tick. Returns indices of beings who just died of old age.
+pub fn age_beings(beings: &mut Beings) -> Vec<usize> {
+    let mut newly_dead = Vec::new();
     for i in 0..beings.count {
         if beings.states[i] == BeingState::Dead {
             continue;
@@ -11,8 +23,10 @@ pub fn age_beings(beings: &mut Beings) {
         if beings.ages[i] >= beings.lifespans[i] {
             beings.states[i] = BeingState::Dead;
             beings.alive_count -= 1;
+            newly_dead.push(i);
         }
     }
+    newly_dead
 }
 
 pub fn drift_personality(beings: &mut Beings, rng: &mut fastrand::Rng) {
@@ -243,14 +257,14 @@ mod tests {
         // Set fear to 1.0
         beings.emotions[0][EMO_FEAR] = 1.0;
 
-        // Decay 200 times: 1.0 - 200 * 0.005 = 0.0
-        for _ in 0..200 {
+        // Decay uses multiplicative 0.995/tick. After 1000 ticks: 0.995^1000 ≈ 0.0067.
+        for _ in 0..1000 {
             super::super::emotions::decay_emotions(&mut beings);
         }
 
         assert!(
-            beings.emotions[0][EMO_FEAR] <= 0.001,
-            "fear should be near 0 after 200 decays, got {}",
+            beings.emotions[0][EMO_FEAR] < 0.01,
+            "fear should be near 0 after 1000 decays, got {}",
             beings.emotions[0][EMO_FEAR]
         );
     }

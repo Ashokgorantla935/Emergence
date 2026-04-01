@@ -198,6 +198,21 @@ impl Beings {
         idx
     }
 
+    /// Spawn a being with a pre-set starting age (for world generation with age variety).
+    /// All other fields identical to `spawn`.
+    pub fn spawn_aged(
+        &mut self,
+        position: [f32; 2],
+        personality: [f32; 5],
+        lifespan: u32,
+        parent_ids: [u32; 2],
+        starting_age: u32,
+    ) -> usize {
+        let idx = self.spawn(position, personality, lifespan, parent_ids);
+        self.ages[idx] = starting_age.min(lifespan.saturating_sub(1));
+        idx
+    }
+
     pub fn life_phase(&self, index: usize) -> LifePhase {
         let age = self.ages[index];
         let lifespan = self.lifespans[index];

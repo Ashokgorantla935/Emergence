@@ -204,59 +204,65 @@ fn state_color_and_size(
         return (color, size);
     }
 
-    // Human: size by life phase
+    // Human: size by life phase — youth 0.7x, elder 0.9x, adult 1.0x baseline
     let base_size = match phase {
-        LifePhase::Youth => 1.0,
+        LifePhase::Youth => 1.4,  // 2.0 * 0.7
         LifePhase::Adult => 2.0,
-        LifePhase::Elder => 1.5,
+        LifePhase::Elder => 1.8,  // 2.0 * 0.9
     };
 
-    // Human: state-driven primary color with subtle per-being hue variation
-    let hue_shift = being_hue_shift(being_idx);
+    // Human: state-driven primary color blended with per-being cloth color for visual variety
+    let cloth_color = being_cloth_color(being_idx);
 
     if state == BeingState::Sleeping {
-        let c = shift_hue([0.3, 0.5, 1.0], hue_shift * 0.3);
+        // Sleeping: blue tint blended with personal cloth color
+        let c = blend_colors([0.3, 0.5, 1.0], cloth_color, 0.3);
         return (c, base_size);
     }
     let safety = needs[NEED_SAFETY];
     let hunger = needs[NEED_HUNGER];
     if safety < 0.3 {
-        let c = shift_hue([1.0, 0.15, 0.15], hue_shift * 0.15);
+        // Fear/danger: strong red override, slight cloth tint
+        let c = blend_colors([1.0, 0.15, 0.15], cloth_color, 0.1);
         return (c, base_size);
     }
     if hunger < 0.3 {
-        let c = shift_hue([1.0, 0.5, 0.1], hue_shift * 0.15);
+        // Starving: orange override
+        let c = blend_colors([1.0, 0.5, 0.1], cloth_color, 0.1);
         return (c, base_size);
     }
     if hunger < 0.5 {
-        let c = shift_hue([1.0, 0.9, 0.2], hue_shift * 0.2);
+        // Hungry: yellow-orange, some cloth tint
+        let c = blend_colors([1.0, 0.9, 0.2], cloth_color, 0.2);
         return (c, base_size);
     }
-    let c = shift_hue([0.3, 0.85, 0.3], hue_shift * 0.2);
+    // Healthy: cloth color dominates (shows personality/culture)
+    let c = blend_colors([0.3, 0.85, 0.3], cloth_color, 0.5);
     (c, base_size)
 }
 
-/// Per-being hue variation: hash the index to a small float in [0, 1).
-fn being_hue_shift(idx: usize) -> f32 {
-    // Simple integer hash
-    let h = idx.wrapping_mul(2654435761).wrapping_add(idx.wrapping_mul(1234567));
-    (h & 0xFF) as f32 / 255.0
+/// Per-being cloth color derived from being index hash — 6 distinct palette entries.
+/// Each being gets a consistent cloth color independent of emotional state.
+fn being_cloth_color(idx: usize) -> [f32; 3] {
+    // 6-color cloth palette: warm/cool/neutral variety
+    const CLOTH_PALETTE: [[f32; 3]; 6] = [
+        [0.85, 0.35, 0.20], // terracotta
+        [0.20, 0.55, 0.80], // slate blue
+        [0.70, 0.60, 0.20], // ochre
+        [0.30, 0.65, 0.45], // forest green
+        [0.60, 0.30, 0.70], // violet
+        [0.80, 0.55, 0.25], // amber
+    ];
+    let h = idx.wrapping_mul(2654435761).wrapping_add(idx >> 3).wrapping_add(idx.wrapping_mul(1234567));
+    CLOTH_PALETTE[h % 6]
 }
 
-/// Slightly shift an RGB color by blending toward a hue offset.
-/// `amount` in [0, 1] — how much variation to apply.
-fn shift_hue(base: [f32; 3], amount: f32) -> [f32; 3] {
-    // Cycle: shift red toward green, green toward blue, blue toward red
-    let shifted = [
-        base[0] * (1.0 - amount * 0.3) + base[1] * (amount * 0.3),
-        base[1] * (1.0 - amount * 0.3) + base[2] * (amount * 0.3),
-        base[2] * (1.0 - amount * 0.3) + base[0] * (amount * 0.3),
-    ];
-    // Clamp to [0, 1]
+/// Blend two colors by `t` (0=base, 1=overlay).
+fn blend_colors(base: [f32; 3], overlay: [f32; 3], t: f32) -> [f32; 3] {
     [
-        shifted[0].clamp(0.0, 1.0),
-        shifted[1].clamp(0.0, 1.0),
-        shifted[2].clamp(0.0, 1.0),
+        (base[0] * (1.0 - t) + overlay[0] * t).clamp(0.0, 1.0),
+        (base[1] * (1.0 - t) + overlay[1] * t).clamp(0.0, 1.0),
+        (base[2] * (1.0 - t) + overlay[2] * t).clamp(0.0, 1.0),
     ]
 }
 

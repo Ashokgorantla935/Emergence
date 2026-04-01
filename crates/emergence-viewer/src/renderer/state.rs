@@ -748,6 +748,20 @@ impl RenderState {
         self.queue.write_buffer(&self.water_time_buffer, 0, bytemuck::cast_slice(&data));
     }
 
+    /// Update water time uniform with signal tint values.
+    /// `signal_danger`, `signal_comfort`, `signal_grief` are normalised [0, 1]
+    /// global averages of the corresponding signal channels.
+    pub fn update_water_time_signals(
+        &self,
+        time: f32,
+        signal_danger: f32,
+        signal_comfort: f32,
+        signal_grief: f32,
+    ) {
+        let data: [f32; 4] = [time, signal_danger, signal_comfort, signal_grief];
+        self.queue.write_buffer(&self.water_time_buffer, 0, bytemuck::cast_slice(&data));
+    }
+
     pub fn update_object_time(&self, time: f32) {
         let data: [f32; 4] = [time, 0.0, 0.0, 0.0];
         self.queue.write_buffer(&self.object_time_buffer, 0, bytemuck::cast_slice(&data));

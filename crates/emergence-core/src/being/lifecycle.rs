@@ -1,6 +1,56 @@
 use super::data::*;
 use crate::world::climate::Season;
 
+/// Award earned traits to a being based on their current state.
+/// Call periodically (e.g. every 600 ticks) from the tick loop.
+pub fn check_and_award_traits(beings: &mut Beings, idx: usize, _tick: u32) {
+    if beings.states[idx] == BeingState::Dead {
+        return;
+    }
+
+    let age = beings.ages[idx];
+    let traits = &mut beings.traits[idx];
+
+    // Elder: > 72000 ticks (~2.5 years at 28800 ticks/year)
+    if age > 72000 {
+        *traits |= BEING_TRAIT_ELDER;
+    }
+
+    // Brave: bold personality > 0.7
+    if beings.personalities[idx][TRAIT_BOLD] > 0.7 {
+        *traits |= BEING_TRAIT_BRAVE;
+    }
+
+    // Coward: bold personality < -0.5
+    if beings.personalities[idx][TRAIT_BOLD] < -0.5 {
+        *traits |= BEING_TRAIT_COWARD;
+    }
+
+    // Strong: tool_quality > 0.8
+    if beings.tool_quality[idx] > 0.8 {
+        *traits |= BEING_TRAIT_STRONG;
+    }
+
+    // Builder: >= 5 build actions (action code 16) in causal memory
+    {
+        let mem = &beings.causal_memories[idx];
+        let build_count = (0..mem.len as usize)
+            .filter(|&i| {
+                let slot = (mem.head as usize + 32 - mem.len as usize + i) % 32;
+                mem.entries[slot].action == 16
+            })
+            .count();
+        if build_count >= 5 {
+            *traits |= BEING_TRAIT_BUILDER;
+        }
+    }
+
+    // Wolf slayer: kill_count >= 3 and creature_type is wolf-killer (tracked separately)
+    // See kill_count increments in movement.rs for per-type tracking.
+    // Here we use the general kill_count >= 3 as a proxy if wolf_kill_count is not separate.
+    // Specific wolf/bear slayer is awarded externally when the kill event fires.
+}
+
 /// Age all living beings by one tick without killing them (for immortal/invulnerable laws).
 pub fn age_beings_no_death(beings: &mut Beings) -> Vec<usize> {
     for i in 0..beings.count {
@@ -96,6 +146,11 @@ pub fn check_death_conditions(beings: &mut Beings, season: Season) -> Vec<usize>
             beings.warmth_zero_ticks[i] = beings.warmth_zero_ticks[i].saturating_add(1);
         } else {
             beings.warmth_zero_ticks[i] = 0;
+        }
+
+        // Decrement rabbit freeze countdown
+        if beings.freeze_ticks[i] > 0 {
+            beings.freeze_ticks[i] -= 1;
         }
 
         // Starvation death: 10000+ ticks at zero hunger (generous grace period)

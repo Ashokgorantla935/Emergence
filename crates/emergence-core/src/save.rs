@@ -144,6 +144,7 @@ pub struct SaveFile {
     pub carry: Vec<[f32; 2]>,           // [0]=food, [1]=stone (Phase 4 expansion)
     pub hunger_zero_ticks: Vec<u16>,
     pub warmth_zero_ticks: Vec<u16>,
+    pub freeze_ticks: Vec<u16>,
     pub pending_action: Vec<u8>,
     pub pending_context: Vec<u16>,
     pub pending_tick: Vec<u32>,
@@ -153,6 +154,10 @@ pub struct SaveFile {
     pub states: Vec<u8>,
     pub creature_type: Vec<u8>,
     pub parent_ids: Vec<[u32; 2]>,
+    pub traits: Vec<u64>,
+    pub kill_count: Vec<u16>,
+    pub last_birth_tick: Vec<u32>,
+    pub names: Vec<String>,
 
     // Relationships (variable — only filled slots serialized)
     pub relationships: Vec<SerializedRelationships>,
@@ -285,6 +290,7 @@ impl SaveFile {
             carry: beings.carry.clone(),
             hunger_zero_ticks: beings.hunger_zero_ticks.clone(),
             warmth_zero_ticks: beings.warmth_zero_ticks.clone(),
+            freeze_ticks: beings.freeze_ticks.clone(),
             pending_action: beings.pending_action.clone(),
             pending_context: beings.pending_context.clone(),
             pending_tick: beings.pending_tick.clone(),
@@ -294,6 +300,10 @@ impl SaveFile {
             states: beings.states.iter().map(|s| *s as u8).collect(),
             creature_type: beings.creature_type.clone(),
             parent_ids: beings.parent_ids.clone(),
+            traits: beings.traits.clone(),
+            kill_count: beings.kill_count.clone(),
+            last_birth_tick: beings.last_birth_tick.clone(),
+            names: beings.names.clone(),
 
             relationships,
             causal_memories,
@@ -399,6 +409,7 @@ impl SaveFile {
             beings.carry.push(self.carry[i]);
             beings.hunger_zero_ticks.push(self.hunger_zero_ticks[i]);
             beings.warmth_zero_ticks.push(self.warmth_zero_ticks[i]);
+            beings.freeze_ticks.push(self.freeze_ticks[i]);
             beings.pending_action.push(self.pending_action[i]);
             beings.pending_context.push(self.pending_context[i]);
             beings.pending_tick.push(self.pending_tick[i]);
@@ -408,6 +419,10 @@ impl SaveFile {
             beings.states.push(being_state_from_u8(self.states[i]));
             beings.creature_type.push(self.creature_type[i]);
             beings.parent_ids.push(self.parent_ids[i]);
+            beings.traits.push(if i < self.traits.len() { self.traits[i] } else { 0 });
+            beings.kill_count.push(if i < self.kill_count.len() { self.kill_count[i] } else { 0 });
+            beings.last_birth_tick.push(if i < self.last_birth_tick.len() { self.last_birth_tick[i] } else { 0 });
+            beings.names.push(if i < self.names.len() { self.names[i].clone() } else { String::new() });
             beings.traces.push(None);
 
             // Relationships

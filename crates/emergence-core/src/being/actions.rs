@@ -480,6 +480,24 @@ pub fn score_actions(
             }
         }
 
+        // Species-specific behavior overrides (applied after generic scoring)
+        apply_species_behavior(
+            action,
+            creature_type,
+            being_index,
+            beings,
+            terrain,
+            signals,
+            pos,
+            radius,
+            &nearby,
+            &local,
+            rng,
+            &mut score,
+            &mut target_pos,
+            &mut target_being,
+        );
+
         // Jitter
         score += rng.f32() * 0.05;
 
@@ -516,6 +534,450 @@ pub fn score_actions(
     best.signal_contrib = max_signal_contrib;
 
     best
+}
+
+/// Apply species-specific behavior overrides to an already-scored action.
+/// Called once per action per being. Modifies score/target_pos/target_being in place.
+#[allow(clippy::too_many_arguments)]
+fn apply_species_behavior(
+    action: Action,
+    creature_type: u8,
+    being_index: usize,
+    beings: &Beings,
+    terrain: &Terrain,
+    signals: &SignalGrid,
+    pos: [f32; 2],
+    radius: f32,
+    nearby: &[usize],
+    local: &LocalSignals,
+    rng: &mut fastrand::Rng,
+    score: &mut f32,
+    target_pos: &mut Option<[f32; 2]>,
+    target_being: &mut Option<usize>,
+) {
+    use crate::being::data::CreatureType;
+    const CH_DANGER: usize = 0;
+
+    match CreatureType::from_u8(creature_type) {
+        // ── HAWK: boids flocking ──────────────────────────────────────────
+        CreatureType::Hawk => match action {
+            Action::Cluster => {
+                // Use boids: separation (3 cells) + alignment + cohesion (8 cells)
+                let boids = compute_hawk_boids(pos, being_index, beings, nearby, 3.0, 8.0);
+                if boids[0].abs() > 0.01 || boids[1].abs() > 0.01 {
+                    *target_pos = Some([pos[0] + boids[0] * 5.0, pos[1] + boids[1] * 5.0]);
+                    *score = 8.5; // Hawks strongly prefer to flock
+                }
+            }
+            Action::Wander => {
+                // Hawks near a flock still wander occasionally, but less
+                let hawk_count = nearby.iter().filter(|&&ni| {
+                    ni != being_index
+                        && beings.creature_type[ni] == CreatureType::Hawk as u8
+                        && beings.states[ni] != BeingState::Dead
+                }).count();
+                if hawk_count >= 2 {
+                    *score *= 0.3; // suppress wandering when in a flock
+                }
+            }
+            _ => {}
+        },
+
+        // ── WOLF: pack hunting ────────────────────────────────────────────
+        CreatureType::Wolf => match action {
+            Action::Hunt => {
+                // Coordinated hunt: massive boost when prey visible AND packmate nearby
+                if target_being.is_some() {
+                    let pack_nearby = nearby.iter().any(|&ni| {
+                        ni != being_index
+                            && beings.creature_type[ni] == CreatureType::Wolf as u8
+                            && beings.states[ni] != BeingState::Dead
+                            && {
+                                let tp = beings.positions[ni];
+                                let dx = tp[0] - pos[0];
+                                let dy = tp[1] - pos[1];
+                                dx * dx + dy * dy <= 100.0 // within 10 cells
+                            }
+                    });
+                    if pack_nearby {
+                        *score = 9.0; // coordinated hunt — highest priority
+                    }
+                }
+            }
+            Action::Cluster => {
+                // PackIdle: wolves near packmates without prey nearby stay together
+                let prey_visible = find_nearest_prey(pos, radius, being_index, beings, nearby).is_some();
+                let pack_nearby = nearby.iter().any(|&ni| {
+                    ni != being_index
+                        && beings.creature_type[ni] == CreatureType::Wolf as u8
+                        && beings.states[ni] != BeingState::Dead
+                });
+                if pack_nearby && !prey_visible {
+                    // Stay near pack center
+                    let pack_center = flock_centroid(pos, being_index, CreatureType::Wolf as u8, beings, nearby);
+                    if let Some(center) = pack_center {
+                        *target_pos = Some(center);
+                        *score = 5.5;
+                    }
+                }
+            }
+            Action::Wander => {
+                // Solo wolves patrol; pack wolves suppress wandering
+                let pack_nearby = nearby.iter().any(|&ni| {
+                    ni != being_index
+                        && beings.creature_type[ni] == CreatureType::Wolf as u8
+                        && beings.states[ni] != BeingState::Dead
+                });
+                if pack_nearby {
+                    *score *= 0.4; // suppress wander when in pack
+                } else {
+                    *score *= 1.3; // solo patrol boost
+                }
+            }
+            _ => {}
+        },
+
+        // ── DEER: herd vigilance + cascading danger alarm ─────────────────
+        CreatureType::Deer => match action {
+            Action::Flee => {
+                // Cascading alarm: ANY deer in 12 cells that detects a wolf/bear/hawk
+                // deposits danger signal — we read that accumulated signal here
+                let danger = local.values[CH_DANGER];
+                if danger > 0.1 {
+                    // Amplify flee score proportional to alarm signal
+                    *score += danger * 6.0;
+                    // Flee away from danger gradient
+                    let [gx, gy] = local.gradients[CH_DANGER];
+                    if gx.abs() > 0.01 || gy.abs() > 0.01 {
+                        *target_pos = Some([pos[0] - gx * 15.0, pos[1] - gy * 15.0]);
+                    }
+                }
+                // Direct predator in range: always flee at high score
+                let predator_near = nearby.iter().any(|&ni| {
+                    ni != being_index
+                        && beings.states[ni] != BeingState::Dead
+                        && CreatureType::from_u8(beings.creature_type[ni]).is_predator()
+                        && {
+                            let tp = beings.positions[ni];
+                            let dx = tp[0] - pos[0];
+                            let dy = tp[1] - pos[1];
+                            dx * dx + dy * dy <= 144.0 // 12 cells
+                        }
+                });
+                if predator_near {
+                    *score = 9.5; // panic flee overrides everything
+                }
+            }
+            Action::Cluster => {
+                // Peaceful grazing herds: score herding highly when no danger
+                let danger = local.values[CH_DANGER];
+                if danger < 0.05 {
+                    *score *= 1.8; // Deer strongly prefer to herd when safe
+                }
+            }
+            _ => {}
+        },
+
+        // ── RABBIT: freeze response ────────────────────────────────────────
+        CreatureType::Rabbit => match action {
+            Action::Flee => {
+                // 50% chance to freeze instead of flee when predator within 8 cells
+                let predator_close = nearby.iter().any(|&ni| {
+                    ni != being_index
+                        && beings.states[ni] != BeingState::Dead
+                        && CreatureType::from_u8(beings.creature_type[ni]).is_predator()
+                        && {
+                            let tp = beings.positions[ni];
+                            let dx = tp[0] - pos[0];
+                            let dy = tp[1] - pos[1];
+                            dx * dx + dy * dy <= 64.0 // 8 cells
+                        }
+                });
+                if predator_close && beings.freeze_ticks[being_index] == 0 {
+                    if rng.f32() < 0.5 {
+                        // Freeze: override flee with zero-movement wander (target = current pos)
+                        // freeze_ticks will be set to 30 in movement.rs when this Flee action executes
+                        // but here we DON'T flee; suppress flee score so Wander (frozen) wins
+                        *score = -1.0;
+                    }
+                    // else: flee normally (other 50%)
+                }
+                // Already frozen: suppress flee
+                if beings.freeze_ticks[being_index] > 0 {
+                    *score = -5.0;
+                }
+            }
+            Action::Wander => {
+                // Frozen rabbit: stay in place
+                if beings.freeze_ticks[being_index] > 0 {
+                    *target_pos = Some(pos); // freeze in place
+                    *score = 8.0; // high score so freeze wins
+                }
+                // WarrenCluster: rabbits near others prefer to cluster
+                let rabbit_neighbors = nearby.iter().filter(|&&ni| {
+                    ni != being_index
+                        && beings.creature_type[ni] == CreatureType::Rabbit as u8
+                        && beings.states[ni] != BeingState::Dead
+                }).count();
+                if rabbit_neighbors >= 2 && beings.freeze_ticks[being_index] == 0 {
+                    *score *= 0.6; // prefer Cluster action over wander when in warren
+                }
+            }
+            Action::Cluster => {
+                // WarrenCluster: stay near rabbit neighbors
+                let rabbit_count = nearby.iter().filter(|&&ni| {
+                    ni != being_index
+                        && beings.creature_type[ni] == CreatureType::Rabbit as u8
+                        && beings.states[ni] != BeingState::Dead
+                }).count();
+                if rabbit_count >= 1 {
+                    *score = (*score * 1.6).min(7.0); // prefer warren clustering
+                }
+                if beings.freeze_ticks[being_index] > 0 {
+                    *score = -1.0; // frozen rabbits don't actively cluster
+                }
+            }
+            _ => {}
+        },
+
+        // ── FISH: simplified boids (separation + cohesion, water-only) ────
+        CreatureType::Fish => match action {
+            Action::Cluster => {
+                let cx = pos[0] as u32;
+                let cy = pos[1] as u32;
+                let in_water = terrain.water[(cy as usize * terrain.width as usize) + cx as usize];
+                if !in_water {
+                    *score = -5.0; // fish must stay in water
+                } else {
+                    let boids = compute_fish_boids(pos, being_index, beings, terrain, nearby, 2.0, 6.0);
+                    if boids[0].abs() > 0.01 || boids[1].abs() > 0.01 {
+                        // Validate target stays in water
+                        let tx = (pos[0] + boids[0] * 4.0).clamp(0.0, terrain.width as f32 - 1.0);
+                        let ty = (pos[1] + boids[1] * 4.0).clamp(0.0, terrain.height as f32 - 1.0);
+                        let tidx = ty as usize * terrain.width as usize + tx as usize;
+                        if terrain.water[tidx] {
+                            *target_pos = Some([tx, ty]);
+                            *score = 7.5;
+                        }
+                    }
+                }
+            }
+            Action::Wander => {
+                // Fish wandering must stay in water
+                let cx = pos[0] as u32;
+                let cy = pos[1] as u32;
+                let in_water = terrain.water[(cy as usize * terrain.width as usize) + cx as usize];
+                if !in_water {
+                    *score = -5.0;
+                } else if let Some(tp) = *target_pos {
+                    let tx = tp[0] as u32;
+                    let ty = tp[1] as u32;
+                    let w = terrain.width as usize;
+                    let h = terrain.height as usize;
+                    if tx as usize >= w || ty as usize >= h || !terrain.water[ty as usize * w + tx as usize] {
+                        // Pick a water-seeking direction instead
+                        *target_pos = find_water_direction(pos, signals, terrain, rng);
+                    }
+                }
+            }
+            _ => {}
+        },
+
+        _ => {}
+    }
+}
+
+/// Compute boids steering for hawks: separation + alignment + cohesion.
+/// Returns normalized steering vector [dx, dy].
+fn compute_hawk_boids(
+    pos: [f32; 2],
+    being_index: usize,
+    beings: &Beings,
+    nearby: &[usize],
+    sep_radius: f32,
+    coh_radius: f32,
+) -> [f32; 2] {
+    let sep_r2 = sep_radius * sep_radius;
+    let coh_r2 = coh_radius * coh_radius;
+
+    let mut sep = [0.0f32; 2];   // separation force
+    let mut align = [0.0f32; 2]; // alignment (avg velocity)
+    let mut coh = [0.0f32; 2];   // cohesion (centroid)
+    let mut flock_count = 0u32;
+
+    for &ni in nearby {
+        if ni == being_index || beings.states[ni] != BeingState::Awake {
+            continue;
+        }
+        if beings.creature_type[ni] != CreatureType::Hawk as u8 {
+            continue;
+        }
+        let tp = beings.positions[ni];
+        let dx = tp[0] - pos[0];
+        let dy = tp[1] - pos[1];
+        let d2 = dx * dx + dy * dy;
+
+        if d2 < sep_r2 && d2 > 0.001 {
+            // Separation: push away
+            let inv_d = 1.0 / d2.sqrt();
+            sep[0] -= dx * inv_d;
+            sep[1] -= dy * inv_d;
+        }
+        if d2 < coh_r2 {
+            // Alignment: match velocity
+            align[0] += beings.velocities[ni][0];
+            align[1] += beings.velocities[ni][1];
+            // Cohesion: toward centroid
+            coh[0] += tp[0];
+            coh[1] += tp[1];
+            flock_count += 1;
+        }
+    }
+
+    if flock_count == 0 {
+        return [0.0, 0.0]; // no flock visible
+    }
+
+    let n = flock_count as f32;
+    let coh_dir = [(coh[0] / n) - pos[0], (coh[1] / n) - pos[1]];
+
+    // Weight: separation strongest, then cohesion, then alignment
+    let mut result = [
+        sep[0] * 1.5 + coh_dir[0] * 0.8 + align[0] * 0.5,
+        sep[1] * 1.5 + coh_dir[1] * 0.8 + align[1] * 0.5,
+    ];
+
+    // Normalize
+    let mag = (result[0] * result[0] + result[1] * result[1]).sqrt();
+    if mag > 0.001 {
+        result[0] /= mag;
+        result[1] /= mag;
+    }
+    result
+}
+
+/// Compute simplified boids for fish: separation + cohesion (water-aware).
+fn compute_fish_boids(
+    pos: [f32; 2],
+    being_index: usize,
+    beings: &Beings,
+    terrain: &Terrain,
+    nearby: &[usize],
+    sep_radius: f32,
+    coh_radius: f32,
+) -> [f32; 2] {
+    let sep_r2 = sep_radius * sep_radius;
+    let coh_r2 = coh_radius * coh_radius;
+
+    let mut sep = [0.0f32; 2];
+    let mut coh = [0.0f32; 2];
+    let mut school_count = 0u32;
+
+    for &ni in nearby {
+        if ni == being_index || beings.states[ni] != BeingState::Awake {
+            continue;
+        }
+        if beings.creature_type[ni] != CreatureType::Fish as u8 {
+            continue;
+        }
+        let tp = beings.positions[ni];
+        let dx = tp[0] - pos[0];
+        let dy = tp[1] - pos[1];
+        let d2 = dx * dx + dy * dy;
+
+        // Only flock with fish that are also in water
+        let tx = tp[0] as u32;
+        let ty = tp[1] as u32;
+        let w = terrain.width as usize;
+        let h = terrain.height as usize;
+        if tx as usize >= w || ty as usize >= h { continue; }
+        if !terrain.water[ty as usize * w + tx as usize] { continue; }
+
+        if d2 < sep_r2 && d2 > 0.001 {
+            let inv_d = 1.0 / d2.sqrt();
+            sep[0] -= dx * inv_d;
+            sep[1] -= dy * inv_d;
+        }
+        if d2 < coh_r2 {
+            coh[0] += tp[0];
+            coh[1] += tp[1];
+            school_count += 1;
+        }
+    }
+
+    if school_count == 0 {
+        return [0.0, 0.0];
+    }
+
+    let n = school_count as f32;
+    let coh_dir = [(coh[0] / n) - pos[0], (coh[1] / n) - pos[1]];
+
+    let mut result = [
+        sep[0] * 1.2 + coh_dir[0] * 1.0,
+        sep[1] * 1.2 + coh_dir[1] * 1.0,
+    ];
+
+    let mag = (result[0] * result[0] + result[1] * result[1]).sqrt();
+    if mag > 0.001 {
+        result[0] /= mag;
+        result[1] /= mag;
+    }
+    result
+}
+
+/// Compute centroid of same-species pack members within nearby list.
+fn flock_centroid(
+    pos: [f32; 2],
+    being_index: usize,
+    ct: u8,
+    beings: &Beings,
+    nearby: &[usize],
+) -> Option<[f32; 2]> {
+    let mut sum = [0.0f32; 2];
+    let mut count = 0u32;
+    for &ni in nearby {
+        if ni == being_index || beings.states[ni] == BeingState::Dead { continue; }
+        if beings.creature_type[ni] != ct { continue; }
+        sum[0] += beings.positions[ni][0];
+        sum[1] += beings.positions[ni][1];
+        count += 1;
+    }
+    if count == 0 {
+        None
+    } else {
+        let _ = pos; // suppress unused warning
+        let n = count as f32;
+        Some([sum[0] / n, sum[1] / n])
+    }
+}
+
+/// Find a direction from current pos that moves toward water.
+fn find_water_direction(
+    pos: [f32; 2],
+    _signals: &SignalGrid,
+    terrain: &Terrain,
+    rng: &mut fastrand::Rng,
+) -> Option<[f32; 2]> {
+    let w = terrain.width as i32;
+    let h = terrain.height as i32;
+    let cx = pos[0] as i32;
+    let cy = pos[1] as i32;
+    // Search in 8 directions at distance 3
+    let dirs: [[i32; 2]; 8] = [
+        [1, 0], [-1, 0], [0, 1], [0, -1],
+        [1, 1], [-1, 1], [1, -1], [-1, -1],
+    ];
+    // Shuffle to avoid directional bias
+    let offset = rng.usize(0..8);
+    for i in 0..8 {
+        let d = dirs[(i + offset) % 8];
+        let tx = (cx + d[0] * 3).clamp(0, w - 1);
+        let ty = (cy + d[1] * 3).clamp(0, h - 1);
+        if terrain.water[ty as usize * w as usize + tx as usize] {
+            return Some([tx as f32, ty as f32]);
+        }
+    }
+    None
 }
 
 fn find_lowest_need(needs: &[f32; 6], state: BeingState) -> usize {

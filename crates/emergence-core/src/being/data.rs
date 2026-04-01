@@ -79,6 +79,24 @@ pub const TRAIT_CURIOUS: usize = 2;
 pub const TRAIT_GENEROUS: usize = 3;
 pub const TRAIT_DIURNAL: usize = 4;
 
+// Being trait bit-flags (stored in Beings::traits as u64 bitmask per being)
+pub const BEING_TRAIT_BRAVE: u64      = 1 << 0;
+pub const BEING_TRAIT_COWARD: u64     = 1 << 1;
+pub const BEING_TRAIT_STRONG: u64     = 1 << 2;
+pub const BEING_TRAIT_WEAK: u64       = 1 << 3;
+pub const BEING_TRAIT_GENIUS: u64     = 1 << 4;
+pub const BEING_TRAIT_BUILDER: u64    = 1 << 5;
+pub const BEING_TRAIT_HUNTER: u64     = 1 << 6;
+pub const BEING_TRAIT_PACIFIST: u64   = 1 << 7;
+pub const BEING_TRAIT_EXPLORER: u64   = 1 << 8;
+pub const BEING_TRAIT_LEADER: u64     = 1 << 9;
+pub const BEING_TRAIT_ELDER: u64      = 1 << 10;
+pub const BEING_TRAIT_WOLF_SLAYER: u64 = 1 << 11;
+pub const BEING_TRAIT_BEAR_SLAYER: u64 = 1 << 12;
+pub const BEING_TRAIT_SURVIVOR: u64   = 1 << 13;
+pub const BEING_TRAIT_FOUNDER: u64    = 1 << 14;
+pub const BEING_TRAIT_VETERAN: u64    = 1 << 15;
+
 pub struct Beings {
     // Hot data
     pub positions: Vec<[f32; 2]>,
@@ -91,6 +109,7 @@ pub struct Beings {
     pub carry: Vec<[f32; 2]>,     // [0]=food, [1]=stone
     pub hunger_zero_ticks: Vec<u16>,
     pub warmth_zero_ticks: Vec<u16>,
+    pub freeze_ticks: Vec<u16>,      // rabbit freeze countdown; 0 = not frozen
     pub pending_action: Vec<u8>,
     pub pending_context: Vec<u16>,
     pub pending_tick: Vec<u32>,
@@ -108,6 +127,10 @@ pub struct Beings {
     /// Lazy: None by default. Allocated on demand when inspector selects a being.
     /// Saves ~24MB at 10K beings (was always-allocated 200-entry rings).
     pub traces: Vec<Option<Box<DecisionTraceRing>>>,
+
+    // History & trait data
+    pub traits: Vec<u64>,       // bit-field: each bit = one BEING_TRAIT_* flag
+    pub kill_count: Vec<u16>,   // total kills across all prey types
 
     // Metadata
     pub parent_ids: Vec<[u32; 2]>,
@@ -140,6 +163,7 @@ impl Beings {
             carry: Vec::new(),
             hunger_zero_ticks: Vec::new(),
             warmth_zero_ticks: Vec::new(),
+            freeze_ticks: Vec::new(),
             pending_action: Vec::new(),
             pending_context: Vec::new(),
             pending_tick: Vec::new(),
@@ -151,6 +175,8 @@ impl Beings {
             causal_memories: Vec::new(),
             relationships: Vec::new(),
             traces: Vec::new(),
+            traits: Vec::new(),
+            kill_count: Vec::new(),
             parent_ids: Vec::new(),
             creature_type: Vec::new(),
             last_birth_tick: Vec::new(),
@@ -182,6 +208,7 @@ impl Beings {
         self.carry.push([0.0, 0.0]);
         self.hunger_zero_ticks.push(0);
         self.warmth_zero_ticks.push(0);
+        self.freeze_ticks.push(0);
         self.pending_action.push(255); // no pending action
         self.pending_context.push(0);
         self.pending_tick.push(0);
@@ -195,6 +222,8 @@ impl Beings {
         self.causal_memories.push(CausalMemoryRing::new());
         self.relationships.push(RelationshipSlots::new());
         self.traces.push(None); // allocated on demand when inspector selects
+        self.traits.push(0);
+        self.kill_count.push(0);
         self.parent_ids.push(parent_ids);
         self.creature_type.push(CreatureType::Human as u8); // default to Human; override after spawn for fauna
         self.last_birth_tick.push(0);

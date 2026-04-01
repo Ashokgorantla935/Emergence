@@ -1,4 +1,10 @@
-use emergence_core::being::data::*;
+use emergence_core::being::data::{
+    Beings, BeingState,
+    BEING_TRAIT_BRAVE, BEING_TRAIT_COWARD, BEING_TRAIT_STRONG, BEING_TRAIT_BUILDER,
+    BEING_TRAIT_HUNTER, BEING_TRAIT_PACIFIST, BEING_TRAIT_EXPLORER, BEING_TRAIT_LEADER,
+    BEING_TRAIT_ELDER, BEING_TRAIT_WOLF_SLAYER, BEING_TRAIT_BEAR_SLAYER,
+    BEING_TRAIT_SURVIVOR, BEING_TRAIT_FOUNDER, BEING_TRAIT_VETERAN,
+};
 use emergence_core::sim::spatial::SpatialIndex;
 use emergence_core::sim::world_state::EventLog;
 
@@ -209,6 +215,66 @@ impl Inspector {
 
         if !child_ids.is_empty() {
             ui.label(format!("Has {} children", child_ids.len()));
+        }
+
+        ui.separator();
+
+        // History: trait badges, kill count, age milestone
+        ui.label("History");
+        let trait_bits = beings.traits[idx];
+        if trait_bits != 0 {
+            ui.horizontal_wrapped(|ui| {
+                let legendary_color = egui::Color32::from_rgb(255, 200, 0);   // gold
+                let positive_color  = egui::Color32::from_rgb(80, 200, 80);   // green
+                let neutral_color   = egui::Color32::from_rgb(160, 160, 160); // grey
+                if trait_bits & BEING_TRAIT_WOLF_SLAYER != 0 {
+                    ui.colored_label(legendary_color, "Wolf Slayer");
+                }
+                if trait_bits & BEING_TRAIT_BEAR_SLAYER != 0 {
+                    ui.colored_label(legendary_color, "Bear Slayer");
+                }
+                if trait_bits & BEING_TRAIT_FOUNDER != 0 {
+                    ui.colored_label(legendary_color, "Founder");
+                }
+                if trait_bits & BEING_TRAIT_ELDER != 0 {
+                    let age_years = (beings.ages[idx] as f32 / 28800.0) as u32;
+                    ui.colored_label(positive_color, format!("Elder ({age_years}y)"));
+                }
+                if trait_bits & BEING_TRAIT_BRAVE != 0 {
+                    ui.colored_label(positive_color, "Brave");
+                }
+                if trait_bits & BEING_TRAIT_BUILDER != 0 {
+                    ui.colored_label(positive_color, "Builder");
+                }
+                if trait_bits & BEING_TRAIT_STRONG != 0 {
+                    ui.colored_label(positive_color, "Strong");
+                }
+                if trait_bits & BEING_TRAIT_HUNTER != 0 {
+                    ui.colored_label(positive_color, "Hunter");
+                }
+                if trait_bits & BEING_TRAIT_LEADER != 0 {
+                    ui.colored_label(positive_color, "Leader");
+                }
+                if trait_bits & BEING_TRAIT_VETERAN != 0 {
+                    ui.colored_label(positive_color, "Veteran");
+                }
+                if trait_bits & BEING_TRAIT_SURVIVOR != 0 {
+                    ui.colored_label(positive_color, "Survivor");
+                }
+                if trait_bits & BEING_TRAIT_EXPLORER != 0 {
+                    ui.colored_label(neutral_color, "Explorer");
+                }
+                if trait_bits & BEING_TRAIT_PACIFIST != 0 {
+                    ui.colored_label(neutral_color, "Pacifist");
+                }
+                if trait_bits & BEING_TRAIT_COWARD != 0 {
+                    ui.colored_label(neutral_color, "Coward");
+                }
+            });
+        }
+        let kills = beings.kill_count[idx];
+        if kills > 0 {
+            ui.label(format!("Defeated {} foes", kills));
         }
 
         ui.separator();

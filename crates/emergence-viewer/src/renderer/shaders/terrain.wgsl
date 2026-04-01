@@ -9,12 +9,12 @@ struct CameraUniform {
 @group(1) @binding(2) var water_mask: texture_2d<f32>;
 @group(1) @binding(3) var water_mask_sampler: sampler;
 
-// group 2: time uniform
+// group 2: time + signal tint uniform
 struct WaterTime {
-    time: f32,
-    _pad0: f32,
-    _pad1: f32,
-    _pad2: f32,
+    time:           f32,
+    signal_danger:  f32,  // [0,1] global danger level
+    signal_comfort: f32,  // [0,1] global comfort level
+    signal_grief:   f32,  // [0,1] global grief level
 };
 @group(2) @binding(0) var<uniform> water_time: WaterTime;
 
@@ -51,6 +51,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         water_uv.y += sin(in.uv.x * 20.0 + t * 1.7) * 0.007;
 
         var color = textureSample(terrain_texture, terrain_sampler, water_uv);
+
+        // Brightness pulse: water body pulses at 5% amplitude (spec: 1px pulse)
+        let pulse = 1.0 + sin(t * 2.0) * 0.05;
+        color = vec4<f32>(color.rgb * pulse, color.a);
 
         // Shore foam: check neighbors in water mask; if near land, add white fringe
         // Texel size matches world grid (256 cells)
@@ -90,6 +94,28 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
         return color;
     } else {
-        return textureSample(terrain_texture, terrain_sampler, in.uv);
+        var land_color = textureSample(terrain_texture, terrain_sampler, in.uv);
+
+        // Signal tinting: subtle color shifts based on dominant active signal
+        // Danger (red shift): multiply (1.1, 0.9, 0.9) scaled by signal strength
+        // Comfort (warm shift): multiply (1.0, 1.0, 0.95) — warm golden
+        // Grief (blue shift): multiply (0.9, 0.9, 1.1)
+        let d = clamp(water_time.signal_danger,  0.0, 1.0);
+        let c = clamp(water_time.signal_comfort, 0.0, 1.0);
+        let g = clamp(water_time.signal_grief,   0.0, 1.0);
+
+        // Each tint multiplier lerps from neutral (1.0) toward the target at signal strength
+        let r_mult = 1.0 + d * 0.10 - g * 0.10;
+        let g_mult = 1.0 - d * 0.10 + c * 0.00 - g * 0.10;
+        let b_mult = 1.0 - d * 0.10 + c * (-0.05) + g * 0.10;
+
+        land_color = vec4<f32>(
+            clamp(land_color.r * r_mult, 0.0, 1.0),
+            clamp(land_color.g * g_mult, 0.0, 1.0),
+            clamp(land_color.b * b_mult, 0.0, 1.0),
+            land_color.a,
+        );
+
+        return land_color;
     }
 }

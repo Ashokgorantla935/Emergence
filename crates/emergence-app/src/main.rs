@@ -980,7 +980,20 @@ impl ApplicationHandler for App {
         // Accumulate wall-clock time for water animation, tree sway, and being bob
         self.elapsed_time += dt;
         if let Some(ref rs) = self.render_state {
-            rs.update_water_time(self.elapsed_time);
+            // Compute global signal averages for terrain tinting (sampled each frame)
+            let (sig_danger, sig_comfort, sig_grief) = self.world.as_ref()
+                .and_then(|w| w.read().ok())
+                .map(|w| {
+                    let signals = &w.signals;
+                    let n = (signals.width * signals.height) as usize;
+                    let scale = 1.0 / n.max(1) as f32;
+                    let danger  = signals.channels[0].iter().sum::<f32>() * scale * 4.0;
+                    let comfort = signals.channels[2].iter().sum::<f32>() * scale * 4.0;
+                    let grief   = signals.channels[3].iter().sum::<f32>() * scale * 4.0;
+                    (danger.min(1.0), comfort.min(1.0), grief.min(1.0))
+                })
+                .unwrap_or((0.0, 0.0, 0.0));
+            rs.update_water_time_signals(self.elapsed_time, sig_danger, sig_comfort, sig_grief);
             rs.update_object_time(self.elapsed_time);
             rs.update_being_time(self.elapsed_time);
         }

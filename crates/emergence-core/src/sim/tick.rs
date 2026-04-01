@@ -392,6 +392,12 @@ pub fn tick(world: &mut World) {
     // Rebuild creature-type partition indices every 600 ticks (Sawyer constraint 5)
     if world.tick % 600 == 0 {
         world.beings.rebuild_partition_indices();
+        // Award traits based on accumulated stats (runs alongside partition rebuild)
+        for i in 0..world.beings.count {
+            if world.beings.states[i] != BeingState::Dead {
+                crate::being::lifecycle::check_and_award_traits(&mut world.beings, i, world.tick);
+            }
+        }
     }
 
     // Settlement detection every 50 ticks (was 600). Amortized ~0.002ms/tick.

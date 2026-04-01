@@ -38,6 +38,14 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
     match action.action {
         Action::Wander => {
             if let Some(target) = action.target_pos {
+                // Rabbit freeze: if target is current pos and freeze_ticks just expired,
+                // initiate a fresh 30-tick freeze (rabbit froze instead of fleeing)
+                let is_rabbit = world.beings.creature_type[being_index] == CreatureType::Rabbit as u8;
+                let is_freeze_pos = (target[0] - pos[0]).abs() < 0.1 && (target[1] - pos[1]).abs() < 0.1;
+                if is_rabbit && is_freeze_pos && world.beings.freeze_ticks[being_index] == 0 {
+                    // This wander-in-place was triggered by the freeze scoring path
+                    world.beings.freeze_ticks[being_index] = 30;
+                }
                 move_toward(world, being_index, target, speed);
             }
         }
@@ -104,6 +112,16 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                 cx.min(world.signals.width - 1),
                 cy.min(world.signals.height - 1),
             );
+            // Deer herd alarm: fleeing deer deposit a strong danger signal so
+            // herd members within 20 cells sense it and also flee (cascading alarm)
+            if world.beings.creature_type[being_index] == CreatureType::Deer as u8 {
+                world.signals.deposit(
+                    crate::world::signal::SignalChannel::Danger,
+                    cx.min(world.signals.width - 1),
+                    cy.min(world.signals.height - 1),
+                    0.8,
+                );
+            }
             world.events.push(Event {
                 tick,
                 actor_id: being_index as u32,
@@ -355,6 +373,22 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                                     level: world.beings.needs[being_index][NEED_HUNGER],
                                 },
                             });
+
+                            // Kill tracking: increment kill_count and award slayer traits
+                            world.beings.kill_count[being_index] =
+                                world.beings.kill_count[being_index].saturating_add(1);
+                            let kills = world.beings.kill_count[being_index];
+                            if kills >= 3 {
+                                match CreatureType::from_u8(prey_type) {
+                                    CreatureType::Wolf => {
+                                        world.beings.traits[being_index] |= BEING_TRAIT_WOLF_SLAYER;
+                                    }
+                                    CreatureType::Bear => {
+                                        world.beings.traits[being_index] |= BEING_TRAIT_BEAR_SLAYER;
+                                    }
+                                    _ => {}
+                                }
+                            }
                         } else {
                             // Miss: prey flees, predator cooldown via combat_modifier
                             world.beings.tool_quality[being_index] = (world.beings.tool_quality[being_index] - 0.1).max(0.0); // cooldown: suppresses Hunt score

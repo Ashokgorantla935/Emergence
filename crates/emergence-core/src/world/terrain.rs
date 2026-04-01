@@ -405,18 +405,9 @@ fn dispatch_elevation_source(
     use super::map::MapId;
     match source {
         ElevationSource::Procedural { params } => {
-            // Dispatch to named generators based on known seed patterns,
-            // or fall back to the generic procedural generator.
-            // The seed embedded in ProceduralParams is the map's canonical seed.
-            match params.seed {
-                11111 => super::terrain_gen::generate_pangaea(w, h, params.seed),
-                22222 => super::terrain_gen::generate_archipelago(w, h, params.seed),
-                33333 => super::terrain_gen::generate_ring_world(w, h, params.seed),
-                44444 => super::terrain_gen::generate_fractal_continent(w, h, params.seed),
-                55555 => super::terrain_gen::generate_crucible(w, h, params.seed),
-                66666 => super::terrain_gen::generate_twin_peaks(w, h, params.seed),
-                _ => super::terrain_gen::generate_custom_procedural(w, h, params),
-            }
+            // All procedural maps now use the triad generator (elevation × temp × moisture).
+            // Each seed produces a dramatically different world.
+            super::terrain_gen::generate_triad_world(w, h, params.seed)
         }
         ElevationSource::Baked { data, width: bw, height: bh } => {
             decode_baked_elevation(data, *bw, *bh)

@@ -330,6 +330,7 @@ impl ObjectRenderer {
                     Biome::Mountain  => 2,
                     Biome::Wetland   => 2,
                     Biome::Desert    => 1,
+                    Biome::Snow      => 1,
                     Biome::Water     => continue,
                 };
 
@@ -354,6 +355,7 @@ impl ObjectRenderer {
                         (Biome::Wetland,   0) => 35,  // slot 0: 3.5%
                         (Biome::Wetland,   _) => 15,  // slot 1: 1.5%
                         (Biome::Desert,    _) => 10,  // sparse: 1%
+                        (Biome::Snow,      _) => 15,  // sparse rock/ice: 1.5%
                         (Biome::Water,     _) => continue,
                     };
 
@@ -424,6 +426,11 @@ impl ObjectRenderer {
                             } else {
                                 (UV_DECOR_CACTUS, [1.0f32, 1.0, 1.0], 2.0)
                             }
+                        }
+                        Biome::Snow => {
+                            rock_count += 1;
+                            let v = ROCK_VARIANTS[(hash >> 2) % ROCK_VARIANTS.len()];
+                            (v, [1.0f32, 1.0, 1.0], 1.5) // small snow-covered rock
                         }
                         Biome::Water => continue,
                     };

@@ -146,6 +146,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             if (biome_id == 3u && h < 0.10 && dist < 0.10) {
                 color = mix(color, vec4<f32>(0.22, 0.46, 0.14, 1.0), 0.65);
             }
+            // Snow: white sparkle dot
+            if (biome_id == 6u && h < 0.25 && dist < 0.12) {
+                color = mix(color, vec4<f32>(1.0, 1.0, 1.0, 1.0), 0.65);
+            }
         }
         return color;
     }
@@ -243,6 +247,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             if (dist < 0.20) {
                 let grey = 0.40 + h2 * 0.20;
                 color = mix(color, vec4<f32>(grey, grey, grey * 0.95, 1.0), 0.60);
+            }
+        }
+
+        // Snow: snowflake dot (near-white sparkle)
+        if (biome_id == 6u && h < 0.18) {
+            let cell_frac = fract(in.world_pos) - vec2<f32>(0.5, 0.5);
+            let dist = length(cell_frac);
+            if (dist < 0.12) {
+                color = mix(color, vec4<f32>(1.0, 1.0, 1.0, 1.0), 0.70);
             }
         }
     }

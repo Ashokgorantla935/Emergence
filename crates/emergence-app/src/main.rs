@@ -1154,6 +1154,7 @@ impl ApplicationHandler for App {
                     emergence_core::world::terrain::Biome::Water     => BiomeAmbience::Water,
                     emergence_core::world::terrain::Biome::Wetland   => BiomeAmbience::Water,
                     emergence_core::world::terrain::Biome::Grassland => BiomeAmbience::Grassland,
+                    emergence_core::world::terrain::Biome::Snow      => BiomeAmbience::Mountain,
                 };
                 // Normalize zoom: camera.zoom 10=close, 512+=far
                 // Invert so zoom_normalized 1.0=close (loud), 0.0=far (quiet)

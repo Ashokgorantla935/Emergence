@@ -30,6 +30,7 @@ fn biome_color(biome: Biome, elevation: f32) -> [u8; 4] {
         }
         Biome::Forest => COLOR_FOREST,
         Biome::Wetland => COLOR_WETLAND,
+        Biome::Snow => COLOR_ICE,
     }
 }
 

@@ -12,6 +12,7 @@ pub enum Biome {
     Mountain,
     Desert,
     Water,
+    Snow,
 }
 
 /// Structure types that can be built on terrain cells.
@@ -99,7 +100,7 @@ impl Terrain {
 
         // --- Generate elevation, moisture, temperature arrays ---
         let (elevation, moisture, temperature_base) = match &config.map {
-            MapSelection::Default => generate_default(w, h, config.terrain_seed),
+            MapSelection::Default => super::terrain_gen::generate_triad_world(w, h, config.terrain_seed),
             MapSelection::BuiltIn(id) => {
                 let def = super::map_registry::get(*id);
                 dispatch_elevation_source(&def.elevation_source, w, h, config.terrain_seed)
@@ -149,6 +150,7 @@ impl Terrain {
                 Biome::Mountain => 2.0,
                 Biome::Desert => 1.3,
                 Biome::Water => f32::MAX,
+                Biome::Snow => 2.5,
             })
             .collect();
 
@@ -191,7 +193,7 @@ impl Terrain {
 
         // Stone resource at mountain cells
         let stone: Vec<f32> = biome.iter().map(|b| {
-            if *b == Biome::Mountain { 1.0 } else { 0.0 }
+            if matches!(b, Biome::Mountain | Biome::Snow) { 1.0 } else { 0.0 }
         }).collect();
 
         Terrain {
@@ -348,6 +350,7 @@ impl Terrain {
                         Biome::Mountain => 2.0,
                         Biome::Desert => 1.3,
                         Biome::Water => f32::MAX,
+                        Biome::Snow => 2.5,
                     };
                     self.movement_cost[idx] = orig;
                     self.seasonal_movement_cost[idx] = orig;
@@ -456,7 +459,7 @@ fn assign_biomes(
     };
 
     match rules {
-        BiomeRules::Standard => assign_standard_biomes(elevation, moisture, &water_mask, has_water),
+        BiomeRules::Standard => assign_standard_biomes(elevation, moisture, temperature, &water_mask, has_water),
         BiomeRules::LatitudeDriven { equator_y } => {
             assign_latitude_biomes(elevation, moisture, &water_mask, w, h, *equator_y)
         }
@@ -467,9 +470,50 @@ fn assign_biomes(
     }
 }
 
+/// Classify biome from elevation, temperature, moisture triad values (all in [0,1]).
+pub(crate) fn classify_biome(e: f32, t: f32, m: f32) -> Biome {
+    // Ocean (handled by water mask, but guard here)
+    if e < 0.30 { return Biome::Water; }
+
+    // High elevation: snow peaks or mountain
+    if e > 0.80 {
+        if t < 0.35 { return Biome::Snow; }
+        return Biome::Mountain;
+    }
+
+    // Medium-high elevation: tundra or mountain
+    if e > 0.65 {
+        if t < 0.30 { return Biome::Snow; }
+        return Biome::Mountain;
+    }
+
+    // Lowlands (e: 0.30 - 0.65)
+    if m > 0.70 {
+        if e < 0.38 { return Biome::Wetland; }   // low + wet = marsh
+        return Biome::Forest;                       // mid + wet = rainforest
+    }
+
+    if m < 0.30 {
+        if t > 0.60 { return Biome::Desert; }      // hot + dry = desert
+        return Biome::Grassland;                    // cool + dry = steppe
+    }
+
+    // Medium moisture
+    if t > 0.70 {
+        if m > 0.50 { return Biome::Forest; }
+        return Biome::Desert;
+    }
+
+    if t < 0.25 { return Biome::Snow; }
+
+    if m > 0.50 { return Biome::Forest; }
+    Biome::Grassland
+}
+
 fn assign_standard_biomes(
     elevation: &[f32],
     moisture: &[f32],
+    temperature: &[f32],
     water_mask: &[bool],
     _has_water: bool,
 ) -> (Vec<Biome>, Vec<bool>) {
@@ -483,19 +527,9 @@ fn assign_standard_biomes(
             water_cells.push(true);
         } else {
             let e = elevation[i];
+            let t = temperature[i];
             let m = moisture[i];
-            let b = if e > 0.75 {
-                Biome::Mountain
-            } else if m < 0.2 && e < 0.5 {
-                Biome::Desert
-            } else if m > 0.7 && e < 0.4 {
-                Biome::Wetland
-            } else if m > 0.4 {
-                Biome::Forest
-            } else {
-                Biome::Grassland
-            };
-            biome.push(b);
+            biome.push(classify_biome(e, t, m));
             water_cells.push(false);
         }
     }

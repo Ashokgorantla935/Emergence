@@ -55,6 +55,7 @@ impl ResourceLayer {
                         Biome::Mountain => 0.75,
                         Biome::Desert => 0.5,
                         Biome::Water => 0.0,
+                        Biome::Snow => 0.1,
                     };
 
                     let (cap, ft, rg) = if near_water {

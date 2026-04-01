@@ -75,6 +75,11 @@ const WETLAND_TILES: &[[f32; 2]] = &[
     tile_uv(23, 28), tile_uv(24, 28),
 ];
 
+const SNOW_TILES: &[[f32; 2]] = &[
+    tile_uv(25, 28), tile_uv(26, 28), tile_uv(27, 28),
+    tile_uv(28, 28), tile_uv(29, 28),
+];
+
 /// Max instances — 256*256 = 65536 cells.
 const MAX_INSTANCES: usize = 200_000; // enough for ~450x450 viewport
 
@@ -177,11 +182,12 @@ impl TerrainRenderer {
                     Biome::Mountain  => MOUNTAIN_TILES,
                     Biome::Water     => WATER_TILES,
                     Biome::Wetland   => WETLAND_TILES,
+                    Biome::Snow      => SNOW_TILES,
                 };
 
                 let variant = hash % tiles.len();
                 let tile_uv = tiles[variant];
-                // Encode biome type in flags: 0=grass, 1=water, 2=forest, 3=desert, 4=mountain, 5=wetland
+                // Encode biome type in flags: 0=grass, 1=water, 2=forest, 3=desert, 4=mountain, 5=wetland, 6=snow
                 let biome_flag = match biome {
                     Biome::Grassland => 0.0f32,
                     Biome::Water     => 1.0,
@@ -189,6 +195,7 @@ impl TerrainRenderer {
                     Biome::Desert    => 3.0,
                     Biome::Mountain  => 4.0,
                     Biome::Wetland   => 5.0,
+                    Biome::Snow      => 6.0,
                 };
                 let is_water = biome == Biome::Water;
 

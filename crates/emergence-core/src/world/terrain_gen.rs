@@ -1,4 +1,4 @@
-use noise::{NoiseFn, OpenSimplex};
+use noise::{Fbm, NoiseFn, OpenSimplex, Perlin};
 
 use super::map::ProceduralParams;
 
@@ -761,6 +761,74 @@ fn generate_custom_attempt(
     (elevation, moisture, temperature_base)
 }
 
+/// Generate a world using the Triad Noise method.
+/// Three independent Fbm<Perlin> layers (elevation × temperature × moisture)
+/// produce dramatically varied biomes across seeds: deserts, snow peaks, marshes, forests.
+/// Returns (elevation, temperature_base, moisture) — same tuple order as other generators.
+pub fn generate_triad_world(w: u32, h: u32, seed: u64) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    let len = (w * h) as usize;
+
+    let mut elev_noise: Fbm<Perlin> = Fbm::new(seed as u32);
+    elev_noise.octaves = 6;
+    elev_noise.frequency = 1.0;
+    elev_noise.lacunarity = 2.0;
+    elev_noise.persistence = 0.5;
+
+    let mut temp_noise: Fbm<Perlin> = Fbm::new(seed.wrapping_add(1000) as u32);
+    temp_noise.octaves = 4;
+    temp_noise.frequency = 1.0;
+    temp_noise.lacunarity = 2.0;
+    temp_noise.persistence = 0.5;
+
+    let mut moist_noise: Fbm<Perlin> = Fbm::new(seed.wrapping_add(2000) as u32);
+    moist_noise.octaves = 5;
+    moist_noise.frequency = 1.0;
+    moist_noise.lacunarity = 2.0;
+    moist_noise.persistence = 0.5;
+
+    let scale = 0.015f64;
+
+    let mut elevation = vec![0.0f32; len];
+    let mut temperature = vec![0.0f32; len];
+    let mut moisture = vec![0.0f32; len];
+
+    for y in 0..h {
+        for x in 0..w {
+            let idx = (y * w + x) as usize;
+            let nx = x as f64 * scale;
+            let ny = y as f64 * scale;
+
+            // Elevation: island mask fades to zero at grid edges (creates ocean borders)
+            let edge = edge_distance(x, y, w, h);
+            let raw_e = elev_noise.get([nx, ny]) as f32;
+            elevation[idx] = ((raw_e + 1.0) * 0.5 * edge).clamp(0.0, 1.0);
+
+            // Temperature: latitude gradient (warm equator, cold poles) + noise
+            let lat_factor = 1.0 - (y as f32 / h as f32 - 0.5).abs() * 2.0;
+            let raw_t = temp_noise.get([nx * 0.8, ny * 0.8]) as f32;
+            temperature[idx] = (raw_t * 0.3 + lat_factor * 0.7 + 0.5).clamp(0.0, 1.0);
+
+            // Moisture: fully independent noise channel
+            let raw_m = moist_noise.get([nx * 1.2, ny * 1.2]) as f32;
+            moisture[idx] = ((raw_m + 1.0) * 0.5).clamp(0.0, 1.0);
+        }
+    }
+
+    (elevation, temperature, moisture)
+}
+
+/// Distance from grid edge, normalized [0, 1]. 0 at edges, 1 at center.
+/// Creates natural island/continent shapes by masking elevation to zero near borders.
+fn edge_distance(x: u32, y: u32, w: u32, h: u32) -> f32 {
+    let fx = x as f32 / w as f32;
+    let fy = y as f32 / h as f32;
+    let dx = (fx - 0.5).abs() * 2.0;
+    let dy = (fy - 0.5).abs() * 2.0;
+    let d = (dx * dx + dy * dy).sqrt().min(1.0);
+    // 1.3 controls how much ocean surrounds the landmass
+    (1.0 - d * 1.3).max(0.0)
+}
+
 /// Auto-detect fertile spawn points in generated terrain.
 pub fn auto_detect_spawns(
     elevation: &[f32],
@@ -784,6 +852,7 @@ pub fn auto_detect_spawns(
                 Biome::Mountain => 0.1,
                 Biome::Desert => 0.2,
                 Biome::Water => 0.0,
+                Biome::Snow => 0.05,
             };
             let move_ease = match biome[i] {
                 Biome::Grassland => 1.0,
@@ -792,6 +861,7 @@ pub fn auto_detect_spawns(
                 Biome::Mountain => 0.3,
                 Biome::Desert => 0.7,
                 Biome::Water => 0.0,
+                Biome::Snow => 0.2,
             };
             let score = food * move_ease;
             (i, score)

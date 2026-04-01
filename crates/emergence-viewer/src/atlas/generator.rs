@@ -250,6 +250,7 @@ fn draw_humanoid_row(pixels: &mut [u8], row: usize, build: u32, phase: u32) {
         };
 
         draw_humanoid_bitmap(pixels, cx, cy, skin_map, cloth_map, skin, clothing, anim_variant, phase);
+        apply_sprite_outline(pixels, cx, cy);
     }
 }
 
@@ -271,17 +272,17 @@ fn draw_humanoid_bitmap(
         let mut sk = skin_map[row];
         let mut cl = cloth_map[row];
 
-        // Walking pose: shift legs (rows 10-15) by 1px alternating sides
+        // Walking pose: shift legs (rows 10-15) by 2px alternating sides for visible animation
         if row >= 10 && row <= 13 && anim_variant >= 2 && anim_variant <= 5 {
             if walk == 0 {
-                // left leg forward, right back — shift left leg left 1px
+                // left leg forward, right back — shift left leg left 2px
                 let left_bits  = sk & 0b0000110000000000;
                 let right_bits = sk & 0b0000001100000000;
-                sk = (sk & 0b1111000011111111) | (left_bits << 1) | (right_bits >> 1);
+                sk = (sk & 0b1111000011111111) | (left_bits << 2) | (right_bits >> 2);
             } else {
                 let left_bits  = sk & 0b0000110000000000;
                 let right_bits = sk & 0b0000001100000000;
-                sk = (sk & 0b1111000011111111) | (left_bits >> 1) | (right_bits << 1);
+                sk = (sk & 0b1111000011111111) | (left_bits >> 2) | (right_bits << 2);
             }
         }
 
@@ -308,8 +309,8 @@ fn draw_humanoid_bitmap(
                 // FIX 3: encode skin as near-white so shader can threshold-select skin_tone
                 set_pixel(pixels, cx + col, cy + row, 255, 255, 255, 255);
             } else if cl_on {
-                // FIX 3: encode cloth as mid-gray so shader selects emotion_tint
-                set_pixel(pixels, cx + col, cy + row, 128, 128, 128, 255);
+                // Higher contrast cloth: 90 (not 128) keeps cloth well below 0.7 shader threshold
+                set_pixel(pixels, cx + col, cy + row, 90, 90, 90, 255);
             }
         }
     }
@@ -356,6 +357,7 @@ fn draw_fauna_rows(pixels: &mut [u8]) {
             if col >= GRID { break; }
             let (cx, cy) = cell_origin(*atlas_row, col);
             draw_fauna_sprite(pixels, cx, cy, *color, *kind, frame);
+            apply_sprite_outline(pixels, cx, cy);
         }
     }
 }
@@ -370,6 +372,33 @@ fn draw_fauna_sprite(pixels: &mut [u8], cx: usize, cy: usize, color: [u8; 3], ki
         4 => draw_rabbit(pixels, cx, cy, color, frame),
         5 => draw_fish(pixels, cx, cy, color, frame),
         _ => draw_snake(pixels, cx, cy, color, frame),
+    }
+}
+
+/// Apply a 1px dark outline (40,30,20,255) around a sprite silhouette in one 16x16 cell.
+/// For every opaque pixel, if any 4-neighbor is transparent, the opaque pixel becomes dark.
+fn apply_sprite_outline(pixels: &mut [u8], cx: usize, cy: usize) {
+    // Collect which pixels in the cell are opaque
+    let mut opaque = [[false; 16]; 16];
+    for row in 0..16usize {
+        for col in 0..16usize {
+            let idx = ((cy + row) * ATLAS_SIZE + (cx + col)) * 4;
+            opaque[row][col] = pixels[idx + 3] > 0;
+        }
+    }
+    // For each opaque pixel adjacent to a transparent pixel, paint dark outline
+    for row in 0..16usize {
+        for col in 0..16usize {
+            if !opaque[row][col] { continue; }
+            let has_transparent_neighbor =
+                (row == 0    || !opaque[row - 1][col]) ||
+                (row == 15   || !opaque[row + 1][col]) ||
+                (col == 0    || !opaque[row][col - 1]) ||
+                (col == 15   || !opaque[row][col + 1]);
+            if has_transparent_neighbor {
+                set_pixel(pixels, cx + col, cy + row, 40, 30, 20, 255);
+            }
+        }
     }
 }
 
@@ -429,13 +458,18 @@ fn draw_hawk(pixels: &mut [u8], cx: usize, cy: usize, color: [u8; 3], frame: usi
 
 fn draw_deer(pixels: &mut [u8], cx: usize, cy: usize, color: [u8; 3], frame: usize) {
     let walk = frame % 2;
-    // Antlers (dark brown)
+    // Antlers (dark brown) — 3+ rows above head for clear visibility
+    let antler_color = [
+        color[0].saturating_sub(50),
+        color[1].saturating_sub(50),
+        color[2].saturating_sub(50),
+    ];
     blit_bitmap(pixels, cx, cy, &[
-        0b0000100000010000, // row 0: antler tips
-        0b0000110000110000, // row 1: antlers
-        0b0000011001100000, // row 2: antler base
-        0b0000001001000000, // row 3: neck top
-    ], color[0].saturating_sub(40), color[1].saturating_sub(40), color[2].saturating_sub(40), 255);
+        0b0000101000101000, // row 0: antler branch tips spread wide
+        0b0000110000110000, // row 1: antler main forks
+        0b0000011001100000, // row 2: antler stems (3px above head)
+        0b0000001001000000, // row 3: antler base joining head
+    ], antler_color[0], antler_color[1], antler_color[2], 255);
 
     // Head
     blit_bitmap(pixels, cx, cy + 3, &[
@@ -482,30 +516,32 @@ fn draw_deer(pixels: &mut [u8], cx: usize, cy: usize, color: [u8; 3], frame: usi
 fn draw_wolf(pixels: &mut [u8], cx: usize, cy: usize, color: [u8; 3], frame: usize) {
     let walk = frame % 2;
 
-    // Ears + head
+    // Ears + head — pointy ears (2px tall triangles)
     blit_bitmap(pixels, cx, cy, &[
-        0b0000100001000000, // row 0: ear tips
-        0b0000110001100000, // row 1: ears
-        0b0000011111000000, // row 2: head top
-        0b0000111111100000, // row 3: head
-        0b0001111111110000, // row 4: snout/head wide
-        0b0001100011000000, // row 5: jaw
+        0b0000100001000000, // row 0: pointy ear tips (single px each)
+        0b0000100001000000, // row 1: ear shafts (2px tall)
+        0b0000110001100000, // row 2: ear base
+        0b0000011111000000, // row 3: head top
+        0b0000111111100000, // row 4: head
+        0b0001111111110000, // row 5: snout/head wide
+        0b0001100011000000, // row 6: jaw
     ], color[0], color[1], color[2], 255);
 
     // Body (low, horizontal)
-    blit_bitmap(pixels, cx, cy + 5, &[
-        0b0001111111111000, // row 5:  shoulder-body
-        0b0011111111111100, // row 6:  body wide
-        0b0001111111111000, // row 7:  body
-        0b0000111111110000, // row 8:  rump
+    blit_bitmap(pixels, cx, cy + 6, &[
+        0b0001111111111000, // row 6:  shoulder-body
+        0b0011111111111100, // row 7:  body wide
+        0b0001111111111000, // row 8:  body
+        0b0000111111110000, // row 9:  rump
     ], color[0], color[1], color[2], 255);
 
-    // Tail (curled up at left)
-    blit_bitmap(pixels, cx, cy + 4, &[
-        0b1100000000000000, // row 4: tail tip
-        0b0110000000000000, // row 5: tail
-        0b0010000000000000, // row 6: tail base
-    ], color[0], color[1], color[2], 255);
+    // Bushy tail (wider, curled up high at left side)
+    blit_bitmap(pixels, cx, cy + 3, &[
+        0b1110000000000000, // row 3: tail tip (3px bushy)
+        0b1111000000000000, // row 4: tail wide
+        0b0111000000000000, // row 5: tail
+        0b0011000000000000, // row 6: tail base
+    ], color[0].min(220), color[1].min(220), color[2].min(220), 255);
 
     // Legs
     let legs: [u16; 4] = if walk == 0 {
@@ -523,10 +559,10 @@ fn draw_wolf(pixels: &mut [u8], cx: usize, cy: usize, color: [u8; 3], frame: usi
             0b0000000000000000,
         ]
     };
-    blit_bitmap(pixels, cx, cy + 9, &legs, color[0].saturating_sub(15), color[1].saturating_sub(15), color[2].saturating_sub(15), 255);
+    blit_bitmap(pixels, cx, cy + 10, &legs, color[0].saturating_sub(15), color[1].saturating_sub(15), color[2].saturating_sub(15), 255);
 
-    // Eye
-    set_pixel(pixels, cx + 10, cy + 3, 255, 200, 50, 255);
+    // Eye (adjusted for head shift)
+    set_pixel(pixels, cx + 10, cy + 4, 255, 200, 50, 255);
 }
 
 fn draw_bear(pixels: &mut [u8], cx: usize, cy: usize, color: [u8; 3], _frame: usize) {
@@ -570,20 +606,23 @@ fn draw_bear(pixels: &mut [u8], cx: usize, cy: usize, color: [u8; 3], _frame: us
 fn draw_rabbit(pixels: &mut [u8], cx: usize, cy: usize, color: [u8; 3], frame: usize) {
     let hop = frame % 2;
 
-    // Long ears
+    // Long ears — 4 rows tall above head for clear iconic shape
     blit_bitmap(pixels, cx, cy, &[
-        0b0000100001000000, // row 0: ear tips
-        0b0000100001000000, // row 1: ears
-        0b0000100001000000, // row 2: ears
-        0b0000110001100000, // row 3: ear base
+        0b0000110000110000, // row 0: ear tips (2px wide each for visibility)
+        0b0000110000110000, // row 1: ears tall
+        0b0000110000110000, // row 2: ears tall
+        0b0000110000110000, // row 3: ears (4px total height)
+        0b0000111001110000, // row 4: ear base wide
     ], color[0], color[1], color[2], 255);
-    // Inner ear pink
-    set_pixel(pixels, cx + 5, cy + 1, 255, 180, 180, 255);
-    set_pixel(pixels, cx + 9, cy + 1, 255, 180, 180, 255);
+    // Inner ear pink (both rows 1 and 2)
+    set_pixel(pixels, cx + 5, cy + 1, 255, 160, 160, 255);
+    set_pixel(pixels, cx + 9, cy + 1, 255, 160, 160, 255);
+    set_pixel(pixels, cx + 5, cy + 2, 255, 160, 160, 255);
+    set_pixel(pixels, cx + 9, cy + 2, 255, 160, 160, 255);
 
-    // Round head + body
+    // Round head + compact body
     let body_y = if hop == 1 { 1 } else { 0 }; // hop lifts body 1px
-    blit_bitmap(pixels, cx, cy + 4 - body_y, &[
+    blit_bitmap(pixels, cx, cy + 5 - body_y, &[
         0b0000011110000000, // head
         0b0000111111000000, // head wide
         0b0000111111000000, // head
@@ -599,12 +638,14 @@ fn draw_rabbit(pixels: &mut [u8], cx: usize, cy: usize, color: [u8; 3], frame: u
     } else {
         [0b0000011001100000, 0b0000011001100000, 0b0000111001110000]
     };
-    blit_bitmap(pixels, cx, cy + 11, &feet, color[0].saturating_sub(10), color[1].saturating_sub(10), color[2].saturating_sub(10), 255);
+    blit_bitmap(pixels, cx, cy + 12, &feet, color[0].saturating_sub(10), color[1].saturating_sub(10), color[2].saturating_sub(10), 255);
 
-    // Tail (white)
+    // Tail (white puffball)
+    set_pixel(pixels, cx + 3, cy + 11, 255, 255, 255, 255);
     set_pixel(pixels, cx + 4, cy + 11, 255, 255, 255, 255);
+    set_pixel(pixels, cx + 4, cy + 12, 255, 255, 255, 255);
     // Eye
-    set_pixel(pixels, cx + 9, cy + 5, 30, 10, 10, 255);
+    set_pixel(pixels, cx + 9, cy + 6, 30, 10, 10, 255);
 }
 
 fn draw_fish(pixels: &mut [u8], cx: usize, cy: usize, color: [u8; 3], frame: usize) {
@@ -740,28 +781,43 @@ fn draw_world_object(pixels: &mut [u8], cx: usize, cy: usize, kind: usize) {
 // These sprites are white/neutral — tint color is applied at render time.
 
 fn draw_decor_tree(pixels: &mut [u8], cx: usize, cy: usize) {
-    // Brown trunk: 2px wide, 4px tall at bottom center
-    fill_rect(pixels, cx, cy, 7, 11, 2, 4, 101,  67,  33, 255);
-    // Triangle canopy: widest at base (row 10), narrows to 1px tip (row 2)
-    // Row 10: 8px wide (cols 4-11)
-    fill_rect(pixels, cx, cy,  4, 10,  8, 1,  34, 139,  34, 255);
+    // Brown trunk: 2px wide, 5px tall at bottom center (clearly visible)
+    fill_rect(pixels, cx, cy, 7, 10, 2, 5, 101,  67,  33, 255);
+
+    // Solid triangle canopy filled completely: widest at base (row 10), narrows to tip (row 2)
+    // Row 10: 10px wide (cols 3-12) — base
+    fill_rect(pixels, cx, cy,  3, 10, 10, 1,  20,  90,  20, 255); // dark outline edge
+    fill_rect(pixels, cx, cy,  4, 10,  8, 1,  34, 139,  34, 255); // interior
     // Row 9: 8px
+    fill_rect(pixels, cx, cy,  3,  9,  1, 1,  20,  90,  20, 255); // left edge
+    fill_rect(pixels, cx, cy, 12,  9,  1, 1,  20,  90,  20, 255); // right edge
     fill_rect(pixels, cx, cy,  4,  9,  8, 1,  34, 139,  34, 255);
-    // Row 8: 6px (cols 5-10)
-    fill_rect(pixels, cx, cy,  5,  8,  6, 1,  34, 139,  34, 255);
+    // Row 8: 8px solid
+    fill_rect(pixels, cx, cy,  4,  8,  8, 1,  34, 139,  34, 255);
     // Row 7: 6px
+    fill_rect(pixels, cx, cy,  4,  7,  1, 1,  20,  90,  20, 255); // left edge
+    fill_rect(pixels, cx, cy, 11,  7,  1, 1,  20,  90,  20, 255); // right edge
     fill_rect(pixels, cx, cy,  5,  7,  6, 1,  45, 160,  45, 255);
-    // Row 6: 4px (cols 6-9)
-    fill_rect(pixels, cx, cy,  6,  6,  4, 1,  45, 160,  45, 255);
+    // Row 6: 6px solid
+    fill_rect(pixels, cx, cy,  5,  6,  6, 1,  45, 160,  45, 255);
     // Row 5: 4px
+    fill_rect(pixels, cx, cy,  5,  5,  1, 1,  20,  90,  20, 255); // left edge
+    fill_rect(pixels, cx, cy, 10,  5,  1, 1,  20,  90,  20, 255); // right edge
     fill_rect(pixels, cx, cy,  6,  5,  4, 1,  60, 180,  60, 255);
-    // Row 4: 2px (cols 7-8)
-    fill_rect(pixels, cx, cy,  7,  4,  2, 1,  60, 180,  60, 255);
-    // Row 3: tip 2px
+    // Row 4: 4px solid
+    fill_rect(pixels, cx, cy,  6,  4,  4, 1,  60, 180,  60, 255);
+    // Row 3: 2px
+    fill_rect(pixels, cx, cy,  6,  3,  1, 1,  20,  90,  20, 255); // left edge
+    fill_rect(pixels, cx, cy,  9,  3,  1, 1,  20,  90,  20, 255); // right edge
     fill_rect(pixels, cx, cy,  7,  3,  2, 1,  80, 200,  80, 255);
-    // Darker shadow on right side of canopy
-    set_pixel(pixels, cx + 11, cy + 10, 20, 100, 20, 255);
-    set_pixel(pixels, cx + 10, cy +  9, 20, 100, 20, 255);
+    // Row 2: tip 2px with darker outline
+    fill_rect(pixels, cx, cy,  7,  2,  2, 1,  20,  90,  20, 255); // tip outline
+    // Row 3 tip (bright)
+    fill_rect(pixels, cx, cy,  7,  3,  2, 1,  80, 200,  80, 255);
+    // Darker shadow strip on right side of canopy for depth
+    set_pixel(pixels, cx + 11, cy + 10, 15,  80, 15, 255);
+    set_pixel(pixels, cx + 11, cy +  9, 15,  80, 15, 255);
+    set_pixel(pixels, cx + 10, cy +  8, 15,  80, 15, 255);
 }
 
 fn draw_decor_bush(pixels: &mut [u8], cx: usize, cy: usize) {

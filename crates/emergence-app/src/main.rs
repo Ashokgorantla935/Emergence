@@ -7,7 +7,7 @@ use emergence_core::world::map::MapSelection;
 use emergence_core::sim::world_state::World;
 use emergence_core::world::signal::SignalChannel;
 use emergence_viewer::animation::AnimationManager;
-use emergence_viewer::audio::{AudioContext, SoundEngine};
+use emergence_viewer::audio::{AudioContext, BiomeAmbience, SoundEngine};
 use emergence_viewer::camera::Camera;
 use emergence_viewer::dashboard::Dashboard;
 use emergence_viewer::inspector::Inspector;
@@ -128,6 +128,10 @@ struct App {
     cursor_preview: CursorPreview,
     flash_alpha: f32,
     shake: ScreenShake,
+
+    // Social emergence overlay toggles
+    show_bond_lines: bool,
+    show_kingdom_colors: bool,
 }
 
 impl App {
@@ -185,6 +189,8 @@ impl App {
             cursor_preview: CursorPreview::new(),
             flash_alpha: 0.0,
             shake: ScreenShake::new(),
+            show_bond_lines: true,
+            show_kingdom_colors: true,
         }
     }
 
@@ -553,12 +559,20 @@ impl ApplicationHandler for App {
                                     KeyCode::KeyS => self.stats_panel.toggle(),
                                     KeyCode::KeyL => self.world_laws_panel.toggle(),
                                     KeyCode::KeyN => self.news_feed_ui.toggle(),
+                                    // ? key (Shift+/) re-shows onboarding controls overlay
+                                    KeyCode::Slash if self.shift_held => {
+                                        self.onboarding.toggle();
+                                    }
+                                    KeyCode::KeyB => {
+                                        self.show_bond_lines = !self.show_bond_lines;
+                                    }
                                     KeyCode::KeyK => {
                                         if self.shift_held {
                                             if let Some(ref mut overlay) = self.kingdom_overlay {
                                                 overlay.toggle_loyalty_heatmap();
                                             }
                                         } else {
+                                            self.show_kingdom_colors = !self.show_kingdom_colors;
                                             self.kingdom_panel.toggle();
                                             if let Some(ref mut overlay) = self.kingdom_overlay {
                                                 overlay.toggle_borders();
@@ -839,7 +853,11 @@ impl ApplicationHandler for App {
 
         // Onboarding timer (only while Playing)
         if self.screen == ScreenState::Playing {
-            self.onboarding.tick(dt, self.had_interaction);
+            let sim_tick = self.world.as_ref()
+                .and_then(|w| w.read().ok())
+                .map(|w| w.tick)
+                .unwrap_or(0);
+            self.onboarding.tick(sim_tick, self.left_mouse_clicked);
         }
         self.had_interaction = false;
 
@@ -913,6 +931,18 @@ impl ApplicationHandler for App {
                     emergence_core::world::climate::Season::Autumn => 2,
                     emergence_core::world::climate::Season::Winter => 3,
                 };
+                // Sample biome at camera center, clamped to world bounds
+                let cam = self.camera.position;
+                let wx = (cam[0].max(0.0) as u32).min(w.terrain.width.saturating_sub(1));
+                let wy = (cam[1].max(0.0) as u32).min(w.terrain.height.saturating_sub(1));
+                let biome = match w.terrain.biome_at(wx, wy) {
+                    emergence_core::world::terrain::Biome::Forest    => BiomeAmbience::Forest,
+                    emergence_core::world::terrain::Biome::Mountain  => BiomeAmbience::Mountain,
+                    emergence_core::world::terrain::Biome::Desert    => BiomeAmbience::Desert,
+                    emergence_core::world::terrain::Biome::Water     => BiomeAmbience::Water,
+                    emergence_core::world::terrain::Biome::Wetland   => BiomeAmbience::Water,
+                    emergence_core::world::terrain::Biome::Grassland => BiomeAmbience::Grassland,
+                };
                 AudioContext {
                     camera_pos: self.camera.position,
                     time_of_day: w.climate.light_level(),
@@ -920,6 +950,7 @@ impl ApplicationHandler for App {
                     near_settlement,
                     weather_active,
                     war_nearby,
+                    biome,
                 }
             } else {
                 AudioContext::default()
@@ -1127,12 +1158,17 @@ impl ApplicationHandler for App {
                 TopBar::show(&self.egui_ctx, &mut self.speed, tick, population);
 
                 // God tool palette — left side panel, always rendered while Playing
+                let power_before = self.god_tool_state.active_power;
                 egui::SidePanel::left("god_palette_panel")
                     .exact_width(200.0)
                     .resizable(false)
                     .show(&self.egui_ctx, |ui| {
                         god_palette::render_palette(ui, &mut self.god_tool_state);
                     });
+                // Notify onboarding on first god power selection.
+                if power_before.is_none() && self.god_tool_state.active_power.is_some() {
+                    self.onboarding.notify_god_power_selected();
+                }
 
                 if let Some(ref world) = self.world {
                     let world = world.read().unwrap();
@@ -1551,6 +1587,236 @@ impl ApplicationHandler for App {
                                     );
                                 }
                             });
+                    }
+                }
+
+                // ── Social emergence overlay ───────────────────────────────────
+                // Bond lines, kingdom auras, group halos. Toggled with B / K.
+                if self.show_bond_lines || self.show_kingdom_colors {
+                    if let Some(ref world) = self.world {
+                        let world = world.read().unwrap();
+                        let screen_w = rs.surface_config.width as f32;
+                        let screen_h = rs.surface_config.height as f32;
+                        let pixels_per_unit = screen_h / self.camera.zoom;
+
+                        // Build per-being kingdom id map (being_idx -> kingdom color [u8;3])
+                        // kingdom_colors[i] = Some([r,g,b]) if being i belongs to a kingdom
+                        let mut kingdom_colors: Vec<Option<[u8; 3]>> =
+                            vec![None; world.beings.count];
+                        if self.show_kingdom_colors {
+                            for kingdom in &self.kingdom_detector.kingdoms {
+                                let kc = kingdom.color;
+                                for s_id in &kingdom.settlements {
+                                    if let Some(s) = self.settlement_detector
+                                        .settlements
+                                        .iter()
+                                        .find(|s| s.id == *s_id)
+                                    {
+                                        for &bi in &s.beings {
+                                            if bi < world.beings.count {
+                                                kingdom_colors[bi] = Some(kc);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Collect bond pairs (capped at 100)
+                        struct BondLine {
+                            ax: f32, ay: f32,
+                            bx: f32, by: f32,
+                            is_trust: bool, // true=trust(green), false=warmth(pink)
+                        }
+                        let mut bond_lines: Vec<BondLine> = Vec::new();
+
+                        if self.show_bond_lines {
+                            'outer: for i in 0..world.beings.count {
+                                if world.beings.states[i] == emergence_core::being::data::BeingState::Dead {
+                                    continue;
+                                }
+                                let slots = &world.beings.relationships[i];
+                                for si in 0..slots.count as usize {
+                                    if bond_lines.len() >= 100 {
+                                        break 'outer;
+                                    }
+                                    let imp = &slots.slots[si];
+                                    let target = imp.target_id as usize;
+                                    // Only draw bond once (i < target to avoid duplicates)
+                                    if target <= i || target >= world.beings.count {
+                                        continue;
+                                    }
+                                    if world.beings.states[target] == emergence_core::being::data::BeingState::Dead {
+                                        continue;
+                                    }
+                                    let strong_trust = imp.trust > 0.5;
+                                    let strong_warmth = imp.warmth > 0.5;
+                                    if !strong_trust && !strong_warmth {
+                                        continue;
+                                    }
+                                    let pa = world.beings.positions[i];
+                                    let pb = world.beings.positions[target];
+                                    // Only draw if both are on-screen (rough check)
+                                    let Some([sax, say]) = self.camera.world_to_screen(pa[0], pa[1], screen_w, screen_h) else { continue };
+                                    let Some([sbx, sby]) = self.camera.world_to_screen(pb[0], pb[1], screen_w, screen_h) else { continue };
+                                    if sax < -50.0 || sax > screen_w + 50.0 || say < -50.0 || say > screen_h + 50.0 {
+                                        continue;
+                                    }
+                                    bond_lines.push(BondLine {
+                                        ax: sax, ay: say,
+                                        bx: sbx, by: sby,
+                                        is_trust: strong_trust,
+                                    });
+                                }
+                            }
+                        }
+
+                        // Collect kingdom aura circles
+                        struct KingdomAura {
+                            sx: f32, sy: f32,
+                            r: f32,
+                            g: f32,
+                            b: f32,
+                        }
+                        let mut auras: Vec<KingdomAura> = Vec::new();
+                        if self.show_kingdom_colors {
+                            let aura_r = 1.5 * pixels_per_unit; // world radius 1.5 → screen px
+                            for (i, kc_opt) in kingdom_colors.iter().enumerate() {
+                                if let Some(kc) = kc_opt {
+                                    if world.beings.states[i] == emergence_core::being::data::BeingState::Dead {
+                                        continue;
+                                    }
+                                    let pos = world.beings.positions[i];
+                                    let Some([sx, sy]) = self.camera.world_to_screen(pos[0], pos[1], screen_w, screen_h) else { continue };
+                                    if sx < -20.0 || sx > screen_w + 20.0 || sy < -20.0 || sy > screen_h + 20.0 {
+                                        continue;
+                                    }
+                                    auras.push(KingdomAura {
+                                        sx, sy,
+                                        r: kc[0] as f32 / 255.0,
+                                        g: kc[1] as f32 / 255.0,
+                                        b: kc[2] as f32 / 255.0,
+                                    });
+                                    let _ = aura_r;
+                                }
+                            }
+                        }
+
+                        // Collect group halos: 3+ beings within 5 cells
+                        struct GroupHalo {
+                            sx: f32, sy: f32,
+                            radius_px: f32,
+                            r: f32, g: f32, b: f32,
+                        }
+                        let mut halos: Vec<GroupHalo> = Vec::new();
+                        if self.show_kingdom_colors {
+                            // Sample every 5th being as potential group center to avoid O(n^2)
+                            let group_radius_world: f32 = 5.0;
+                            let group_radius_sq = group_radius_world * group_radius_world;
+                            // Use settlement centroids as group centers (already computed)
+                            for s in &self.settlement_detector.settlements {
+                                if s.population < 3 {
+                                    continue;
+                                }
+                                // Count beings within 5 cells of centroid
+                                let mut count = 0u32;
+                                let mut sum_x = 0.0f32;
+                                let mut sum_y = 0.0f32;
+                                // Find kingdom color for this settlement
+                                let mut kcolor: Option<[u8; 3]> = None;
+                                'sloop: for kingdom in &self.kingdom_detector.kingdoms {
+                                    if kingdom.settlements.contains(&s.id) {
+                                        kcolor = Some(kingdom.color);
+                                        break 'sloop;
+                                    }
+                                }
+                                for &bi in &s.beings {
+                                    if bi >= world.beings.count { continue; }
+                                    if world.beings.states[bi] == emergence_core::being::data::BeingState::Dead { continue; }
+                                    let p = world.beings.positions[bi];
+                                    let dx = p[0] - s.center[0];
+                                    let dy = p[1] - s.center[1];
+                                    if dx * dx + dy * dy <= group_radius_sq {
+                                        count += 1;
+                                        sum_x += p[0];
+                                        sum_y += p[1];
+                                    }
+                                }
+                                if count < 3 {
+                                    continue;
+                                }
+                                let cx = sum_x / count as f32;
+                                let cy = sum_y / count as f32;
+                                let Some([sx, sy]) = self.camera.world_to_screen(cx, cy, screen_w, screen_h) else { continue };
+                                let halo_r = (count as f32 * 0.5 + 4.0).min(20.0) * pixels_per_unit;
+                                let (hr, hg, hb) = match kcolor {
+                                    Some(kc) => (kc[0] as f32 / 255.0, kc[1] as f32 / 255.0, kc[2] as f32 / 255.0),
+                                    None => (0.5, 0.5, 0.5),
+                                };
+                                halos.push(GroupHalo { sx, sy, radius_px: halo_r, r: hr, g: hg, b: hb });
+                            }
+                        }
+
+                        // Draw all social overlay elements
+                        if !bond_lines.is_empty() || !auras.is_empty() || !halos.is_empty() {
+                            egui::Area::new(egui::Id::new("social_emergence_overlay"))
+                                .fixed_pos(egui::pos2(0.0, 0.0))
+                                .order(egui::Order::Background)
+                                .interactable(false)
+                                .show(&self.egui_ctx, |ui| {
+                                    let painter = ui.painter();
+
+                                    // Group halos (drawn first, behind everything)
+                                    for h in &halos {
+                                        painter.circle_stroke(
+                                            egui::pos2(h.sx, h.sy),
+                                            h.radius_px,
+                                            egui::Stroke::new(
+                                                1.5,
+                                                egui::Color32::from_rgba_unmultiplied(
+                                                    (h.r * 255.0) as u8,
+                                                    (h.g * 255.0) as u8,
+                                                    (h.b * 255.0) as u8,
+                                                    45,
+                                                ),
+                                            ),
+                                        );
+                                    }
+
+                                    // Kingdom aura rings around each being
+                                    let aura_radius = (1.5 * pixels_per_unit).max(3.0);
+                                    for a in &auras {
+                                        painter.circle_stroke(
+                                            egui::pos2(a.sx, a.sy),
+                                            aura_radius,
+                                            egui::Stroke::new(
+                                                1.2,
+                                                egui::Color32::from_rgba_unmultiplied(
+                                                    (a.r * 255.0) as u8,
+                                                    (a.g * 255.0) as u8,
+                                                    (a.b * 255.0) as u8,
+                                                    120,
+                                                ),
+                                            ),
+                                        );
+                                    }
+
+                                    // Bond lines
+                                    for b in &bond_lines {
+                                        let color = if b.is_trust {
+                                            // Trust: green
+                                            egui::Color32::from_rgba_unmultiplied(60, 220, 80, 77)
+                                        } else {
+                                            // Warmth: pink
+                                            egui::Color32::from_rgba_unmultiplied(255, 130, 180, 77)
+                                        };
+                                        painter.line_segment(
+                                            [egui::pos2(b.ax, b.ay), egui::pos2(b.bx, b.by)],
+                                            egui::Stroke::new(1.0, color),
+                                        );
+                                    }
+                                });
+                        }
                     }
                 }
 

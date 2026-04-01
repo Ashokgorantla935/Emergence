@@ -26,6 +26,20 @@ use std::thread;
 // Public API types
 // ---------------------------------------------------------------------------
 
+/// Biome type at the camera position — drives ambient layer mixing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BiomeAmbience {
+    Grassland,
+    Forest,
+    Mountain,
+    Desert,
+    Water,
+}
+
+impl Default for BiomeAmbience {
+    fn default() -> Self { BiomeAmbience::Grassland }
+}
+
 /// Camera and world context for ambient selection.
 #[derive(Clone, Copy, Debug)]
 pub struct AudioContext {
@@ -41,6 +55,8 @@ pub struct AudioContext {
     pub weather_active: bool,
     /// Whether any kingdom is at war near camera
     pub war_nearby:   bool,
+    /// Biome under the camera center
+    pub biome: BiomeAmbience,
 }
 
 impl Default for AudioContext {
@@ -52,6 +68,7 @@ impl Default for AudioContext {
             near_settlement: false,
             weather_active:  false,
             war_nearby:      false,
+            biome:           BiomeAmbience::Grassland,
         }
     }
 }
@@ -278,6 +295,10 @@ struct AudioThreadState {
     /// Ambient loop counter — triggers a new ambient drone every N ms
     ambient_timer: std::time::Instant,
     ambient_interval_secs: f32,
+    /// Last known biome for layer mixing
+    current_biome: BiomeAmbience,
+    /// Simple LCG seed for pitch jitter
+    rng_seed: u64,
 }
 
 const CROSSFADE_TICKS: u32 = 120; // ~2 seconds at 60fps
@@ -297,16 +318,44 @@ impl AudioThreadState {
             ambient_sink,
             ambient_timer: std::time::Instant::now(),
             ambient_interval_secs: 4.0,
+            current_biome: BiomeAmbience::Grassland,
+            rng_seed: 0x517cc1b727220a95,
         }
+    }
+
+    /// Xorshift64 RNG — returns a value in [0.0, 1.0).
+    fn rand_f32(&mut self) -> f32 {
+        self.rng_seed ^= self.rng_seed << 13;
+        self.rng_seed ^= self.rng_seed >> 7;
+        self.rng_seed ^= self.rng_seed << 17;
+        (self.rng_seed as u32) as f32 / u32::MAX as f32
+    }
+
+    /// Return a pitch multiplier in [0.9, 1.1] for ±10% jitter.
+    fn pitch_jitter(&mut self) -> f32 {
+        0.9 + self.rand_f32() * 0.2
     }
 
     fn apply_context(&mut self, ctx: AudioContext) {
         let is_night = ctx.time_of_day < 0.15 || ctx.time_of_day > 0.85;
 
-        let nature_w     = if ctx.weather_active { 0.3 } else { 1.0 };
+        // Base nature weight — biome modifies this
+        let biome_nature_boost = match ctx.biome {
+            BiomeAmbience::Forest    => 1.4,  // strong bird/nature layer
+            BiomeAmbience::Grassland => 1.0,
+            BiomeAmbience::Water     => 0.6,  // less nature, more ambient rumble below
+            BiomeAmbience::Desert    => 0.3,  // sparse nature
+            BiomeAmbience::Mountain  => 0.5,  // wind dominates
+        };
+
+        let nature_base: f32 = if ctx.weather_active { 0.3 } else { 1.0 };
+        let nature_w     = (nature_base * biome_nature_boost).min(1.0);
         let night_w      = if is_night { 0.8 } else { 0.0 };
         let settlement_w = if ctx.near_settlement { 0.6 } else { 0.0 };
         let weather_w    = if ctx.weather_active { 0.9 } else { 0.0 };
+
+        // Track biome for play_ambient_tick
+        self.current_biome = ctx.biome;
 
         for (i, w) in [nature_w, night_w, settlement_w, weather_w].iter().enumerate() {
             if (self.layers[i].weight - w).abs() > 0.01 {
@@ -332,8 +381,8 @@ impl AudioThreadState {
         if amb_vol < 0.01 { return; }
 
         // Determine dominant layer
-        let nature_w = self.layers[0].weight;
-        let night_w  = self.layers[1].weight;
+        let nature_w  = self.layers[0].weight;
+        let night_w   = self.layers[1].weight;
         let weather_w = self.layers[3].weight;
 
         let base_vol = amb_vol * 0.3; // quiet ambient background
@@ -341,18 +390,56 @@ impl AudioThreadState {
         if weather_w > 0.5 {
             // Rain/storm: broadband noise
             let samples = synth_noise_burst(2.0, base_vol * weather_w);
-            let source = to_rodio_source(samples, 1.0);
-            sink.append(source);
+            sink.append(to_rodio_source(samples, 1.0));
         } else if night_w > 0.5 {
             // Night: higher freq crickets-like tone
             let samples = synth_sine_envelope(800.0, 820.0, 1.5, base_vol * night_w, 0.1, 0.3);
-            let source = to_rodio_source(samples, 1.0);
-            sink.append(source);
-        } else if nature_w > 0.3 {
-            // Nature: soft low drone
-            let samples = synth_ambient_drone(55.0, 3.0, base_vol * nature_w);
-            let source = to_rodio_source(samples, 1.0);
-            sink.append(source);
+            sink.append(to_rodio_source(samples, 1.0));
+        } else {
+            // Biome-specific ambient character
+            match self.current_biome {
+                BiomeAmbience::Forest => {
+                    // Rich nature: layered drone + higher-freq bird-like shimmer
+                    if nature_w > 0.3 {
+                        let mut s = synth_ambient_drone(55.0, 3.0, base_vol * nature_w * 0.8);
+                        let shimmer = synth_sine_envelope(1200.0, 1400.0, 0.4, base_vol * 0.15, 0.1, 0.4);
+                        for (a, b) in s.iter_mut().zip(shimmer.iter()) { *a += b; }
+                        sink.append(to_rodio_source(s, 1.0));
+                    }
+                }
+                BiomeAmbience::Water => {
+                    // Low wave-like rumble: slow LFO on drone
+                    let mut s = synth_ambient_drone(40.0, 3.5, base_vol * 0.5);
+                    let noise = synth_noise_burst(3.5, base_vol * 0.15);
+                    for (a, b) in s.iter_mut().zip(noise.iter()) { *a += b; }
+                    sink.append(to_rodio_source(s, 1.0));
+                }
+                BiomeAmbience::Desert => {
+                    // Wind: filtered noise, no drone
+                    let samples = synth_noise_burst(2.5, base_vol * 0.35);
+                    sink.append(to_rodio_source(samples, 1.0));
+                }
+                BiomeAmbience::Mountain => {
+                    // High wind + distant echo-like tone
+                    let mut s = synth_noise_burst(2.0, base_vol * 0.4);
+                    let echo = synth_sine_envelope(300.0, 250.0, 1.0, base_vol * 0.1, 0.2, 0.6);
+                    // Offset echo by 0.5s
+                    let gap = (SAMPLE_RATE as f32 * 0.5) as usize;
+                    let total = s.len().max(gap + echo.len());
+                    s.resize(total, 0.0);
+                    for (i, b) in echo.iter().enumerate() {
+                        if gap + i < s.len() { s[gap + i] += b; }
+                    }
+                    sink.append(to_rodio_source(s, 1.0));
+                }
+                BiomeAmbience::Grassland => {
+                    // Default: soft low drone
+                    if nature_w > 0.3 {
+                        let samples = synth_ambient_drone(55.0, 3.0, base_vol * nature_w);
+                        sink.append(to_rodio_source(samples, 1.0));
+                    }
+                }
+            }
         }
     }
 
@@ -456,39 +543,52 @@ impl AudioThreadState {
         sink.append(source);
     }
 
-    fn play_world_event(&self, sound: WorldEventSound) {
-        let Some(ref sink) = self.sink else { return; };
+    fn play_world_event(&mut self, sound: WorldEventSound) {
+        if self.sink.is_none() { return; }
         let vol = self.volumes.effective_master() * self.volumes.sfx();
         if vol < 0.01 { return; }
 
+        // ±10% pitch jitter (computed before sink borrow to satisfy borrow checker)
+        let jitter = self.pitch_jitter();
+        let Some(ref sink) = self.sink else { return; };
+
         let samples = match sound {
             WorldEventSound::Birth => {
-                // Rising tone: 440→880 Hz, 200ms
-                synth_sine_envelope(440.0, 880.0, 0.2, vol * 0.35, 0.1, 0.5)
+                // Rising tone: 440→880 Hz, 200ms — jitter shifts base freq
+                synth_sine_envelope(440.0 * jitter, 880.0 * jitter, 0.2, vol * 0.35, 0.1, 0.5)
             }
             WorldEventSound::Death => {
                 // Falling tone: 440→220 Hz, 300ms
-                synth_sine_envelope(440.0, 220.0, 0.3, vol * 0.3, 0.05, 0.6)
+                synth_sine_envelope(440.0 * jitter, 220.0 * jitter, 0.3, vol * 0.3, 0.05, 0.6)
             }
             WorldEventSound::Combat => {
-                // Short white noise burst: 100ms
+                // Short white noise burst: 100ms (noise has no pitch — skip jitter)
                 synth_noise_burst(0.1, vol * 0.45)
             }
             WorldEventSound::KingdomRise => {
-                // Triumphant rising arpeggio-like sweep
+                // Triumphant rising sweep + ascending arpeggio motif (C4 E4 G4 C5)
                 let mut s = synth_sine_envelope(261.0, 523.0, 0.6, vol * 0.5, 0.1, 0.4);
                 let s2 = synth_sine_envelope(330.0, 660.0, 0.6, vol * 0.3, 0.15, 0.4);
                 for (a, b) in s.iter_mut().zip(s2.iter()) { *a += b; }
+                // Brief ascending arpeggio: C4, E4, G4, C5
+                let note_freqs = [261.63_f32, 329.63, 392.0, 523.25];
+                let gap_len = (SAMPLE_RATE as f32 * 0.02) as usize;
+                let mut motif: Vec<f32> = Vec::new();
+                for &freq in &note_freqs {
+                    let note_s = synth_sine_envelope(freq, freq, 0.12, vol * 0.35, 0.05, 0.4);
+                    motif.extend(note_s);
+                    motif.extend(vec![0.0f32; gap_len]);
+                }
+                s.extend(motif);
                 s
             }
             WorldEventSound::KingdomFall => {
                 // Dark descending tone
-                synth_sine_envelope(220.0, 55.0, 0.8, vol * 0.5, 0.05, 0.5)
+                synth_sine_envelope(220.0 * jitter, 55.0 * jitter, 0.8, vol * 0.5, 0.05, 0.5)
             }
         };
 
-        let source = to_rodio_source(samples, 1.0);
-        sink.append(source);
+        sink.append(to_rodio_source(samples, 1.0));
     }
 
     fn play_ui(&self, sound: UiSound) {
@@ -560,9 +660,9 @@ impl SoundEngine {
 
                 let mut state = AudioThreadState::new(sink, ambient_sink);
 
-                // Prime ambient on start
-                // Set nature layer active immediately so first tick plays sound
+                // Prime ambient on start — set nature layer and play immediately
                 state.layers[0].weight = 1.0;
+                state.play_ambient_tick();
 
                 // Startup confirmation: 200ms sine at 440 Hz to confirm audio pipeline is alive.
                 if let Some(ref sink) = state.sink {

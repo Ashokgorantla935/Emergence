@@ -528,62 +528,187 @@ impl TopBar {
 }
 
 // ---------------------------------------------------------------------------
-// Onboarding tooltip (shown at 20s with no interaction)
+// Onboarding overlay (shown immediately on first load, tick < 300 or until clicked)
 // ---------------------------------------------------------------------------
 
 pub struct OnboardingTooltip {
-    idle_secs: f32,
+    /// Whether the overlay is currently visible.
     shown: bool,
+    /// Once dismissed it will not auto-show again (? key can re-show).
     dismissed: bool,
-    shown_secs: f32,
+    /// First god power hint: shown once when player selects a power.
+    god_power_hint_shown: bool,
+    god_power_hint_dismissed: bool,
 }
 
 impl OnboardingTooltip {
     pub fn new() -> Self {
-        OnboardingTooltip { idle_secs: 0.0, shown: false, dismissed: false, shown_secs: 0.0 }
+        OnboardingTooltip {
+            shown: true,
+            dismissed: false,
+            god_power_hint_shown: false,
+            god_power_hint_dismissed: false,
+        }
     }
 
-    pub fn tick(&mut self, dt: f32, had_interaction: bool) {
+    /// Call each frame from the Playing screen.
+    /// `sim_tick` — current world tick. `clicked` — any mouse click this frame.
+    pub fn tick(&mut self, sim_tick: u32, clicked: bool) {
         if self.dismissed {
             return;
         }
-        if had_interaction {
-            self.idle_secs = 0.0;
-        } else {
-            self.idle_secs += dt;
+        // Auto-dismiss after 300 ticks.
+        if sim_tick >= 300 {
+            self.dismissed = true;
+            self.shown = false;
+            return;
         }
-        if self.idle_secs >= 20.0 {
-            self.shown = true;
-        }
-        // Auto-dismiss after 5 seconds of being shown
-        if self.shown {
-            self.shown_secs += dt;
-            if self.shown_secs >= 5.0 {
-                self.dismissed = true;
-            }
+        // Click anywhere to dismiss.
+        if clicked && self.shown {
+            self.dismissed = true;
+            self.shown = false;
         }
     }
 
+    /// Re-show overlay (bound to ? key).
+    pub fn toggle(&mut self) {
+        self.shown = !self.shown;
+        if self.shown {
+            self.dismissed = false;
+        }
+    }
+
+    /// Notify that the player just selected a god power for the first time.
+    pub fn notify_god_power_selected(&mut self) {
+        if !self.god_power_hint_dismissed {
+            self.god_power_hint_shown = true;
+        }
+    }
+
+    pub fn dismiss_god_power_hint(&mut self) {
+        self.god_power_hint_shown = false;
+        self.god_power_hint_dismissed = true;
+    }
+
     pub fn show(&mut self, ctx: &egui::Context) {
-        if !self.shown || self.dismissed {
-            return;
+        // Main onboarding overlay
+        if self.shown && !self.dismissed {
+            let mut close = false;
+            egui::Window::new("Welcome to Emergence")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .frame(egui::Frame::window(&ctx.style()).fill(
+                    egui::Color32::from_rgba_unmultiplied(15, 15, 20, 220),
+                ))
+                .show(ctx, |ui| {
+                    ui.set_min_width(340.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+
+                    egui::Grid::new("onboarding_grid")
+                        .num_columns(2)
+                        .spacing([12.0, 4.0])
+                        .show(ui, |ui| {
+                            ui.label(egui::RichText::new("Left-click + drag").strong());
+                            ui.label("Pan camera");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("Scroll").strong());
+                            ui.label("Zoom");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("WASD").strong());
+                            ui.label("Pan camera");
+                            ui.end_row();
+                        });
+
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("God Powers").strong());
+                    ui.label("Click a power on the left panel, then click on the world");
+                    ui.add_space(8.0);
+
+                    egui::Grid::new("onboarding_keys")
+                        .num_columns(2)
+                        .spacing([12.0, 4.0])
+                        .show(ui, |ui| {
+                            ui.label(egui::RichText::new("S").strong());
+                            ui.label("Statistics");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("N").strong());
+                            ui.label("News Feed");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("I").strong());
+                            ui.label("Inspector (click a being)");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("F1–F7").strong());
+                            ui.label("Signal heatmaps");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("M").strong());
+                            ui.label("Mute audio");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("B").strong());
+                            ui.label("Bond lines");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("K").strong());
+                            ui.label("Kingdom colors");
+                            ui.end_row();
+                        });
+
+                    ui.add_space(10.0);
+                    if ui.button("Click anywhere to dismiss").clicked() {
+                        close = true;
+                    }
+                });
+            if close {
+                self.dismissed = true;
+                self.shown = false;
+            }
         }
 
-        egui::Window::new("Getting Started")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-20.0, -20.0))
-            .show(ctx, |ui| {
-                ui.label("Watch the two tribes. Will they meet?");
-                ui.add_space(4.0);
-                ui.label("WASD / drag to pan.  Scroll to zoom.");
-                ui.label("Click a being to inspect it.");
-                ui.label("Space to pause.  1-6 to change speed.");
-                ui.label("Esc for the menu.");
-                ui.add_space(8.0);
-                if ui.button("Got it").clicked() {
-                    self.dismissed = true;
-                }
-            });
+        // Persistent bottom-left hint (shown after overlay dismissed)
+        if self.dismissed {
+            egui::Area::new(egui::Id::new("controls_hint"))
+                .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(8.0, -8.0))
+                .interactable(false)
+                .show(ctx, |ui| {
+                    ui.label(
+                        egui::RichText::new("? for controls")
+                            .color(egui::Color32::from_rgba_unmultiplied(200, 200, 200, 80))
+                            .small(),
+                    );
+                });
+        }
+
+        // God power hint near cursor
+        if self.god_power_hint_shown {
+            let mut close = false;
+            egui::Window::new("##god_hint")
+                .title_bar(false)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -60.0))
+                .frame(egui::Frame::window(&ctx.style()).fill(
+                    egui::Color32::from_rgba_unmultiplied(30, 30, 10, 200),
+                ))
+                .show(ctx, |ui| {
+                    ui.label(
+                        egui::RichText::new("Click on the world to use this power")
+                            .color(egui::Color32::from_rgb(255, 220, 100)),
+                    );
+                    if ui.small_button("x").clicked() {
+                        close = true;
+                    }
+                });
+            if close {
+                self.dismiss_god_power_hint();
+            }
+        }
     }
 }

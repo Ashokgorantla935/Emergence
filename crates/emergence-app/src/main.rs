@@ -118,6 +118,9 @@ struct App {
     pending_new_game: bool,
     pending_quit: bool,
     pending_scenario: Option<(ScenarioId, MapSelection, u32, FaunaDensity)>,
+    // Last launched scenario — used by "Regenerate World" to restart with a new seed.
+    // Box avoids storing a large Clone inline.
+    last_scenario: Option<Box<(ScenarioId, MapSelection, u32, FaunaDensity)>>,
 
     // God tools
     god_tool_state: GodToolState,
@@ -272,6 +275,7 @@ impl App {
             pending_new_game: false,
             pending_quit: false,
             pending_scenario: None,
+            last_scenario: None::<Box<_>>,
             god_tool_state: GodToolState::new(),
             settlement_detector: SettlementDetector::new(),
             kingdom_detector: KingdomDetector::new(),
@@ -299,6 +303,7 @@ impl App {
 
     /// Launch a new game from a scenario.
     fn start_scenario(&mut self, id: ScenarioId, map: MapSelection, population: u32, fauna_density: FaunaDensity) {
+        self.last_scenario = Some(Box::new((id, map.clone(), population, fauna_density)));
         let mut scenario = ScenarioConfig::new(id);
         // Apply the map selection chosen in the UI (overrides scenario default).
         if !matches!(map, MapSelection::Default) {
@@ -866,6 +871,26 @@ impl ApplicationHandler for App {
 
                         let mut w = world.write().unwrap();
                         for action in self.god_tool_state.action_queue.drain(..) {
+                            use emergence_core::god_action::{GodAction, ResetKind};
+                            if let GodAction::WorldReset { kind } = &action {
+                                match kind {
+                                    ResetKind::Hard => {
+                                        // Re-launch same scenario with a new seed
+                                        if let Some(ref last) = self.last_scenario {
+                                            let (id, map, pop, fauna) = *last.clone();
+                                            self.pending_scenario = Some((id, map, pop, fauna));
+                                        }
+                                    }
+                                    ResetKind::Soft => {
+                                        // Keep terrain, wipe beings
+                                        w.beings.hot.alive_count = 0;
+                                        for i in 0..w.beings.hot.count {
+                                            w.beings.hot.states[i] = emergence_core::being::data::BeingState::Dead;
+                                        }
+                                    }
+                                }
+                                continue;
+                            }
                             w.god_queue.push(action);
                         }
                     }

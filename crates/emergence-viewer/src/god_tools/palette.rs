@@ -1,6 +1,7 @@
 use egui::{Color32, RichText, Ui};
 use super::mod_types::{GodToolState, ToolTab, PowerDef};
 use super::power_catalog::POWER_CATALOG;
+use emergence_core::god_action::{GodAction, ResetKind};
 
 /// Left-panel egui rendering: collapsible category tree + 78 power buttons.
 pub fn render_palette(ui: &mut Ui, state: &mut GodToolState) {
@@ -27,8 +28,7 @@ pub fn render_palette(ui: &mut Ui, state: &mut GodToolState) {
                     Color32::from_rgb(180, 80, 200));
                 render_tab_section(ui, state, ToolTab::Kingdom, "[K] Kingdom",
                     Color32::from_rgb(80, 200, 200));
-                render_tab_section(ui, state, ToolTab::World, "[L] World",
-                    Color32::from_rgb(180, 180, 180));
+                render_world_section(ui, state);
             });
 
         ui.separator();
@@ -287,6 +287,58 @@ fn render_power_button(ui: &mut Ui, state: &mut GodToolState, power: &PowerDef) 
                 .text(format!("{}t", remaining))
                 .fill(Color32::from_rgb(80, 60, 10)),
         );
+    }
+}
+
+/// World tab: standard powers + a top-level "Regenerate World" button.
+fn render_world_section(ui: &mut Ui, state: &mut GodToolState) {
+    let tab = ToolTab::World;
+    let is_active_tab = state.active_tab == tab;
+    let color = Color32::from_rgb(180, 180, 180);
+    let id = ui.make_persistent_id("[L] World");
+
+    let mut cs = egui::collapsing_header::CollapsingState::load_with_default_open(
+        ui.ctx(), id, false,
+    );
+    if is_active_tab {
+        cs.set_open(true);
+        cs.store(ui.ctx());
+    }
+
+    let (toggle_resp, _header_resp, _body) = cs.show_header(ui, |ui| {
+        ui.label(RichText::new("[L] World").color(color).strong());
+    }).body(|ui| {
+        // Standard catalog powers for this tab
+        let powers: Vec<&PowerDef> = POWER_CATALOG
+            .iter()
+            .filter(|p| p.tab == tab)
+            .collect();
+        ui.vertical(|ui| {
+            for power in powers {
+                render_power_button(ui, state, power);
+            }
+        });
+
+        ui.add_space(4.0);
+        ui.separator();
+
+        // Regenerate World — hard reset with new random seed
+        let btn = egui::Button::new(
+            RichText::new("Regenerate World")
+                .color(Color32::from_rgb(255, 160, 60))
+                .strong(),
+        )
+        .fill(Color32::from_rgb(50, 30, 10))
+        .stroke(egui::Stroke::new(1.5, Color32::from_rgb(200, 100, 30)))
+        .min_size(egui::vec2(178.0, 28.0));
+
+        if ui.add(btn).on_hover_text("Destroy this world and generate a brand-new one with the same settings").clicked() {
+            state.action_queue.push(GodAction::WorldReset { kind: ResetKind::Hard });
+        }
+    });
+
+    if toggle_resp.clicked() {
+        state.active_tab = tab;
     }
 }
 

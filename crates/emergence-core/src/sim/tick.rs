@@ -11,6 +11,7 @@ use crate::being::actions::{score_actions, ScoredAction};
 use crate::being::data::*;
 use crate::being::emotions::{decay_emotions, trigger_emotion, update_emotions_from_needs};
 use crate::being::lifecycle::{age_beings, age_beings_no_death, check_death_conditions, drift_personality_humans, generate_personality};
+use crate::being::names::generate_name;
 use crate::being::needs::decay_needs;
 use crate::being::social::{deposit_emotion_signals, init_kinship_warmth};
 use crate::sim::movement::execute_action;
@@ -579,9 +580,14 @@ fn process_births(world: &mut World) {
             continue;
         }
 
-        // Find any adult partner nearby within 12 cells (no relationship required)
+        // Birth cooldown: 1000 ticks (~2 min at 8t/s) per parent
+        if i < world.beings.last_birth_tick.len() && tick.saturating_sub(world.beings.last_birth_tick[i]) < 1000 {
+            continue;
+        }
+
+        // Find any adult partner nearby within 8 cells (no relationship required)
         let pos = world.beings.positions[i];
-        let nearby = world.spatial.query_radius_with_positions(pos[0], pos[1], 12.0, &world.beings.positions);
+        let nearby = world.spatial.query_radius_with_positions(pos[0], pos[1], 8.0, &world.beings.positions);
         for partner in nearby {
             // Only check from the lower index to prevent both parents triggering birth
             if partner <= i {
@@ -592,6 +598,11 @@ fn process_births(world: &mut World) {
                 || world.beings.creature_type[partner] != CreatureType::Human as u8
                 || world.beings.life_phase(partner) != LifePhase::Adult
             {
+                continue;
+            }
+
+            // Partner cooldown check
+            if partner < world.beings.last_birth_tick.len() && tick.saturating_sub(world.beings.last_birth_tick[partner]) < 1000 {
                 continue;
             }
 
@@ -606,13 +617,13 @@ fn process_births(world: &mut World) {
                 continue;
             }
 
-            // Stochastic birth: base 0.5% per tick per eligible pair, scaled by carrying capacity.
-            // Carrying capacity = map_size / 10. Uses human-only count so fauna don't inflate the cap.
+            // Stochastic birth: base 0.08% per tick per eligible pair, scaled by carrying capacity.
+            // Carrying capacity = map_size / 40. Uses human-only count so fauna don't inflate the cap.
             // At low population: near full rate. Near capacity: rate drops to near zero.
             let human_alive = world.beings.human_count as f32;
-            let carrying_capacity = (world.config.size.0 * world.config.size.1) as f32 / 10.0;
+            let carrying_capacity = (world.config.size.0 * world.config.size.1) as f32 / 40.0;
             let density_factor = (1.0 - human_alive / carrying_capacity).max(0.0);
-            let birth_prob = 0.005 * density_factor;
+            let birth_prob = 0.0008 * density_factor;
             if world.rng.f32() > birth_prob {
                 continue;
             }
@@ -647,7 +658,17 @@ fn process_births(world: &mut World) {
 
     // Spawn new beings
     for (pos, personality, lifespan, parents) in new_beings {
+        // Set birth cooldown on both parents BEFORE spawn (spawn grows vecs)
+        let pa = parents[0] as usize;
+        let pb = parents[1] as usize;
+        if pa < world.beings.last_birth_tick.len() {
+            world.beings.last_birth_tick[pa] = tick;
+        }
+        if pb < world.beings.last_birth_tick.len() {
+            world.beings.last_birth_tick[pb] = tick;
+        }
         let idx = world.beings.spawn(pos, personality, lifespan, parents);
+        world.beings.names[idx] = generate_name(&mut world.rng);
         // New births are human by default; keep human_count in sync so capacity check stays accurate.
         world.beings.human_count += 1;
         // Kinship warmth: siblings start with warmth 0.3 / trust 0.2

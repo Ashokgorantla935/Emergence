@@ -1,4 +1,5 @@
 use crate::being::data::CreatureType;
+use crate::being::names::generate_name;
 use crate::world::climate::{Season, WeatherKind};
 use crate::world::terrain::Biome;
 use crate::sim::world_state::World;
@@ -395,7 +396,8 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         // ── Creation ──────────────────────────────────────────────────────────
         GodAction::SpawnBeing { pos, personality, lifespan } => {
             if !world.terrain.is_water_f(pos[0], pos[1]) {
-                world.beings.spawn(pos, personality, lifespan, [u32::MAX, u32::MAX]);
+                let idx = world.beings.spawn(pos, personality, lifespan, [u32::MAX, u32::MAX]);
+                world.beings.names[idx] = generate_name(&mut world.rng);
             }
         }
 
@@ -411,7 +413,8 @@ fn apply_god_action(world: &mut World, action: GodAction) {
             };
             if !world.terrain.is_water_f(pos[0], pos[1]) {
                 let lifespan = 86000 + world.rng.u32(0..58001);
-                world.beings.spawn(pos, personality, lifespan, [u32::MAX, u32::MAX]);
+                let idx = world.beings.spawn(pos, personality, lifespan, [u32::MAX, u32::MAX]);
+                world.beings.names[idx] = generate_name(&mut world.rng);
             }
         }
 

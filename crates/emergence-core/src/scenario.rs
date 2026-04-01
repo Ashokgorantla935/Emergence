@@ -46,7 +46,7 @@ impl ScenarioId {
     }
 
     pub fn is_default(self) -> bool {
-        self == ScenarioId::TwoTribes
+        self == ScenarioId::Experiment
     }
 }
 
@@ -125,7 +125,7 @@ fn scenario_genesis() -> ScenarioConfig {
         id: ScenarioId::Genesis,
         world: WorldConfig {
             size: (1024, 1024),
-            initial_beings: 1200,
+            initial_beings: 15,
             signal_channels: 7,
             terrain_seed: fastrand::u64(..),
             has_water: true,
@@ -144,13 +144,13 @@ fn scenario_genesis() -> ScenarioConfig {
 }
 
 fn scenario_two_tribes() -> ScenarioConfig {
-    // Two groups of ~500 spawn on opposite sides; camera positioned between them.
+    // Two groups of 10 spawn on opposite sides; camera positioned between them.
     // This is the DEFAULT scenario (Tarn Adams approved).
     ScenarioConfig {
         id: ScenarioId::TwoTribes,
         world: WorldConfig {
             size: (1024, 1024),
-            initial_beings: 1000,
+            initial_beings: 20,
             signal_channels: 7,
             terrain_seed: fastrand::u64(..),
             has_water: true,
@@ -174,7 +174,7 @@ fn scenario_island() -> ScenarioConfig {
         id: ScenarioId::Island,
         world: WorldConfig {
             size: (1024, 1024),
-            initial_beings: 600,
+            initial_beings: 10,
             signal_channels: 7,
             terrain_seed: fastrand::u64(..),
             has_water: true,
@@ -197,7 +197,7 @@ fn scenario_harsh_winter() -> ScenarioConfig {
         id: ScenarioId::HarshWinter,
         world: WorldConfig {
             size: (1024, 1024),
-            initial_beings: 1000,
+            initial_beings: 30,
             signal_channels: 7,
             terrain_seed: fastrand::u64(..),
             has_water: true,
@@ -220,7 +220,7 @@ fn scenario_paradise() -> ScenarioConfig {
         id: ScenarioId::Paradise,
         world: WorldConfig {
             size: (1024, 1024),
-            initial_beings: 1000,
+            initial_beings: 8,
             signal_channels: 7,
             terrain_seed: fastrand::u64(..),
             has_water: true,
@@ -243,7 +243,7 @@ fn scenario_experiment() -> ScenarioConfig {
         id: ScenarioId::Experiment,
         world: WorldConfig {
             size: (1024, 1024),
-            initial_beings: 800,
+            initial_beings: 5,
             signal_channels: 7,
             terrain_seed: fastrand::u64(..),
             has_water: true,

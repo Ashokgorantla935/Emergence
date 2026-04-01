@@ -2,7 +2,8 @@
 /// notable being tracker, and commentary system.
 /// Wires into the existing news_feed.rs UI panel.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use emergence_core::being::data::Beings;
 use emergence_core::sim::world_state::{Event, EventCause, EventLog, EventType};
 use emergence_core::sim::event_log::ImportanceTier;
 use super::kingdom::KingdomDetector;
@@ -45,8 +46,11 @@ pub struct NewsFeedSystem {
     notable_beings: Vec<NotableBeing>,
     /// Mass-death accumulator: (start_tick, count)
     mass_death_window: Option<(u32, u32)>,
+    #[allow(dead_code)]
     high_event_count_since: u32,
     last_high_event_tick: u32,
+    /// Rate limiter: maps EventType discriminant -> last tick shown.
+    rate_limit: HashMap<u8, u32>,
 }
 
 impl NewsFeedSystem {
@@ -63,6 +67,7 @@ impl NewsFeedSystem {
             mass_death_window: None,
             high_event_count_since: 0,
             last_high_event_tick: 0,
+            rate_limit: HashMap::new(),
         }
     }
 
@@ -70,6 +75,7 @@ impl NewsFeedSystem {
     pub fn update(
         &mut self,
         events: &EventLog,
+        beings: &Beings,
         settlement_detector: &SettlementDetector,
         kingdom_detector: &KingdomDetector,
         tick: u32,
@@ -96,32 +102,85 @@ impl NewsFeedSystem {
             return;
         }
 
-        let mut emitted_this_tick = 0;
+        // --- Pass 1: bin events by type ---
+        const COLLAPSIBLE: &[EventType] = &[
+            EventType::Born,
+            EventType::BuildingComplete,
+            EventType::SharedFood,
+            EventType::Fled,
+        ];
+        const RATE_LIMIT_TICKS: u32 = 10;
 
-        for idx in new_event_indices {
-            if emitted_this_tick >= MAX_PER_TICK {
-                break;
-            }
-            let event = &events.events[idx];
-            // Track deaths for mass-death detection regardless of tier
+        let mut grouped: HashMap<u8, (u32, u32, usize)> = HashMap::new();
+        let mut unique_events: Vec<usize> = Vec::new();
+
+        for idx in &new_event_indices {
+            let event = &events.events[*idx];
             if event.event_type == EventType::Died {
                 self.track_death(event.tick);
             }
-
             let tier = ImportanceTier::of(event.event_type);
             if tier == ImportanceTier::Low {
                 continue;
             }
+            let key = event.event_type as u8;
+            if COLLAPSIBLE.contains(&event.event_type) {
+                let entry = grouped.entry(key).or_insert((event.tick, 0, *idx));
+                entry.1 += 1;
+            } else {
+                unique_events.push(*idx);
+            }
+        }
 
-            if let Some(item) = self.format_event(
-                event,
-                tier,
-                settlement_detector,
-                kingdom_detector,
-            ) {
-                if tier >= ImportanceTier::High {
-                    self.last_high_event_tick = tick;
+        let mut emitted_this_tick = 0;
+
+        // --- Pass 2: emit grouped summaries ---
+        for (key, (first_tick, count, sample_idx)) in &grouped {
+            if emitted_this_tick >= MAX_PER_TICK { break; }
+            if let Some(&last_tick) = self.rate_limit.get(key) {
+                if tick.wrapping_sub(last_tick) < RATE_LIMIT_TICKS { continue; }
+            }
+            let event = &events.events[*sample_idx];
+            let tier = ImportanceTier::of(event.event_type);
+            let text = if *count == 1 {
+                match self.format_event(event, beings, tier, settlement_detector, kingdom_detector) {
+                    Some(item) => item.text,
+                    None => continue,
                 }
+            } else {
+                match event.event_type {
+                    EventType::Born => format!("{} beings were born.", count),
+                    EventType::BuildingComplete => format!("{} structures completed.", count),
+                    EventType::SharedFood => format!("{} food shared.", count),
+                    EventType::Fled => format!("{} beings fled.", count),
+                    _ => format!("{} events.", count),
+                }
+            };
+            let item = RichNewsItem {
+                tick: *first_tick, text, tier,
+                world_pos: Some(event.location),
+                pinned: false, is_commentary: false, jump_being: None,
+            };
+            if tier >= ImportanceTier::High { self.last_high_event_tick = tick; }
+            self.rate_limit.insert(*key, tick);
+            self.push_message(item);
+            emitted_this_tick += 1;
+        }
+
+        // --- Pass 3: emit unique events ---
+        for idx in &unique_events {
+            if emitted_this_tick >= MAX_PER_TICK { break; }
+            let event = &events.events[*idx];
+            let tier = ImportanceTier::of(event.event_type);
+            let key = event.event_type as u8;
+            if tier < ImportanceTier::High {
+                if let Some(&last_tick) = self.rate_limit.get(&key) {
+                    if tick.wrapping_sub(last_tick) < RATE_LIMIT_TICKS { continue; }
+                }
+            }
+            if let Some(item) = self.format_event(event, beings, tier, settlement_detector, kingdom_detector) {
+                if tier >= ImportanceTier::High { self.last_high_event_tick = tick; }
+                self.rate_limit.insert(key, tick);
                 self.push_message(item);
                 emitted_this_tick += 1;
             }
@@ -203,12 +262,13 @@ impl NewsFeedSystem {
     fn format_event(
         &self,
         event: &Event,
+        beings: &Beings,
         tier: ImportanceTier,
         settlement_detector: &SettlementDetector,
         kingdom_detector: &KingdomDetector,
     ) -> Option<RichNewsItem> {
-        let actor_name = self.being_name(event.actor_id as usize);
-        let target_name = self.being_name(event.target_id as usize);
+        let actor_name = self.being_name(event.actor_id as usize, beings);
+        let target_name = self.being_name(event.target_id as usize, beings);
 
         let text = match event.event_type {
             EventType::Born => format!(
@@ -384,11 +444,14 @@ impl NewsFeedSystem {
         })
     }
 
-    fn being_name(&self, being_idx: usize) -> String {
+    fn being_name(&self, being_idx: usize, beings: &Beings) -> String {
+        if being_idx < beings.names.len() && !beings.names[being_idx].is_empty() {
+            return beings.names[being_idx].clone();
+        }
         if let Some(nb) = self.notable_beings.iter().find(|nb| nb.being_idx == being_idx) {
             nb.name.clone()
         } else {
-            format!("Being #{}", being_idx)
+            super::kingdom::leader_being_name(being_idx as u32)
         }
     }
 

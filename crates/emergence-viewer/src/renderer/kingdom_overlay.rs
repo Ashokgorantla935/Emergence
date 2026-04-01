@@ -282,7 +282,7 @@ impl KingdomOverlay {
         });
 
         KingdomOverlay {
-            show_borders: true,   // ON by default per spec review
+            show_borders: false,  // OFF by default — circles confuse users; toggle with K
             show_loyalty_heatmap: false,
             line_buffer,
             quad_buffer,

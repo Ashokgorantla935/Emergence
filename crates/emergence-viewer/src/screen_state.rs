@@ -239,25 +239,64 @@ pub struct ScenarioSelectUi {
     pub map_picker: MapPickerState,
     /// One 128x128 Color32 pixel buffer per map (in map_registry::all_ids() order).
     thumbnails: Vec<Vec<egui::Color32>>,
+    /// Population slider value (1–50).
+    pub population: u32,
+    /// Fauna density selection.
+    pub fauna_density: FaunaDensity,
+}
+
+/// Fauna density level, maps to predator_density in ScenarioDifficulty.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FaunaDensity {
+    Low,
+    Medium,
+    High,
+}
+
+impl FaunaDensity {
+    pub fn label(self) -> &'static str {
+        match self {
+            FaunaDensity::Low => "Low",
+            FaunaDensity::Medium => "Medium",
+            FaunaDensity::High => "High",
+        }
+    }
+
+    pub fn predator_density(self) -> f32 {
+        match self {
+            FaunaDensity::Low => 0.05,
+            FaunaDensity::Medium => 0.25,
+            FaunaDensity::High => 0.55,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub enum ScenarioSelectAction {
     None,
-    Start(ScenarioId, MapSelection),
+    Start {
+        id: ScenarioId,
+        map: MapSelection,
+        population: u32,
+        fauna_density: FaunaDensity,
+    },
     Back,
 }
 
 impl ScenarioSelectUi {
     pub fn new() -> Self {
-        let default_scenario = ScenarioId::TwoTribes;
+        let default_scenario = ScenarioId::Experiment;
         let map_picker = MapPickerState::new_for_scenario(default_scenario);
         let thumbnails = build_thumbnails();
+        // Default population matches Experiment scenario's initial_beings (5),
+        // but we start the slider at 5 as a sane sandbox default.
         ScenarioSelectUi {
             selected: default_scenario,
             action: ScenarioSelectAction::None,
             map_picker,
             thumbnails,
+            population: 5,
+            fauna_density: FaunaDensity::Low,
         }
     }
 
@@ -310,11 +349,46 @@ impl ScenarioSelectUi {
 
                         ui.add_space(8.0);
                         let cfg = ScenarioConfig::new(self.selected);
-                        ui.label(format!("Beings: {}", cfg.world.initial_beings));
-                        ui.label(format!("Predators: {}", cfg.world.has_predators));
-                        ui.label(format!("Seasons: {}", cfg.world.seasons));
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Seasons: {}  |  Day/Night: {}",
+                                if cfg.world.seasons { "on" } else { "off" },
+                                if cfg.world.day_night { "on" } else { "off" },
+                            ))
+                            .weak()
+                            .size(11.0),
+                        );
 
-                        ui.add_space(12.0);
+                        ui.add_space(10.0);
+                        ui.separator();
+                        ui.add_space(6.0);
+
+                        // Population slider
+                        ui.horizontal(|ui| {
+                            ui.label("Population:");
+                            let mut pop = self.population as f32;
+                            if ui.add(
+                                egui::Slider::new(&mut pop, 1.0..=50.0)
+                                    .step_by(1.0)
+                                    .fixed_decimals(0),
+                            ).changed() {
+                                self.population = pop as u32;
+                            }
+                        });
+
+                        ui.add_space(4.0);
+
+                        // Fauna density row
+                        ui.horizontal(|ui| {
+                            ui.label("Fauna density:");
+                            for density in [FaunaDensity::Low, FaunaDensity::Medium, FaunaDensity::High] {
+                                if ui.selectable_label(self.fauna_density == density, density.label()).clicked() {
+                                    self.fauna_density = density;
+                                }
+                            }
+                        });
+
+                        ui.add_space(10.0);
                         ui.separator();
 
                         // Map picker — needs a clone of ctx for texture upload.
@@ -326,16 +400,39 @@ impl ScenarioSelectUi {
                             &self.thumbnails,
                         );
 
-                        ui.add_space(16.0);
+                        ui.add_space(12.0);
+                        ui.separator();
+                        ui.add_space(6.0);
+
+                        // Tips
+                        ui.label(
+                            egui::RichText::new("Tip: Use God Tools to guide your people.")
+                                .weak()
+                                .italics()
+                                .size(11.0),
+                        );
+                        ui.label(
+                            egui::RichText::new("Press ? in-game for controls.")
+                                .weak()
+                                .italics()
+                                .size(11.0),
+                        );
+
+                        ui.add_space(12.0);
 
                         if ui
-                            .add_sized(egui::vec2(160.0, 36.0), egui::Button::new("Start"))
+                            .add_sized(
+                                egui::vec2(160.0, 36.0),
+                                egui::Button::new(egui::RichText::new("Start World").strong()),
+                            )
                             .clicked()
                         {
-                            self.action = ScenarioSelectAction::Start(
-                                self.selected,
-                                self.map_picker.selected.clone(),
-                            );
+                            self.action = ScenarioSelectAction::Start {
+                                id: self.selected,
+                                map: self.map_picker.selected.clone(),
+                                population: self.population,
+                                fauna_density: self.fauna_density,
+                            };
                         }
                         ui.add_space(8.0);
                         if ui
@@ -590,7 +687,21 @@ impl OnboardingTooltip {
         self.god_power_hint_dismissed = true;
     }
 
-    pub fn show(&mut self, ctx: &egui::Context) {
+    pub fn show(&mut self, ctx: &egui::Context, population: u32) {
+        // Low-population hint — persistent banner until player has enough beings
+        if population < 10 {
+            egui::Area::new(egui::Id::new("low_pop_hint"))
+                .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 48.0))
+                .interactable(false)
+                .show(ctx, |ui| {
+                    ui.label(
+                        egui::RichText::new("Click  Spawn Human  (left panel) to populate your world")
+                            .color(egui::Color32::from_rgba_unmultiplied(140, 220, 80, 210))
+                            .strong(),
+                    );
+                });
+        }
+
         // Main onboarding overlay
         if self.shown && !self.dismissed {
             let mut close = false;
@@ -624,8 +735,15 @@ impl OnboardingTooltip {
                         });
 
                     ui.add_space(8.0);
+                    ui.label(
+                        egui::RichText::new("Drop humans on the world to begin!")
+                            .color(egui::Color32::from_rgb(140, 220, 80))
+                            .strong(),
+                    );
+                    ui.label("Select  Spawn Human  on the left panel, then click the world.");
+                    ui.add_space(6.0);
                     ui.label(egui::RichText::new("God Powers").strong());
-                    ui.label("Click a power on the left panel, then click on the world");
+                    ui.label("Click any power on the left panel, then click on the world");
                     ui.add_space(8.0);
 
                     egui::Grid::new("onboarding_keys")

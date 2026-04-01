@@ -115,8 +115,8 @@ impl NewsFeed {
 
         egui::Window::new("World Events")
             .id(egui::Id::new("news_feed"))
-            .anchor(egui::Align2::LEFT_TOP, egui::vec2(10.0, 40.0))
-            .fixed_size(egui::vec2(300.0, height))
+            .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(10.0, -80.0))
+            .fixed_size(egui::vec2(240.0, height))
             .title_bar(true)
             .collapsible(false)
             .resizable(false)

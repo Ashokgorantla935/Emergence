@@ -112,6 +112,8 @@ pub struct Beings {
     // Metadata
     pub parent_ids: Vec<[u32; 2]>,
     pub creature_type: Vec<u8>, // 0=Human. See CreatureType enum. 1 byte per being.
+    pub last_birth_tick: Vec<u32>,
+    pub names: Vec<String>,
 
     // Count tracking
     pub count: usize,
@@ -151,6 +153,8 @@ impl Beings {
             traces: Vec::new(),
             parent_ids: Vec::new(),
             creature_type: Vec::new(),
+            last_birth_tick: Vec::new(),
+            names: Vec::new(),
             count: 0,
             alive_count: 0,
             human_count: 0,
@@ -193,6 +197,8 @@ impl Beings {
         self.traces.push(None); // allocated on demand when inspector selects
         self.parent_ids.push(parent_ids);
         self.creature_type.push(CreatureType::Human as u8); // default to Human; override after spawn for fauna
+        self.last_birth_tick.push(0);
+        self.names.push(String::new());
         self.count += 1;
         self.alive_count += 1;
         idx

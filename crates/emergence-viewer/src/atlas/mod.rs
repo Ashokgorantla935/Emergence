@@ -135,18 +135,28 @@ mod tests {
     use super::generator;
     use image::{ImageBuffer, Rgba};
 
-    /// Regenerate the atlas PNG from the Rust generator and write it to assets/sprites/atlas.png.
+    /// Regenerate the atlas PNG from real sprite assets and write it to assets/sprites/atlas.png.
     /// Run with: cargo test -p emergence-viewer regenerate_atlas -- --nocapture
     #[test]
     fn regenerate_atlas() {
-        let pixels = generator::generate();
-        assert_eq!(pixels.len(), 512 * 512 * 4, "generator must return 512x512 RGBA");
+        let packs_root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/sprites/packs"
+        );
+
+        let (pixels, report) = generator::compose_from_assets(packs_root);
+        assert_eq!(pixels.len(), 512 * 512 * 4, "composer must return 512x512 RGBA");
+
+        // Print the mapping report
+        println!("[regenerate_atlas] Asset mapping report:");
+        for line in &report {
+            println!("  {}", line);
+        }
 
         let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
             ImageBuffer::from_raw(512, 512, pixels)
                 .expect("pixel buffer dimensions must match");
 
-        // Resolve path relative to this file's manifest dir
         let out_path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../assets/sprites/atlas.png"
@@ -155,6 +165,6 @@ mod tests {
 
         let meta = std::fs::metadata(out_path).expect("atlas.png must exist after save");
         println!("[regenerate_atlas] wrote {} bytes to {}", meta.len(), out_path);
-        assert!(meta.len() > 6210, "new PNG should be larger than the Python placeholder");
+        assert!(meta.len() > 50_000, "atlas with real sprites should be >50KB");
     }
 }

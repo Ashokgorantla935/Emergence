@@ -8,6 +8,7 @@ pub mod god_action;
 
 use being::data::{Beings, CreatureType};
 use being::lifecycle::generate_initial_personality;
+use being::names::generate_name;
 use god_action::GodActionQueue;
 use sim::spatial::SpatialIndex;
 use sim::world_state::{EventLog, World};
@@ -82,12 +83,13 @@ pub fn create_world(config: WorldConfig) -> World {
         // We distribute 60-90% of max across beings for natural variety
         let lifespan = 86400 + rng.u32(0..57601); // 3-5 sim-years
         let idx = beings.spawn([x, y], personality, lifespan, [u32::MAX, u32::MAX]);
+        beings.names[idx] = generate_name(&mut rng);
         // Starting ages: mix of children, young adults, adults (0..~50% of lifespan).
         // No elders at world start — population begins in its reproductive prime.
         beings.ages[idx] = rng.u32(0..(lifespan / 2));
     }
 
-    // Spawn fauna distributed by biome (1,500 total)
+    // Spawn fauna distributed by biome (~280 total)
     spawn_fauna(&mut beings, &terrain, &mut rng);
 
     World {
@@ -109,10 +111,10 @@ pub fn create_world(config: WorldConfig) -> World {
     }
 }
 
-/// Spawn ~1,500 fauna distributed by biome.
-/// Forest: Wolf 5%, Deer 15%, Bear 3%, Rabbit 20%, Hawk 5%, Snake 5% of forest cells sampled.
-/// Grassland: Deer 30%, Rabbit 35%, Hawk 5%.
-/// Water: Fish 100%.
+/// Spawn ~280 fauna distributed by biome.
+/// Forest: 15 wolves, 45 deer, 10 bears, 60 rabbits, 15 hawks, 6 snakes.
+/// Grassland: 30 deer, 35 rabbits, 5 hawks, 5 wolves, 5 snakes.
+/// Water: 50 fish.
 pub fn spawn_fauna(beings: &mut Beings, terrain: &Terrain, rng: &mut fastrand::Rng) {
     // Personality presets per fauna type [bold, social, curious, generous, diurnal]
     let wolf_personality: [f32; 5] = [0.9, 0.7, 0.3, -0.5, 0.5];
@@ -181,23 +183,23 @@ pub fn spawn_fauna(beings: &mut Beings, terrain: &Terrain, rng: &mut fastrand::R
     let max_x = terrain.width as f32 - 1.0;
     let max_y = terrain.height as f32 - 1.0;
 
-    // Forest/wetland spawn: ~750 beings
-    spawn_batch(beings, &forest_cells, 75,  CreatureType::Wolf,   wolf_personality,   rng, max_x, max_y);
-    spawn_batch(beings, &forest_cells, 225, CreatureType::Deer,   deer_personality,   rng, max_x, max_y);
-    spawn_batch(beings, &forest_cells, 45,  CreatureType::Bear,   bear_personality,   rng, max_x, max_y);
-    spawn_batch(beings, &forest_cells, 300, CreatureType::Rabbit, rabbit_personality, rng, max_x, max_y);
-    spawn_batch(beings, &forest_cells, 75,  CreatureType::Hawk,   hawk_personality,   rng, max_x, max_y);
-    spawn_batch(beings, &forest_cells, 30,  CreatureType::Snake,  snake_personality,  rng, max_x, max_y);
+    // Forest/wetland spawn: ~151 beings
+    spawn_batch(beings, &forest_cells, 15, CreatureType::Wolf,   wolf_personality,   rng, max_x, max_y);
+    spawn_batch(beings, &forest_cells, 45, CreatureType::Deer,   deer_personality,   rng, max_x, max_y);
+    spawn_batch(beings, &forest_cells, 10, CreatureType::Bear,   bear_personality,   rng, max_x, max_y);
+    spawn_batch(beings, &forest_cells, 60, CreatureType::Rabbit, rabbit_personality, rng, max_x, max_y);
+    spawn_batch(beings, &forest_cells, 15, CreatureType::Hawk,   hawk_personality,   rng, max_x, max_y);
+    spawn_batch(beings, &forest_cells, 6,  CreatureType::Snake,  snake_personality,  rng, max_x, max_y);
 
-    // Grassland spawn: ~500 beings
-    spawn_batch(beings, &grassland_cells, 150, CreatureType::Deer,   deer_personality,   rng, max_x, max_y);
-    spawn_batch(beings, &grassland_cells, 175, CreatureType::Rabbit, rabbit_personality, rng, max_x, max_y);
-    spawn_batch(beings, &grassland_cells, 25,  CreatureType::Hawk,   hawk_personality,   rng, max_x, max_y);
-    spawn_batch(beings, &grassland_cells, 25,  CreatureType::Wolf,   wolf_personality,   rng, max_x, max_y);
-    spawn_batch(beings, &grassland_cells, 25,  CreatureType::Snake,  snake_personality,  rng, max_x, max_y);
+    // Grassland spawn: ~80 beings
+    spawn_batch(beings, &grassland_cells, 30, CreatureType::Deer,   deer_personality,   rng, max_x, max_y);
+    spawn_batch(beings, &grassland_cells, 35, CreatureType::Rabbit, rabbit_personality, rng, max_x, max_y);
+    spawn_batch(beings, &grassland_cells, 5,  CreatureType::Hawk,   hawk_personality,   rng, max_x, max_y);
+    spawn_batch(beings, &grassland_cells, 5,  CreatureType::Wolf,   wolf_personality,   rng, max_x, max_y);
+    spawn_batch(beings, &grassland_cells, 5,  CreatureType::Snake,  snake_personality,  rng, max_x, max_y);
 
-    // Water spawn: ~250 fish
-    spawn_batch(beings, &water_cells, 250, CreatureType::Fish, fish_personality, rng, max_x, max_y);
+    // Water spawn: ~50 fish
+    spawn_batch(beings, &water_cells, 50, CreatureType::Fish, fish_personality, rng, max_x, max_y);
 
     // Rebuild partition indices now that fauna are spawned
     beings.rebuild_partition_indices();

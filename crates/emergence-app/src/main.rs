@@ -23,7 +23,7 @@ use emergence_viewer::renderer::particles::ParticleSystem;
 use emergence_viewer::renderer::state::RenderState;
 use emergence_viewer::renderer::terrain::TerrainRenderer;
 use emergence_viewer::screen_state::{
-    MainMenuAction, MainMenuUi, OnboardingTooltip, PauseMenuAction, PauseMenuUi,
+    FaunaDensity, MainMenuAction, MainMenuUi, OnboardingTooltip, PauseMenuAction, PauseMenuUi,
     SaveSlotInfo, ScenarioSelectAction, ScenarioSelectUi, ScreenState, SpeedControls,
     TopBar,
 };
@@ -117,7 +117,7 @@ struct App {
     pending_save_slot: Option<u8>,
     pending_new_game: bool,
     pending_quit: bool,
-    pending_scenario: Option<(ScenarioId, MapSelection)>,
+    pending_scenario: Option<(ScenarioId, MapSelection, u32, FaunaDensity)>,
 
     // God tools
     god_tool_state: GodToolState,
@@ -230,12 +230,16 @@ impl App {
     }
 
     /// Launch a new game from a scenario.
-    fn start_scenario(&mut self, id: ScenarioId, map: MapSelection) {
+    fn start_scenario(&mut self, id: ScenarioId, map: MapSelection, population: u32, fauna_density: FaunaDensity) {
         let mut scenario = ScenarioConfig::new(id);
         // Apply the map selection chosen in the UI (overrides scenario default).
         if !matches!(map, MapSelection::Default) {
             scenario.world.map = map;
         }
+        // Apply population and fauna overrides from the scenario select UI.
+        scenario.world.initial_beings = population;
+        scenario.world.predator_fraction = fauna_density.predator_density();
+        scenario.world.has_predators = fauna_density != FaunaDensity::Low;
 
         // Position camera per scenario
         self.camera = Camera::new(
@@ -641,9 +645,12 @@ impl ApplicationHandler for App {
                             }
                             ScreenState::ScenarioSelect => {
                                 if key == KeyCode::Enter || key == KeyCode::NumpadEnter {
+                                    let sel = &self.scenario_select_ui;
                                     self.pending_scenario = Some((
-                                        emergence_core::scenario::ScenarioId::TwoTribes,
-                                        emergence_core::world::map::MapSelection::Default,
+                                        sel.selected,
+                                        sel.map_picker.selected.clone(),
+                                        sel.population,
+                                        sel.fauna_density,
                                     ));
                                 } else if key == KeyCode::Escape {
                                     self.screen = ScreenState::MainMenu;
@@ -732,8 +739,8 @@ impl ApplicationHandler for App {
             self.pending_new_game = false;
             self.screen = ScreenState::ScenarioSelect;
         }
-        if let Some((id, map)) = self.pending_scenario.take() {
-            self.start_scenario(id, map);
+        if let Some((id, map, population, fauna_density)) = self.pending_scenario.take() {
+            self.start_scenario(id, map, population, fauna_density);
         }
 
         // --- Timing ---
@@ -802,13 +809,14 @@ impl ApplicationHandler for App {
                     // News feed system: every frame with the event log
                     self.news_feed_system.update(
                         &world.events,
+                        &world.beings,
                         &self.settlement_detector,
                         &self.kingdom_detector,
                         world.tick,
                     );
 
-                    // News feed UI ingest
-                    self.news_feed_ui.ingest_events(&world.events);
+                    // Feed deduped items from news_feed_system into the UI (not raw events)
+                    self.news_feed_ui.items = self.news_feed_system.to_legacy_items();
 
                     // World event sounds: scan recent events (last `ticks` worth)
                     // We sample at most one sound per category per frame to avoid spam.
@@ -1239,8 +1247,8 @@ impl ApplicationHandler for App {
             ScreenState::ScenarioSelect => {
                 self.scenario_select_ui.show(&self.egui_ctx);
                 match self.scenario_select_ui.action.clone() {
-                    ScenarioSelectAction::Start(id, map) => {
-                        self.pending_scenario = Some((id, map));
+                    ScenarioSelectAction::Start { id, map, population, fauna_density } => {
+                        self.pending_scenario = Some((id, map, population, fauna_density));
                     }
                     ScenarioSelectAction::Back => {
                         self.screen = ScreenState::MainMenu;
@@ -2028,7 +2036,7 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                self.onboarding.show(&self.egui_ctx);
+                self.onboarding.show(&self.egui_ctx, population);
             }
             ScreenState::PauseMenu => {
                 self.pause_menu_ui.show(&self.egui_ctx, &self.save_slots);
@@ -2421,6 +2429,8 @@ fn main() {
         app.pending_scenario = Some((
             emergence_core::scenario::ScenarioId::Genesis,
             emergence_core::world::map::MapSelection::Default,
+            10u32,
+            FaunaDensity::Low,
         ));
     }
     event_loop.run_app(&mut app).unwrap();

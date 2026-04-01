@@ -108,31 +108,37 @@ fn dot(pixels: &mut [u8], cx: usize, cy: usize, lx: usize, ly: usize, r: u8, g: 
 //   CLOTH_MASK — which pixels show clothing color
 // Bit 15 = leftmost column (x=0), bit 0 = rightmost (x=15).
 // Row 0 = top of cell.
+//
+// WorldBox-style layout — sprite centered vertically (~12px tall in 16px cell):
+//   Rows 0-1:   empty (top padding)
+//   Rows 2-4:   head — 3x3 block (cols 6-8, bits 9-7)
+//   Row  5:     neck — 1px (col 7, bit 8)
+//   Rows 6-7:   arm stubs at cols 5,9 (bits 10,6); body cloth at cols 6-8
+//   Rows 8-9:   waist/hips (cloth cols 6-8)
+//   Rows 10-12: legs — left cols 5-6, right cols 8-9
+//   Row  13:    feet — cols 5-7 + cols 8-10 (3px each, slightly wider)
+//   Rows 14-15: empty (bottom padding)
+//
+// Outline (dark 20,15,10) painted by apply_sprite_outline() after blit.
 
-/// Standard adult humanoid facing front, idle stance.
-/// Head: 3x3 circle at top center (cols 6-8, rows 1-3)
-/// Neck: 1px col 7, row 4
-/// Body: 4x4 torso (cols 5-8, rows 4-8)
-/// Arms: 1px wide on sides rows 5-7
-/// Legs: 2 cols each with 1px gap, rows 9-14
-/// Feet: slightly wider row 15
+/// Standard adult humanoid — front-facing, idle. 3x3 head, 3px body, 2px legs.
 const ADULT_SKIN: [u16; 16] = [
-    0b0000000000000000, // row  0: empty above head
-    0b0000011100000000, // row  1: head top (3px circle)
-    0b0000111110000000, // row  2: head wide (5px for face)
-    0b0000011100000000, // row  3: head bottom
-    0b0000001000000000, // row  4: neck (1px col 6)
-    0b0000100000010000, // row  5: arm stubs at sides
-    0b0001000000001000, // row  6: arms extended
-    0b0000100000010000, // row  7: arm ends
-    0b0000000000000000, // row  8: (cloth covers waist)
-    0b0000000000000000, // row  9: (cloth)
-    0b0000110001100000, // row 10: upper legs
-    0b0000110001100000, // row 11: legs
-    0b0000110001100000, // row 12: legs
-    0b0000110001100000, // row 13: lower legs
-    0b0000111001110000, // row 14: feet
-    0b0000111001110000, // row 15: feet wide
+    0b0000000000000000, // row  0: empty
+    0b0000000000000000, // row  1: empty
+    0b0000001110000000, // row  2: head top    (cols 6-8)
+    0b0000001110000000, // row  3: head middle
+    0b0000001110000000, // row  4: head bottom
+    0b0000000100000000, // row  5: neck        (col 7)
+    0b0000010000010000, // row  6: arm stubs   (cols 5, 9)
+    0b0000010000010000, // row  7: arms
+    0b0000000000000000, // row  8: waist (cloth)
+    0b0000000000000000, // row  9: hips  (cloth)
+    0b0000011001100000, // row 10: legs        (cols 5-6, 8-9)
+    0b0000011001100000, // row 11: legs
+    0b0000011001100000, // row 12: lower legs
+    0b0000011101110000, // row 13: feet wider  (cols 5-7, 8-10)
+    0b0000000000000000, // row 14: empty
+    0b0000000000000000, // row 15: empty
 ];
 
 const ADULT_CLOTH: [u16; 16] = [
@@ -140,12 +146,12 @@ const ADULT_CLOTH: [u16; 16] = [
     0b0000000000000000, // row  1
     0b0000000000000000, // row  2
     0b0000000000000000, // row  3
-    0b0000011110000000, // row  4: collar/shoulder (4px)
-    0b0000011110000000, // row  5: torso
-    0b0000011110000000, // row  6: torso
-    0b0000011110000000, // row  7: torso
-    0b0000011110000000, // row  8: waist
-    0b0000011110000000, // row  9: waist/hips
+    0b0000000000000000, // row  4
+    0b0000000000000000, // row  5
+    0b0000001110000000, // row  6: shoulder/torso (cols 6-8)
+    0b0000001110000000, // row  7: torso
+    0b0000001110000000, // row  8: waist
+    0b0000001110000000, // row  9: hips
     0b0000000000000000, // row 10: legs (skin)
     0b0000000000000000, // row 11:
     0b0000000000000000, // row 12:
@@ -154,25 +160,24 @@ const ADULT_CLOTH: [u16; 16] = [
     0b0000000000000000, // row 15:
 ];
 
-/// Youth: smaller, head-heavy — sits in bottom 12px of cell.
-/// Big head (4px wide) relative to compact body
+/// Youth: smaller, head-heavy — starts 3 rows lower, compact body (~9px tall).
 const YOUTH_SKIN: [u16; 16] = [
     0b0000000000000000, // row  0: empty
-    0b0000000000000000, // row  1:
-    0b0000000000000000, // row  2:
-    0b0000011100000000, // row  3: head top 3px
-    0b0000111110000000, // row  4: head wide 5px (big head)
-    0b0000011100000000, // row  5: head bottom
-    0b0000001000000000, // row  6: neck
-    0b0000010000100000, // row  7: small arm stubs
-    0b0000000000000000, // row  8: (cloth body)
-    0b0000000000000000, // row  9: (cloth)
+    0b0000000000000000, // row  1: empty
+    0b0000000000000000, // row  2: empty
+    0b0000000000000000, // row  3: empty
+    0b0000001110000000, // row  4: head top  (3px — big relative to body)
+    0b0000001110000000, // row  5: head mid
+    0b0000001110000000, // row  6: head bot
+    0b0000000100000000, // row  7: neck
+    0b0000010000010000, // row  8: arm stubs
+    0b0000000000000000, // row  9: (cloth waist)
     0b0000011001100000, // row 10: legs
     0b0000011001100000, // row 11: legs
-    0b0000011001100000, // row 12: lower legs
-    0b0000011101110000, // row 13: feet
-    0b0000000000000000, // row 14:
-    0b0000000000000000, // row 15:
+    0b0000011101110000, // row 12: feet
+    0b0000000000000000, // row 13: empty
+    0b0000000000000000, // row 14: empty
+    0b0000000000000000, // row 15: empty
 ];
 
 const YOUTH_CLOTH: [u16; 16] = [
@@ -183,8 +188,8 @@ const YOUTH_CLOTH: [u16; 16] = [
     0b0000000000000000,
     0b0000000000000000,
     0b0000000000000000,
-    0b0000001110000000, // row  7: torso (3px)
-    0b0000001110000000, // row  8: torso
+    0b0000000000000000,
+    0b0000001110000000, // row  8: torso (3px)
     0b0000001110000000, // row  9: waist
     0b0000000000000000,
     0b0000000000000000,
@@ -194,24 +199,24 @@ const YOUTH_CLOTH: [u16; 16] = [
     0b0000000000000000,
 ];
 
-/// Elder: slightly hunched — head offset left, stooped posture.
+/// Elder: hunched — head shifted left 1px, stooped posture.
 const ELDER_SKIN: [u16; 16] = [
-    0b0000000000000000, // row  0:
-    0b0000111000000000, // row  1: head (shifted left = hunched fwd)
-    0b0001111100000000, // row  2: head wide
-    0b0000111000000000, // row  3: head bottom
-    0b0000010000000000, // row  4: neck
-    0b0001000000010000, // row  5: arms wide (hunched shoulders)
-    0b0010000000001000, // row  6: arms reaching
-    0b0001000000010000, // row  7: arm ends
+    0b0000000000000000, // row  0: empty
+    0b0000000000000000, // row  1: empty
+    0b0000011100000000, // row  2: head top  (cols 5-7, shifted left for hunch)
+    0b0000011100000000, // row  3: head mid
+    0b0000011100000000, // row  4: head bot
+    0b0000001000000000, // row  5: neck (col 6, hunched forward)
+    0b0000100000010000, // row  6: arm stubs (cols 4, 9 — wide hunch posture)
+    0b0000100000010000, // row  7: arms
     0b0000000000000000, // row  8: (cloth)
     0b0000000000000000, // row  9:
     0b0000011001100000, // row 10: legs
     0b0000011001100000, // row 11: legs
-    0b0000011001100000, // row 12: legs
-    0b0000011001100000, // row 13: legs
-    0b0000011101110000, // row 14: feet
-    0b0000000000000000, // row 15:
+    0b0000011001100000, // row 12: lower legs
+    0b0000011101110000, // row 13: feet
+    0b0000000000000000, // row 14: empty
+    0b0000000000000000, // row 15: empty
 ];
 
 const ELDER_CLOTH: [u16; 16] = [
@@ -219,12 +224,12 @@ const ELDER_CLOTH: [u16; 16] = [
     0b0000000000000000,
     0b0000000000000000,
     0b0000000000000000,
-    0b0000001100000000, // row  4: collar (2px, offset for hunch)
-    0b0000011110000000, // row  5: torso (4px)
-    0b0000011110000000, // row  6: torso
-    0b0000011110000000, // row  7: torso
-    0b0000011110000000, // row  8: waist
-    0b0000001100000000, // row  9: lower waist
+    0b0000000000000000,
+    0b0000000000000000,
+    0b0000001110000000, // row  6: torso (3px, centered)
+    0b0000001110000000, // row  7: torso
+    0b0000001110000000, // row  8: waist
+    0b0000000110000000, // row  9: lower waist (2px, tapered)
     0b0000000000000000,
     0b0000000000000000,
     0b0000000000000000,
@@ -272,25 +277,27 @@ fn draw_humanoid_bitmap(
         let mut sk = skin_map[row];
         let mut cl = cloth_map[row];
 
-        // Walking pose: shift legs (rows 10-15) by 2px alternating sides for visible animation
+        // Walking pose: shift legs (rows 10-13) by 1px alternating sides for visible animation
+        // Left leg at cols 5-6 (bits 10-9), right leg at cols 8-9 (bits 7-6).
         if row >= 10 && row <= 13 && anim_variant >= 2 && anim_variant <= 5 {
             if walk == 0 {
-                // left leg forward, right back — shift left leg left 2px
-                let left_bits  = sk & 0b0000110000000000;
-                let right_bits = sk & 0b0000001100000000;
-                sk = (sk & 0b1111000011111111) | (left_bits << 2) | (right_bits >> 2);
+                // left leg forward, right back
+                let left_bits  = sk & 0b0000011000000000;
+                let right_bits = sk & 0b0000000110000000;
+                sk = (sk & 0b1111100001111111) | (left_bits << 1) | (right_bits >> 1);
             } else {
-                let left_bits  = sk & 0b0000110000000000;
-                let right_bits = sk & 0b0000001100000000;
-                sk = (sk & 0b1111000011111111) | (left_bits >> 2) | (right_bits << 2);
+                let left_bits  = sk & 0b0000011000000000;
+                let right_bits = sk & 0b0000000110000000;
+                sk = (sk & 0b1111100001111111) | (left_bits >> 1) | (right_bits << 1);
             }
         }
 
         // Arms raised (anim_variant 6 = fight/reach)
-        if anim_variant == 6 && row >= 5 && row <= 7 {
+        // Arm stubs at cols 5 (bit 10) and col 9 (bit 6).
+        if anim_variant == 6 && row >= 6 && row <= 7 {
             // Extend arms outward by 1px each side
-            let arm_left  = sk & 0b0000100000000000;
-            let arm_right = sk & 0b0000000000100000;
+            let arm_left  = sk & 0b0000010000000000;
+            let arm_right = sk & 0b0000000001000000;
             sk |= arm_left << 1;
             sk |= arm_right >> 1;
         }
@@ -315,9 +322,9 @@ fn draw_humanoid_bitmap(
         }
     }
 
-    // Elder walking stick: vertical line at col 13, rows 5-14
+    // Elder walking stick: vertical line at col 13, rows 6-13 (matching centered sprite)
     if phase == 2 {
-        for r in 5..15usize {
+        for r in 6..14usize {
             set_pixel(pixels, cx + 13, cy + r, 139, 90, 43, 255);
         }
     }
@@ -1275,4 +1282,345 @@ fn draw_wireframe_cell(pixels: &mut [u8], cx: usize, cy: usize, style: usize) {
         set_pixel(pixels, cx + 2, cy + i, 180, 220, 255, alpha);
         set_pixel(pixels, cx + 13, cy + i, 180, 220, 255, alpha);
     }
+}
+
+// ─── asset composer ─────────────────────────────────────────────────────────
+//
+// Generates the 512x512 atlas by compositing real sprite PNGs from packs.
+// Falls back to procedural generation for any cell where loading fails.
+// Returns flat RGBA8 pixel data (512*512*4 bytes) and a report of what was
+// mapped vs what fell back.
+
+/// Nearest-neighbor downscale — preserves pixel-art crispness.
+fn downscale_nearest(
+    src: &image::RgbaImage,
+    sx: u32, sy: u32, sw: u32, sh: u32,   // source region
+    dw: u32, dh: u32,                      // dest size (16x16)
+) -> image::RgbaImage {
+    let mut dst = image::RgbaImage::new(dw, dh);
+    for dy in 0..dh {
+        for dx in 0..dw {
+            let px = sx + dx * sw / dw;
+            let py = sy + dy * sh / dh;
+            let px = px.min(src.width().saturating_sub(1));
+            let py = py.min(src.height().saturating_sub(1));
+            dst.put_pixel(dx, dy, *src.get_pixel(px, py));
+        }
+    }
+    dst
+}
+
+/// Blit a 16x16 RgbaImage into the atlas pixel buffer at (atlas_col, atlas_row).
+fn blit_cell(pixels: &mut [u8], atlas_row: usize, atlas_col: usize, tile: &image::RgbaImage) {
+    let (ox, oy) = cell_origin(atlas_row, atlas_col);
+    for py in 0..16usize {
+        for px in 0..16usize {
+            let pixel = tile.get_pixel(px as u32, py as u32);
+            // Only blit if the source pixel is non-transparent
+            if pixel[3] > 0 {
+                set_pixel(pixels, ox + px, oy + py, pixel[0], pixel[1], pixel[2], pixel[3]);
+            }
+        }
+    }
+}
+
+/// Try to load a PNG and return an RgbaImage, or None on failure.
+fn load_png(path: &str) -> Option<image::RgbaImage> {
+    image::open(path).ok().map(|img| img.into_rgba8())
+}
+
+/// Crop + nearest-neighbor scale a region from src to 16x16.
+fn crop_and_scale(src: &image::RgbaImage, sx: u32, sy: u32, sw: u32, sh: u32) -> image::RgbaImage {
+    downscale_nearest(src, sx, sy, sw, sh, 16, 16)
+}
+
+/// Compose the atlas from real sprite assets, with procedural fallbacks.
+/// Returns (pixel_data, report_lines).
+pub fn compose_from_assets(packs_root: &str) -> (Vec<u8>, Vec<String>) {
+    // Start with full procedural atlas as baseline
+    let mut pixels = generate();
+    let mut report: Vec<String> = Vec::new();
+
+    // ── Humans: Rows 0–11 from premade-npc-spritesheets ────────────────────
+    // Each npc*.png = 256x512, 8 cols x 16 rows of 32x32 cells.
+    // We take row 0 (y=0) of each sheet and map cols 0-9 → atlas cols 0-9.
+    // NPC mapping: npc1→row0, npc3→row1, npc5→row2, npc7→row3 (adults)
+    //              npc2→row4, npc4→row5, npc6→row6, npc8→row7 (youth)
+    //              npc9→row8, npc10→row9, npc11→row10, npc12→row11 (elder)
+    let npc_map: &[(u32, usize)] = &[
+        (1, 0), (3, 1), (5, 2), (7, 3),   // adults
+        (2, 4), (4, 5), (6, 6), (8, 7),   // youth
+        (9, 8), (10, 9), (11, 10), (12, 11), // elders
+    ];
+    for &(npc_num, atlas_row) in npc_map {
+        let path = format!("{}/premade-npc-spritesheets/npc{}.png", packs_root, npc_num);
+        if let Some(sheet) = load_png(&path) {
+            // Use source row 0 (first animation row = idle/walk)
+            // 10 animation states → cols 0–9 in atlas
+            let mut mapped = 0usize;
+            for atlas_col in 0..10usize {
+                // Source frame: walking row 2 for odd cols (walk frames), row 0 for even (idle)
+                let src_row = if atlas_col % 3 == 0 { 0u32 } else { atlas_col as u32 % 4 };
+                let src_col = atlas_col as u32 % 8;
+                let sx = src_col * 32;
+                let sy = src_row * 32;
+                if sx + 32 <= sheet.width() && sy + 32 <= sheet.height() {
+                    let tile = crop_and_scale(&sheet, sx, sy, 32, 32);
+                    blit_cell(&mut pixels, atlas_row, atlas_col, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row {:2} (npc{:2}): {} cols from {}", atlas_row, npc_num, mapped, path));
+        } else {
+            report.push(format!("FALLBACK row {:2} (npc{:2}): file not found, using procedural", atlas_row, npc_num));
+        }
+    }
+
+    // ── Fauna Row 12 col 0: Bird (native 16x16) ────────────────────────────
+    {
+        let path = format!(
+            "{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/\
+             Sunnyside_World_Assets/Elements/Animals/spr_deco_bird_01_strip4.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            // 64x16 = 4 frames of 16x16. Blit frames 0–3 into row 12, cols 0–3.
+            for frame in 0..4usize {
+                let tile = crop_and_scale(&sheet, (frame as u32) * 16, 0, 16, 16);
+                blit_cell(&mut pixels, 12, frame, &tile);
+            }
+            report.push(format!("MAPPED   row 12 col 0-3 (bird): native 16x16, 4 frames from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 12 col 0-3 (bird): file not found, using procedural"));
+        }
+    }
+
+    // ── Fauna Row 13 col 0: Cow (32x32 → 16x16) ──────────────────────────
+    {
+        let path = format!(
+            "{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/\
+             Sunnyside_World_Assets/Elements/Animals/spr_deco_cow_strip4.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            for frame in 0..4usize {
+                let tile = crop_and_scale(&sheet, (frame as u32) * 32, 0, 32, 32);
+                blit_cell(&mut pixels, 13, frame, &tile);
+            }
+            report.push(format!("MAPPED   row 13 col 0-3 (cow): 4 frames 32->16 from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 13 col 0-3 (cow): file not found, using procedural"));
+        }
+    }
+
+    // ── Fauna Row 13 col 4: Pig ───────────────────────────────────────────
+    {
+        let path = format!(
+            "{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/\
+             Sunnyside_World_Assets/Elements/Animals/spr_deco_pig_01_strip4.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            for frame in 0..4usize {
+                let tile = crop_and_scale(&sheet, (frame as u32) * 32, 0, 32, 32);
+                blit_cell(&mut pixels, 13, 4 + frame, &tile);
+            }
+            report.push(format!("MAPPED   row 13 col 4-7 (pig): 4 frames 32->16 from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 13 col 4-7 (pig): file not found, using procedural"));
+        }
+    }
+
+    // ── Fauna Row 14 col 0: Sheep ─────────────────────────────────────────
+    {
+        let path = format!(
+            "{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/\
+             Sunnyside_World_Assets/Elements/Animals/spr_deco_sheep_01_strip4.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            for frame in 0..4usize {
+                let tile = crop_and_scale(&sheet, (frame as u32) * 32, 0, 32, 32);
+                blit_cell(&mut pixels, 14, frame, &tile);
+            }
+            report.push(format!("MAPPED   row 14 col 0-3 (sheep): 4 frames 32->16 from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 14 col 0-3 (sheep): file not found, using procedural"));
+        }
+    }
+
+    // ── Fauna Row 14 col 4: Duck ──────────────────────────────────────────
+    {
+        let path = format!(
+            "{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/\
+             Sunnyside_World_Assets/Elements/Animals/spr_deco_duck_01_strip4.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            for frame in 0..4usize {
+                let tile = crop_and_scale(&sheet, (frame as u32) * 32, 0, 32, 32);
+                blit_cell(&mut pixels, 14, 4 + frame, &tile);
+            }
+            report.push(format!("MAPPED   row 14 col 4-7 (duck): 4 frames 32->16 from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 14 col 4-7 (duck): file not found, using procedural"));
+        }
+    }
+
+    // ── Nature Row 21: pixel_16_woods (native 16x16) ──────────────────────
+    // The 352x192 sheet is 22 cols x 12 rows. We sample tile positions to find
+    // tree, bush, rock, reed. Based on common woods tileset conventions:
+    //   Row 0 = ground/grass tiles, Row 1+ = nature objects.
+    // We'll sample multiple candidate rows and pick visually interesting ones.
+    {
+        let path = format!(
+            "{}/pixel_16_woods v2 free/pixel_16_woods v2 free/free_pixel_16_woods.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            // Candidate positions for tree-like sprites (typically rows 1-4 in woods tilesets)
+            // tree: col 0, row 2 (y=32) is a common tree position
+            // bush: col 4, row 2
+            // rock: col 8, row 3
+            // reed/grass: col 0, row 4
+            // We'll also try cols from different rows to maximize visual variety
+
+            let nature_cells: &[(usize, u32, u32, &str)] = &[
+                // (atlas_col, sheet_col, sheet_row, name)
+                (0,  0, 2, "tree-a"),
+                (1,  1, 2, "tree-b"),
+                (2,  2, 2, "tree-c"),
+                (3,  3, 2, "bush-a"),
+                (4,  4, 2, "bush-b"),
+                (5,  5, 2, "shrub"),
+                (6,  0, 3, "rock-a"),
+                (7,  1, 3, "rock-b"),
+                (8,  2, 3, "rock-c"),
+                (9,  3, 3, "reed"),
+                (10, 0, 4, "grass-a"),
+                (11, 1, 4, "grass-b"),
+                (12, 2, 4, "flower"),
+                (13, 3, 4, "mushroom"),
+                (14, 0, 5, "stump"),
+                (15, 1, 5, "log"),
+            ];
+
+            let mut mapped = 0usize;
+            for &(atlas_col, sc, sr, name) in nature_cells {
+                let sx = sc * 16;
+                let sy = sr * 16;
+                if sx + 16 <= sheet.width() && sy + 16 <= sheet.height() {
+                    let tile = crop_and_scale(&sheet, sx, sy, 16, 16);
+                    blit_cell(&mut pixels, 21, atlas_col, &tile);
+                    mapped += 1;
+                    report.push(format!("MAPPED   row 21 col {:2} ({}): native 16x16 from sheet ({},{})", atlas_col, name, sc, sr));
+                } else {
+                    report.push(format!("FALLBACK row 21 col {:2} ({}): out of bounds", atlas_col, name));
+                }
+            }
+            let _ = mapped;
+        } else {
+            report.push(format!("FALLBACK row 21 all (nature): pixel_16_woods not found, using procedural"));
+        }
+    }
+
+    // ── World Objects Row 20 col 4-6: Campfire frames ─────────────────────
+    // Animation_Campfire.png = 256x32 = 8 frames x 32x32
+    {
+        let path = format!(
+            "{}/The Fan-tasy Tileset (Free) 1.5.7/The Fan-tasy Tileset (Free)/\
+             Art/Props/Animation/Animation_Campfire.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            for frame in 0..3usize {
+                let sx = (frame as u32) * 32;
+                if sx + 32 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 32, 32);
+                    blit_cell(&mut pixels, 20, 4 + frame, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 20 col 4-6 (campfire): 3 frames 32->16 from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 20 col 4-6 (campfire): file not found, using procedural"));
+        }
+    }
+
+    // ── World Objects Row 20 col 0: Berry bush (Sprout Lands) ─────────────
+    {
+        let path = format!(
+            "{}/Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/\
+             Objects/Basic Plants.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            // 96x32 = 6 cols x 2 rows of 16x16
+            for col in 0..4usize {
+                if (col as u32) * 16 + 16 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, (col as u32) * 16, 0, 16, 16);
+                    blit_cell(&mut pixels, 20, col, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 20 col 0-3 (plants): native 16x16 from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 20 col 0-3 (plants): file not found, using procedural"));
+        }
+    }
+
+    // ── Terrain-like Row 21 fallback — mystic_woods decor ─────────────────
+    // decor_16x16.png = 64x80 = 4x5 grid of 16x16
+    // Fill any row-21 cols 16-19 with mystic_woods decor tiles
+    {
+        let path = format!(
+            "{}/mystic_woods_free_2.2/sprites/tilesets/decor_16x16.png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            for i in 0..4usize {
+                let sx = (i as u32 % 4) * 16;
+                let sy = (i as u32 / 4) * 16;
+                if sx + 16 <= sheet.width() && sy + 16 <= sheet.height() {
+                    let tile = crop_and_scale(&sheet, sx, sy, 16, 16);
+                    blit_cell(&mut pixels, 21, 16 + i, &tile);
+                }
+            }
+            report.push(format!("MAPPED   row 21 col 16-19 (mystic decor): native 16x16 from {}", path));
+        } else {
+            report.push(format!("FALLBACK row 21 col 16-19 (mystic decor): file not found"));
+        }
+    }
+
+    // ── mana seed forest tiles: Row 22 ────────────────────────────────────
+    {
+        let path = format!(
+            "{}/mana seed seasonal forest sample (summer)/seasonal sample (summer).png",
+            packs_root
+        );
+        if let Some(sheet) = load_png(&path) {
+            // 256x256 = 16x16 grid of 16x16 tiles.
+            // Fill row 22 with first 16 cols of this sheet (row 0).
+            let mut mapped = 0usize;
+            for col in 0..16usize {
+                let sx = (col as u32) * 16;
+                if sx + 16 <= sheet.width() {
+                    let tile = crop_and_scale(&sheet, sx, 0, 16, 16);
+                    blit_cell(&mut pixels, 22, col, &tile);
+                    mapped += 1;
+                }
+            }
+            report.push(format!("MAPPED   row 22 col 0-{} (mana seed forest): native 16x16", mapped - 1));
+        } else {
+            report.push(format!("FALLBACK row 22 (mana seed): file not found, using procedural"));
+        }
+    }
+
+    // ── Summary ───────────────────────────────────────────────────────────
+    let mapped_count = report.iter().filter(|s| s.starts_with("MAPPED")).count();
+    let fallback_count = report.iter().filter(|s| s.starts_with("FALLBACK")).count();
+    report.push(format!(
+        "\nSUMMARY: {} cells mapped from real assets, {} cells used procedural fallback",
+        mapped_count, fallback_count
+    ));
+
+    (pixels, report)
 }

@@ -38,8 +38,8 @@ const UV_HUT:         [f32; 2] = [15.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
 const UV_WALL:        [f32; 2] = [16.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
 const UV_FOOD_CACHE:  [f32; 2] = [17.0 * ATLAS_CELL, 20.0 * ATLAS_CELL];
 
-/// Max objects: 10K resources + 40K decorations + 500 structures
-const MAX_OBJECTS: usize = 52_000;
+/// Max objects: 12K resources + 40K decorations + 2K structures
+const MAX_OBJECTS: usize = 60_000;
 
 /// Max decorative terrain objects — WorldBox-level density (2-3 per forest cell)
 const MAX_DECORATIONS: usize = 40_000;

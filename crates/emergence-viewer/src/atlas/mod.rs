@@ -129,3 +129,32 @@ impl Atlas {
         Some(img.into_rgba8().into_raw())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::generator;
+    use image::{ImageBuffer, Rgba};
+
+    /// Regenerate the atlas PNG from the Rust generator and write it to assets/sprites/atlas.png.
+    /// Run with: cargo test -p emergence-viewer regenerate_atlas -- --nocapture
+    #[test]
+    fn regenerate_atlas() {
+        let pixels = generator::generate();
+        assert_eq!(pixels.len(), 512 * 512 * 4, "generator must return 512x512 RGBA");
+
+        let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
+            ImageBuffer::from_raw(512, 512, pixels)
+                .expect("pixel buffer dimensions must match");
+
+        // Resolve path relative to this file's manifest dir
+        let out_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/sprites/atlas.png"
+        );
+        img.save(out_path).expect("failed to write atlas.png");
+
+        let meta = std::fs::metadata(out_path).expect("atlas.png must exist after save");
+        println!("[regenerate_atlas] wrote {} bytes to {}", meta.len(), out_path);
+        assert!(meta.len() > 6210, "new PNG should be larger than the Python placeholder");
+    }
+}

@@ -829,11 +829,12 @@ impl ApplicationHandler for App {
             self.flash_alpha = (self.flash_alpha - dt * 6.0).max(0.0);
         }
 
-        // Accumulate wall-clock time for water animation and tree sway
+        // Accumulate wall-clock time for water animation, tree sway, and being bob
         self.elapsed_time += dt;
         if let Some(ref rs) = self.render_state {
             rs.update_water_time(self.elapsed_time);
             rs.update_object_time(self.elapsed_time);
+            rs.update_being_time(self.elapsed_time);
         }
 
         // Onboarding timer (only while Playing)
@@ -1455,6 +1456,104 @@ impl ApplicationHandler for App {
                     }
                 }
 
+                // ── Floating action labels above beings ────────────────────────
+                // Sample ~1/30 of beings per frame via bucket rotation to cap label count.
+                if let Some(ref world) = self.world {
+                    let world = world.read().unwrap();
+                    let screen_w = rs.surface_config.width as f32;
+                    let screen_h = rs.surface_config.height as f32;
+                    let tick_bucket = (world.tick % 30) as usize;
+                    let count = world.beings.count;
+
+                    // Collect label data before the egui closure (borrow checker)
+                    struct LabelEntry {
+                        sx: f32,
+                        sy: f32,
+                        text: &'static str,
+                        color: egui::Color32,
+                    }
+                    let mut labels: Vec<LabelEntry> = Vec::with_capacity(32);
+
+                    for i in (tick_bucket..count).step_by(30) {
+                        if labels.len() >= 30 {
+                            break;
+                        }
+                        // Skip dead beings
+                        if world.beings.states[i] == emergence_core::being::data::BeingState::Dead {
+                            continue;
+                        }
+                        let action_u8 = world.beings.pending_action[i];
+                        let (text, color): (&'static str, egui::Color32) = match action_u8 {
+                            5  => ("Bonding",   egui::Color32::from_rgb(255, 180, 220)), // Bond — pink
+                            6  => ("Sharing",   egui::Color32::from_rgb(255, 220, 30)),  // ShareFood — yellow
+                            8  => ("Exploring", egui::Color32::from_rgb(60, 210, 80)),   // Explore — green
+                            11 => ("Mourning",  egui::Color32::from_rgb(120, 140, 255)), // Mourn — blue/indigo
+                            14 => ("Hunting",   egui::Color32::from_rgb(230, 50, 50)),   // Hunt — red
+                            15 => ("Teaching",  egui::Color32::from_rgb(255, 160, 30)),  // Teach — orange
+                            16 => ("Building",  egui::Color32::from_rgb(100, 200, 255)), // Build — cyan
+                            3  => ("Fighting",  egui::Color32::from_rgb(220, 40, 40)),   // Flee (conflict) — red
+                            _  => continue, // skip unremarkable actions
+                        };
+
+                        let pos = world.beings.positions[i];
+                        let Some([sx, sy]) = self.camera.world_to_screen(pos[0], pos[1], screen_w, screen_h)
+                        else { continue };
+
+                        // Skip if off-screen
+                        if sx < -20.0 || sx > screen_w + 20.0 || sy < -20.0 || sy > screen_h + 20.0 {
+                            continue;
+                        }
+
+                        labels.push(LabelEntry { sx, sy, text, color });
+                    }
+
+                    if !labels.is_empty() {
+                        egui::Area::new(egui::Id::new("action_labels_overlay"))
+                            .fixed_pos(egui::pos2(0.0, 0.0))
+                            .order(egui::Order::Foreground)
+                            .interactable(false)
+                            .show(&self.egui_ctx, |ui| {
+                                let painter = ui.painter();
+                                for entry in &labels {
+                                    let label_pos = egui::pos2(entry.sx, entry.sy - 22.0);
+                                    // Semi-transparent background pill
+                                    let font = egui::FontId::proportional(10.0);
+                                    let galley = painter.layout_no_wrap(
+                                        entry.text.to_string(),
+                                        font.clone(),
+                                        entry.color,
+                                    );
+                                    let text_size = galley.size();
+                                    let bg_rect = egui::Rect::from_center_size(
+                                        label_pos,
+                                        text_size + egui::vec2(6.0, 3.0),
+                                    );
+                                    painter.rect_filled(
+                                        bg_rect,
+                                        egui::CornerRadius::same(3),
+                                        egui::Color32::from_rgba_unmultiplied(0, 0, 0, 140),
+                                    );
+                                    // Shadow
+                                    painter.text(
+                                        label_pos + egui::vec2(1.0, 1.0),
+                                        egui::Align2::CENTER_CENTER,
+                                        entry.text,
+                                        egui::FontId::proportional(10.0),
+                                        egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180),
+                                    );
+                                    // Label
+                                    painter.text(
+                                        label_pos,
+                                        egui::Align2::CENTER_CENTER,
+                                        entry.text,
+                                        egui::FontId::proportional(10.0),
+                                        entry.color,
+                                    );
+                                }
+                            });
+                    }
+                }
+
                 // ── Heatmap channel legend ─────────────────────────────────────
                 if let Some(ref hm) = self.heatmap_renderer {
                     if let Some(channel) = hm.active_channel {
@@ -1632,6 +1731,7 @@ impl ApplicationHandler for App {
                             render_pass.set_pipeline(&rs.sprite_pipeline);
                             render_pass.set_bind_group(0, &rs.camera_bind_group, &[]);
                             render_pass.set_bind_group(1, &rs.atlas.bind_group, &[]);
+                            render_pass.set_bind_group(2, &rs.being_time_bind_group, &[]);
                             render_pass.set_vertex_buffer(0, being_r.vertex_buffer.slice(..));
                             render_pass.set_vertex_buffer(1, being_r.instance_buffer.slice(..));
                             render_pass.set_index_buffer(

@@ -51,6 +51,12 @@ pub struct RenderState {
     pub object_time_buffer: wgpu::Buffer,
     /// Bind group for the object time uniform.
     pub object_time_bind_group: wgpu::BindGroup,
+    /// Bind group layout for the being time uniform (group 2 in being_sprite shader).
+    pub being_time_bind_group_layout: wgpu::BindGroupLayout,
+    /// Buffer holding elapsed time for being idle bob (padded to 16 bytes).
+    pub being_time_buffer: wgpu::Buffer,
+    /// Bind group for the being time uniform.
+    pub being_time_bind_group: wgpu::BindGroup,
     pub terrain_pipeline: wgpu::RenderPipeline,
     /// Sprite pipeline (replaces old circle SDF being pipeline).
     pub sprite_pipeline: wgpu::RenderPipeline,
@@ -295,6 +301,38 @@ impl RenderState {
             }],
         });
 
+        // ── Being time uniform (group 2, being_sprite pipeline) ───────────
+        let being_time_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Being Time BGL"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let being_time_data: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
+        let being_time_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Being Time Buffer"),
+            contents: bytemuck::cast_slice(&being_time_data),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let being_time_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Being Time BG"),
+            layout: &being_time_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: being_time_buffer.as_entire_binding(),
+            }],
+        });
+
         // ── Terrain pipeline ───────────────────────────────────────────────
         let terrain_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label:  Some("Terrain Shader"),
@@ -371,6 +409,7 @@ impl RenderState {
                 bind_group_layouts: &[
                     &camera_bind_group_layout,
                     &atlas.bind_group_layout,
+                    &being_time_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });
@@ -672,6 +711,9 @@ impl RenderState {
             object_time_bind_group_layout,
             object_time_buffer,
             object_time_bind_group,
+            being_time_bind_group_layout,
+            being_time_buffer,
+            being_time_bind_group,
             terrain_pipeline,
             sprite_pipeline,
             heatmap_pipeline,
@@ -709,5 +751,10 @@ impl RenderState {
     pub fn update_object_time(&self, time: f32) {
         let data: [f32; 4] = [time, 0.0, 0.0, 0.0];
         self.queue.write_buffer(&self.object_time_buffer, 0, bytemuck::cast_slice(&data));
+    }
+
+    pub fn update_being_time(&self, time: f32) {
+        let data: [f32; 4] = [time, 0.0, 0.0, 0.0];
+        self.queue.write_buffer(&self.being_time_buffer, 0, bytemuck::cast_slice(&data));
     }
 }

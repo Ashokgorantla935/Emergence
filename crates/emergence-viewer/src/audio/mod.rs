@@ -544,8 +544,11 @@ impl SoundEngine {
                     Ok((_stream, stream_handle)) => {
                         let sfx = rodio::Sink::try_new(&stream_handle).ok();
                         let amb = rodio::Sink::try_new(&stream_handle).ok();
-                        // Stream must stay alive for the duration — leak it onto the heap.
-                        // Safe: we never free it intentionally; it lives for the process lifetime.
+                        // Both _stream and stream_handle must outlive the sinks.
+                        // Leak both onto the heap so they live for the process lifetime.
+                        // Safe: intentional, we own the audio device for the process duration.
+                        let handle_box = Box::new(stream_handle);
+                        std::mem::forget(handle_box);
                         std::mem::forget(_stream);
                         (sfx, amb)
                     }
@@ -560,6 +563,17 @@ impl SoundEngine {
                 // Prime ambient on start
                 // Set nature layer active immediately so first tick plays sound
                 state.layers[0].weight = 1.0;
+
+                // Startup confirmation: 200ms sine at 440 Hz to confirm audio pipeline is alive.
+                if let Some(ref sink) = state.sink {
+                    let vol = state.volumes.effective_master() * state.volumes.sfx();
+                    let samples = synth_sine_envelope(440.0, 440.0, 0.2, vol * 0.4, 0.05, 0.4);
+                    let source = to_rodio_source(samples, 1.0);
+                    sink.append(source);
+                    eprintln!("[audio] Startup tone queued — audio pipeline confirmed");
+                } else {
+                    eprintln!("[audio] No sink available — audio will be silent");
+                }
 
                 loop {
                     match rx.recv() {

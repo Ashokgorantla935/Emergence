@@ -386,6 +386,25 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                                 0.8,
                             );
 
+                            // Crime signal: human killed a peaceful human (unprovoked murder)
+                            if prey_type == CreatureType::Human as u8
+                                && world.beings.hot.creature_type[being_index] == CreatureType::Human as u8
+                            {
+                                let victim_last_action = world.beings.hot.pending_action[prey_idx];
+                                let victim_was_peaceful = victim_last_action != Action::Hunt as u8
+                                    && victim_last_action != 255; // 255 = no action pending
+                                if victim_was_peaceful {
+                                    let ax = pos[0] as u32;
+                                    let ay = pos[1] as u32;
+                                    world.signals.deposit(
+                                        crate::world::signal::SignalChannel::Crime,
+                                        ax.min(world.signals.width - 1),
+                                        ay.min(world.signals.height - 1),
+                                        100.0,
+                                    );
+                                }
+                            }
+
                             trigger_emotion(&mut world.beings, being_index, EMO_JOY, 0.2);
 
                             world.events.push(Event {

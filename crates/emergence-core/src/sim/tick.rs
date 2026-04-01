@@ -279,7 +279,18 @@ pub fn tick(world: &mut World) {
                 // Reward: improvement in minimum need
                 let min_before = needs_before.iter().copied().fold(f32::MAX, f32::min);
                 let min_after = needs_after.iter().copied().fold(f32::MAX, f32::min);
-                let reward = min_after - min_before;
+                let base_reward = min_after - min_before;
+
+                // Criminal penalty: if Crime signal is at this being's position and they just
+                // chose Hunt, they deposited it this tick (unprovoked murder). Apply massive penalty.
+                let crime_at_pos = world.signals.read(SignalChannel::Crime, cx, cy);
+                let reward = if crime_at_pos > 5.0
+                    && action.action == crate::being::actions::Action::Hunt
+                {
+                    -10000.0
+                } else {
+                    base_reward
+                };
 
                 // TD error: δ = reward + γ * max(new_q) - old_q[chosen]
                 let max_new_q = new_q_values.iter().copied().fold(f32::NEG_INFINITY, f32::max);

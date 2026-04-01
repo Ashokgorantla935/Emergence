@@ -8,10 +8,11 @@ pub enum SignalChannel {
     Celebration = 4,
     Anger = 5,
     Scent = 6,
+    Crime = 7,
 }
 
 impl SignalChannel {
-    pub const COUNT: usize = 7;
+    pub const COUNT: usize = 8;
 
     pub fn from_index(i: usize) -> Option<Self> {
         match i {
@@ -22,6 +23,7 @@ impl SignalChannel {
             4 => Some(Self::Celebration),
             5 => Some(Self::Anger),
             6 => Some(Self::Scent),
+            7 => Some(Self::Crime),
             _ => None,
         }
     }
@@ -32,8 +34,8 @@ pub struct SignalGrid {
     pub height: u32,
     pub channels: Vec<Vec<f32>>,
     pub wrap_horizontal: bool,
-    decay_factors: [f32; 7],
-    diffusion_rates: [f32; 7],
+    decay_factors: [f32; 8],
+    diffusion_rates: [f32; 8],
     scratch: Vec<f32>, // reusable scratch buffer for diffusion
 }
 
@@ -57,6 +59,7 @@ impl SignalGrid {
             0.9954,     // Celebration: half-life 150
             0.9965,     // Anger: half-life 200
             0.9931,     // Scent: half-life 100
+            0.9931,     // Crime: half-life 100
         ];
 
         let diffusion_rates = [
@@ -67,6 +70,7 @@ impl SignalGrid {
             0.10,     // Celebration: moderate-fast
             0.12,     // Anger: fast
             0.06,     // Scent: moderate
+            0.12,     // Crime: fast (like Anger, guards need to track quickly)
         ];
 
         SignalGrid {
@@ -97,10 +101,12 @@ impl SignalGrid {
         const COMFORT: usize = 2;
         const ANGER: usize = 5;
         const SCENT: usize = 6;
+        const CRIME: usize = 7;
 
         // Rule 1 — Fear Synthesis: anger * comfort -> danger
         // Rule 2 — Trail Reinforcement: food_trail * scent -> amplify food_trail
-        // Both rules are per-cell, no spatial coupling, safe to do in one linear pass.
+        // Rule 4 — Crime Beacon: crime signal amplifies Danger nearby
+        // All rules are per-cell, no spatial coupling, safe to do in one linear pass.
         for i in 0..len {
             let anger = self.channels[ANGER][i];
             let comfort = self.channels[COMFORT][i];
@@ -115,6 +121,12 @@ impl SignalGrid {
             let scent = self.channels[SCENT][i];
             if food_trail > 0.1 && scent > 0.1 {
                 self.channels[FOOD_TRAIL][i] = (food_trail * 1.05).min(10.0);
+            }
+
+            // Rule 4: Crime Beacon — Crime signal amplifies Danger nearby
+            let crime = self.channels[CRIME][i];
+            if crime > 0.5 {
+                self.channels[DANGER][i] = (self.channels[DANGER][i] + crime * 0.2).min(10.0);
             }
         }
 
@@ -425,6 +437,40 @@ mod tests {
         assert!(
             danger_after > danger_before,
             "danger should increase when anger and comfort overlap, before={danger_before} after={danger_after}"
+        );
+    }
+
+    #[test]
+    fn test_crime_channel_exists() {
+        let mut grid = SignalGrid::new(16, 16);
+        // Deposit max Crime at center
+        grid.deposit(SignalChannel::Crime, 8, 8, 100.0);
+        assert!(
+            (grid.read(SignalChannel::Crime, 8, 8) - 10.0).abs() < 0.001,
+            "Crime deposit should be capped at 10.0"
+        );
+
+        // Let it decay — after 100 ticks (half-life) it should be below 50% of initial
+        for _ in 0..100 {
+            grid.tick();
+        }
+
+        let val = grid.read(SignalChannel::Crime, 8, 8);
+        assert!(
+            val < 5.0,
+            "Crime signal should decay below 50% after 100 ticks (half-life), got {val}"
+        );
+        assert!(val > 0.0, "Crime signal should not be zero after 100 ticks");
+
+        // Verify Crime reaction amplifies Danger
+        let mut grid2 = SignalGrid::new(16, 16);
+        grid2.deposit(SignalChannel::Crime, 8, 8, 10.0);
+        let danger_before = grid2.read(SignalChannel::Danger, 8, 8);
+        grid2.tick();
+        let danger_after = grid2.read(SignalChannel::Danger, 8, 8);
+        assert!(
+            danger_after > danger_before,
+            "Crime signal should amplify Danger via reaction rule, before={danger_before} after={danger_after}"
         );
     }
 

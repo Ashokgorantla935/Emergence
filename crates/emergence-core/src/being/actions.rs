@@ -249,7 +249,14 @@ pub fn score_actions(
             brain_input[i] += meme_bias[i];
         }
 
-        let (q_values, _hidden) = brain::forward(&beings.hot.brain_weights[being_index], &brain_input);
+        let (mut q_values, _hidden) = brain::forward(&beings.hot.brain_weights[being_index], &brain_input);
+
+        // Guard behavior: bold humans detect Crime signal and prioritize hunting the criminal.
+        // Read Crime separately (channel 7, not in LocalSignals cache which only holds 7 channels).
+        let crime_at_pos = signals.read(SignalChannel::Crime, cx, cy);
+        if crime_at_pos > 0.1 && beings.hot.personalities[being_index][TRAIT_BOLD] > 0.3 {
+            q_values[Action::Hunt as usize] += 20.0;
+        }
 
         // Build allowed action indices for Boltzmann selection
         let allowed_indices: Vec<u8> = Action::ALL.iter().map(|&a| a as u8).collect();
@@ -327,7 +334,32 @@ pub fn score_actions(
                 }
             }
             Action::Hunt => {
-                if let Some(pp) = find_nearest_prey(pos, radius, being_index, beings, &nearby) {
+                // If Crime signal detected, chase the crime gradient (guard behavior)
+                if crime_at_pos > 0.1 {
+                    let (gdx, gdy) = signals.gradient(SignalChannel::Crime, pos[0], pos[1], radius * 2.0);
+                    if gdx.abs() > 0.01 || gdy.abs() > 0.01 {
+                        target_pos = Some([pos[0] + gdx * radius, pos[1] + gdy * radius]);
+                        // Check if any human near the crime peak is the criminal
+                        for &ni in &nearby {
+                            if ni == being_index || beings.hot.states[ni] == BeingState::Dead {
+                                continue;
+                            }
+                            if beings.hot.creature_type[ni] == CreatureType::Human as u8 {
+                                let np = beings.hot.positions[ni];
+                                let ndx = np[0] - pos[0];
+                                let ndy = np[1] - pos[1];
+                                if ndx * gdx + ndy * gdy > 0.0 {
+                                    target_being = Some(ni);
+                                    target_pos = Some(np);
+                                    break;
+                                }
+                            }
+                        }
+                    } else if let Some(pp) = find_nearest_prey(pos, radius, being_index, beings, &nearby) {
+                        target_pos = Some(pp.1);
+                        target_being = Some(pp.0);
+                    }
+                } else if let Some(pp) = find_nearest_prey(pos, radius, being_index, beings, &nearby) {
                     target_pos = Some(pp.1);
                     target_being = Some(pp.0);
                 }

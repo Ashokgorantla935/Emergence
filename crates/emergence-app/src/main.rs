@@ -2107,6 +2107,8 @@ impl ApplicationHandler for App {
                                 ("ANGER", "F6 — Anger/conflict. High near fights and theft.", egui::Color32::from_rgb(220, 80, 30)),
                             emergence_core::world::signal::SignalChannel::Scent =>
                                 ("SCENT", "F7 — Cultural identity. Beings recognize group members.", egui::Color32::from_rgb(200, 120, 220)),
+                            emergence_core::world::signal::SignalChannel::Crime =>
+                                ("CRIME", "F8 — Murder beacon. Deposited by unprovoked killers. Bold beings hunt the source.", egui::Color32::from_rgb(200, 0, 200)),
                         };
 
                         egui::Area::new(egui::Id::new("heatmap_legend"))

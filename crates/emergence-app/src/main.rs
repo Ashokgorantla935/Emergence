@@ -155,6 +155,7 @@ struct App {
     // Observation systems
     settlement_detector: SettlementDetector,
     kingdom_detector: KingdomDetector,
+    cached_kingdom_frame: Option<emergence_viewer::renderer::kingdom_overlay::KingdomFrame>,
     kingdom_panel: KingdomPanel,
     news_feed_system: NewsFeedSystem,
 
@@ -333,6 +334,7 @@ impl App {
             god_tool_state: GodToolState::new(),
             settlement_detector: SettlementDetector::new(),
             kingdom_detector: KingdomDetector::new(),
+            cached_kingdom_frame: None,
             kingdom_panel: KingdomPanel::new(),
             news_feed_system: NewsFeedSystem::new(),
             news_feed_ui: NewsFeed::new(),
@@ -1053,8 +1055,7 @@ impl ApplicationHandler for App {
                     {
                         use emergence_core::sim::world_state::EventType;
                         use emergence_viewer::audio::WorldEventSound;
-                        let recent = world.events.events.iter()
-                            .filter(|e| e.tick + ticks >= world.tick);
+                        let recent = world.events.recent_events(world.tick.saturating_sub(ticks));
                         let mut had_birth = false;
                         let mut had_death = false;
                         let mut had_combat = false;
@@ -1090,8 +1091,7 @@ impl ApplicationHandler for App {
                     // World annotations: spawn callouts for dramatic kingdom events
                     {
                         use emergence_core::sim::world_state::EventType;
-                        let recent = world.events.events.iter()
-                            .filter(|e| e.tick + ticks >= world.tick);
+                        let recent = world.events.recent_events(world.tick.saturating_sub(ticks));
                         for ev in recent {
                             let (text, color, duration) = match ev.event_type {
                                 EventType::KingdomFormed => {
@@ -1372,7 +1372,11 @@ impl ApplicationHandler for App {
                 // At high speeds (many ticks/frame) we always render at 1.0.
                 // At Speed1x the tick runs at end of each frame so frac = 1.0.
                 let frame_frac = 1.0f32;
-                br.update(&rs.queue, &world.beings, &self.anim, frame_frac, world.tick as u32, pixels_per_unit, world.terrain.width, world.terrain.height);
+                let cx = self.camera.position[0];
+                let cy = self.camera.position[1];
+                let half_w = self.camera.zoom * self.camera.aspect * 0.5 + 4.0;
+                let half_h = self.camera.zoom * 0.5 + 4.0;
+                br.update(&rs.queue, &world.beings, &self.anim, frame_frac, world.tick as u32, pixels_per_unit, world.terrain.width, world.terrain.height, cx, cy, half_w, half_h);
             }
             self.profile_accum.being_ms += being_t.elapsed().as_secs_f32() * 1000.0;
 
@@ -1418,7 +1422,7 @@ impl ApplicationHandler for App {
                 // Campfire ember particles: emit every 6 frames for each campfire.
                 // Campfire u8 value = 1. Scan only the visible viewport to avoid full-grid scan.
                 let frame_tick = world.tick;
-                if frame_tick % 6 == 0 {
+                if frame_tick % 6 == 0 && self.camera.zoom < 60.0 {
                     let tw = world.terrain.width as usize;
                     let th = world.terrain.height as usize;
                     let half_w = (self.camera.zoom * self.camera.aspect * 0.5 + 4.0) as usize;
@@ -1445,9 +1449,9 @@ impl ApplicationHandler for App {
                 }
 
                 // Birth sparkle + death soul: scan recent events this tick
-                for event in &world.events.events {
-                    if event.tick == world.tick {
-                        match event.event_type {
+                let recent_events = world.events.recent_events(world.tick);
+                for event in recent_events {
+                    match event.event_type {
                             EventType::Born => {
                                 ps.emit(EmitterKind::BirthSparkle, event.location, world.tick);
                             }
@@ -1456,7 +1460,6 @@ impl ApplicationHandler for App {
                             }
                             _ => {}
                         }
-                    }
                 }
 
                 // Emotion event particles: sample beings every 20 ticks to avoid flood.
@@ -1514,8 +1517,15 @@ impl ApplicationHandler for App {
             // Kingdom overlay prepare
             let kingdom_t = Instant::now();
             if let Some(ref mut ko) = self.kingdom_overlay {
-                let frame = build_kingdom_frame(&self.kingdom_detector, &world, world.tick);
-                ko.prepare(&rs.queue, &frame);
+                // Throttle expensive convex hull calculations to 1Hz
+                if world.tick % 60 == 0 || self.cached_kingdom_frame.is_none() {
+                    self.cached_kingdom_frame = Some(build_kingdom_frame(&self.kingdom_detector, &world, world.tick));
+                }
+                if let Some(ref mut frame) = self.cached_kingdom_frame {
+                    // Update the tick so the shader/CPU pulsing still animates at 60fps
+                    frame.tick = world.tick;
+                    ko.prepare(&rs.queue, frame);
+                }
             }
             self.profile_accum.kingdom_ms += kingdom_t.elapsed().as_secs_f32() * 1000.0;
         }

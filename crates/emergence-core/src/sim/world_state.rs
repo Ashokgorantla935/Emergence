@@ -108,6 +108,24 @@ impl EventLog {
             .filter(|e| e.actor_id == being_id || e.target_id == being_id)
             .collect()
     }
+
+    /// Get events that happened since `since_tick`.
+    /// Traverses the ring buffer backwards and stops as soon as it hits older events.
+    pub fn recent_events(&self, since_tick: u32) -> Vec<&Event> {
+        let mut result = Vec::new();
+        if self.len == 0 {
+            return result;
+        }
+        for i in 0..self.len {
+            let idx = (self.head + self.capacity - 1 - i) % self.capacity;
+            let ev = &self.events[idx];
+            if ev.tick < since_tick {
+                break; // Because events are pushed in chronological order
+            }
+            result.push(ev);
+        }
+        result
+    }
 }
 
 /// 28 named boolean world laws. Each is a branch-predicted check at the relevant engine point.

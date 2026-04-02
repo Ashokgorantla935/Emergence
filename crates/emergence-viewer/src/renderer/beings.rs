@@ -101,6 +101,10 @@ impl BeingRenderer {
         pixels_per_unit: f32,
         world_width:     u32,
         world_height:    u32,
+        cam_x:           f32,
+        cam_y:           f32,
+        cam_half_w:      f32,
+        cam_half_h:      f32,
     ) {
         let lod = if pixels_per_unit > 10.0 { 0u8 }
             else if pixels_per_unit > 3.0  { 1 }
@@ -193,9 +197,12 @@ impl BeingRenderer {
                 _ => (atlas_uv, atlas_size, size, bob_flip),
             };
 
-            // Skip beings outside world bounds to avoid rendering garbage
+            // Skip beings outside viewport (Frustum culling per being)
             let (px, py) = (beings.hot.positions[i][0], beings.hot.positions[i][1]);
-            if px < 0.0 || px >= world_width as f32 || py < 0.0 || py >= world_height as f32 {
+            // Over-pad the check area slightly so beings don't pop brightly on screen edges
+            let margin = 2.0;
+            if px < cam_x - cam_half_w - margin || px > cam_x + cam_half_w + margin ||
+               py < cam_y - cam_half_h - margin || py > cam_y + cam_half_h + margin {
                 continue;
             }
 
@@ -220,7 +227,8 @@ impl BeingRenderer {
         }
 
         // Y-sort: lower Y (screen bottom) renders on top of higher Y (screen top)
-        instances.sort_by(|a, b| a.position[1].partial_cmp(&b.position[1]).unwrap_or(std::cmp::Ordering::Equal));
+        // sort_unstable_by is significantly faster than sort_by for float components
+        instances.sort_unstable_by(|a, b| a.position[1].partial_cmp(&b.position[1]).unwrap_or(std::cmp::Ordering::Equal));
 
         self.instance_count = instances.len() as u32;
         if !instances.is_empty() {

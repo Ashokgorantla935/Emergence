@@ -169,8 +169,10 @@ impl TerrainRenderer {
         terrain: &Terrain,
         cam_x: f32, cam_y: f32, cam_zoom: f32, cam_aspect: f32,
     ) {
-        if self.last_cam_x == cam_x && self.last_cam_y == cam_y &&
-           self.last_cam_zoom == cam_zoom && self.last_cam_aspect == cam_aspect {
+        if (self.last_cam_x - cam_x).abs() < 1.0 && 
+           (self.last_cam_y - cam_y).abs() < 1.0 &&
+           (self.last_cam_zoom - cam_zoom).abs() < 1.0 && 
+           (self.last_cam_aspect - cam_aspect).abs() < 0.01 {
             return;
         }
         self.last_cam_x = cam_x;

@@ -958,7 +958,7 @@ impl LaunchOverlayUi {
             self.logo_texture = Some(ctx.load_texture(
                 "emergence_logo",
                 color_image,
-                egui::TextureOptions::LINEAR,
+                egui::TextureOptions::NEAREST,
             ));
         }
     }
@@ -1034,7 +1034,7 @@ impl LaunchOverlayUi {
 
         // ── Central logo + CTA ─────────────────────────────────────────────
         egui::Area::new(egui::Id::new("launch_center"))
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -60.0))
+            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 40.0))
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
@@ -1061,9 +1061,9 @@ impl LaunchOverlayUi {
                     );
                     ui.add_space(40.0);
 
-                    // "Start Simulation" CTA button
+                    // "Start World" CTA button
                     let btn = egui::Button::new(
-                        egui::RichText::new("Start Simulation")
+                        egui::RichText::new("Start World")
                             .strong()
                             .size(18.0)
                             .color(egui::Color32::BLACK),

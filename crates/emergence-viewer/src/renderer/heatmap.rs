@@ -132,6 +132,7 @@ impl HeatmapRenderer {
             SignalChannel::Anger => (1.0, 0.5, 0.0),
             SignalChannel::Scent => (0.5, 0.5, 0.5),
             SignalChannel::Crime => (0.8, 0.0, 0.8), // purple: crime/murder beacon
+            SignalChannel::Toxin => (0.4, 0.9, 0.2), // green: environmental toxin
         };
 
         let mut pixels = Vec::with_capacity((self.width * self.height * 4) as usize);

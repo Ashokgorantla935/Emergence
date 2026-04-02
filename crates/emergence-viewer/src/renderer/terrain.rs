@@ -10,10 +10,12 @@ const ATLAS_CELL: f32 = 1.0 / 32.0;
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct TerrainInstance {
-    pub world_pos: [f32; 2], // world x, y of this cell
-    pub tile_uv:   [f32; 2], // UV origin in the atlas for this tile
-    pub flags:     f32,      // 1.0 = water, 0.0 = land
-    pub _pad:      f32,
+    pub world_pos:      [f32; 2], // world x, y of this cell
+    pub tile_uv:        [f32; 2], // UV origin in the atlas for this tile
+    pub flags:          f32,      // biome id: 0=grass, 1=water, 2=forest, ...
+    pub elevation:      f32,      // terrain elevation [0.0, 1.0] — used for water depth coloring
+    pub structure_type: f32,      // StructureType as f32: 0=None, 1=Campfire, 2=LeanTo, 3=Hut, 4=Wall, 5=ResourceCache
+    pub _pad:           f32,      // padding to 32 bytes
 }
 
 /// Unit quad vertex.
@@ -80,14 +82,18 @@ const SNOW_TILES: &[[f32; 2]] = &[
     tile_uv(28, 28), tile_uv(29, 28),
 ];
 
-/// Max instances — 256*256 = 65536 cells.
-const MAX_INSTANCES: usize = 200_000; // enough for ~450x450 viewport
+/// Max instances — 2048*2048 = 4.19M cells.
+const MAX_INSTANCES: usize = 500_000; // capped for GPU performance
 
 pub struct TerrainRenderer {
     pub vertex_buffer:   wgpu::Buffer,
     pub index_buffer:    wgpu::Buffer,
     pub instance_buffer: wgpu::Buffer,
     pub instance_count:  u32,
+    pub last_cam_x:      f32,
+    pub last_cam_y:      f32,
+    pub last_cam_zoom:   f32,
+    pub last_cam_aspect: f32,
 }
 
 impl TerrainRenderer {
@@ -132,6 +138,10 @@ impl TerrainRenderer {
             index_buffer,
             instance_buffer,
             instance_count: 0,
+            last_cam_x:      f32::NAN,
+            last_cam_y:      f32::NAN,
+            last_cam_zoom:   f32::NAN,
+            last_cam_aspect: f32::NAN,
         };
 
         // Instances will be rebuilt per-frame with viewport culling
@@ -143,6 +153,15 @@ impl TerrainRenderer {
         renderer
     }
 
+    /// Invalidate the viewport cache — forces a full rebuild on the next call to rebuild_instances_viewport.
+    /// Call this when terrain data changes (structures placed, biomes edited) without recreating the renderer.
+    pub fn invalidate_cache(&mut self) {
+        self.last_cam_x     = f32::NAN;
+        self.last_cam_y     = f32::NAN;
+        self.last_cam_zoom  = f32::NAN;
+        self.last_cam_aspect = f32::NAN;
+    }
+
     /// Rebuild instance buffer for visible terrain cells within camera viewport.
     pub fn rebuild_instances_viewport(
         &mut self,
@@ -150,6 +169,15 @@ impl TerrainRenderer {
         terrain: &Terrain,
         cam_x: f32, cam_y: f32, cam_zoom: f32, cam_aspect: f32,
     ) {
+        if self.last_cam_x == cam_x && self.last_cam_y == cam_y &&
+           self.last_cam_zoom == cam_zoom && self.last_cam_aspect == cam_aspect {
+            return;
+        }
+        self.last_cam_x = cam_x;
+        self.last_cam_y = cam_y;
+        self.last_cam_zoom = cam_zoom;
+        self.last_cam_aspect = cam_aspect;
+
         let w = terrain.width as usize;
         let h = terrain.height as usize;
 
@@ -161,14 +189,16 @@ impl TerrainRenderer {
         let y_min = ((cam_y - half_h).floor() as isize).max(0) as usize;
         let y_max = ((cam_y + half_h).ceil() as usize + 1).min(h);
 
-        let capacity = (x_max - x_min) * (y_max - y_min);
-        if capacity > MAX_INSTANCES {
-            eprintln!("TERRAIN WARNING: viewport has {} cells but MAX_INSTANCES={}", capacity, MAX_INSTANCES);
-        }
-        let mut instances = Vec::with_capacity(capacity.min(MAX_INSTANCES));
+        let visible_cells = (x_max - x_min) * (y_max - y_min);
+        let stride: usize = if visible_cells > 1_000_000 { 4 }
+                            else if visible_cells > 250_000 { 2 }
+                            else { 1 };
 
-        'outer: for y in y_min..y_max {
-            for x in x_min..x_max {
+        let capacity = (visible_cells / (stride * stride)).min(MAX_INSTANCES);
+        let mut instances = Vec::with_capacity(capacity);
+
+        'outer: for y in (y_min..y_max).step_by(stride) {
+            for x in (x_min..x_max).step_by(stride) {
                 if instances.len() >= MAX_INSTANCES { break 'outer; }
                 let idx = y * w + x;
                 let biome = terrain.biome[idx];
@@ -197,25 +227,22 @@ impl TerrainRenderer {
                     Biome::Wetland   => 5.0,
                     Biome::Snow      => 6.0,
                 };
-                let is_water = biome == Biome::Water;
+                let elevation = terrain.elevation[idx];
+
+                let structure_type = terrain.structure[idx] as f32;
 
                 instances.push(TerrainInstance {
                     world_pos: [x as f32, y as f32],
                     tile_uv,
                     flags: biome_flag,
-                    _pad: 0.0,
+                    elevation,
+                    structure_type,
+                    _pad: stride as f32,
                 });
             }
         }
 
         self.instance_count = instances.len() as u32;
-
-        eprintln!(
-            "TERRAIN: {} instances ({}x{} grid), {} bytes",
-            self.instance_count,
-            w, h,
-            instances.len() * std::mem::size_of::<TerrainInstance>(),
-        );
 
         if !instances.is_empty() {
             queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));

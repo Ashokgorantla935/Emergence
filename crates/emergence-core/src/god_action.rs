@@ -154,6 +154,9 @@ pub enum GodAction {
     MeteorStrike {
         pos: [f32; 2],
     },
+    Volcano {
+        pos: [f32; 2],
+    },
     WildfireIgnite {
         x: u32,
         y: u32,
@@ -378,6 +381,42 @@ impl GodActionQueue {
 
     pub fn is_empty(&self) -> bool {
         self.pending.is_empty()
+    }
+}
+
+/// Base movement cost for a biome (mirrors terrain.rs initialization logic).
+fn biome_movement_cost(biome: crate::world::terrain::Biome) -> f32 {
+    crate::world::terrain::biome_movement_cost(biome)
+}
+
+/// Apply permanent topographic mutation to a circular region of the heightmap.
+/// Positive `boost` raises terrain (volcano); negative lowers it (earthquake depression).
+fn mutate_topography(world: &mut World, center_x: i32, center_y: i32, radius: f32, boost: f32) {
+    let w = world.config.size.0 as i32;
+    let h = world.config.size.1 as i32;
+    let r_ceil = radius.ceil() as i32;
+
+    for dy in -r_ceil..=r_ceil {
+        for dx in -r_ceil..=r_ceil {
+            let wx = (center_x + dx).clamp(0, w - 1) as usize;
+            let wy = (center_y + dy).clamp(0, h - 1) as usize;
+            let dist = ((dx * dx + dy * dy) as f32).sqrt();
+            if dist <= radius {
+                let idx = wy * w as usize + wx;
+                let falloff = 1.0 - (dist / radius);
+                let delta = falloff * falloff * boost;
+                world.terrain.elevation[idx] = (world.terrain.elevation[idx] + delta).clamp(0.0, 1.0);
+                world.terrain.biome[idx] = crate::world::terrain::classify_biome(
+                    world.terrain.elevation[idx],
+                    world.terrain.temperature_base[idx],
+                    world.terrain.moisture[idx],
+                );
+                let cost = biome_movement_cost(world.terrain.biome[idx]);
+                world.terrain.movement_cost[idx] = cost;
+                world.terrain.seasonal_movement_cost[idx] = cost;
+                world.terrain.modified[idx] = world.terrain.modified[idx].saturating_add(1);
+            }
+        }
     }
 }
 
@@ -697,7 +736,7 @@ fn apply_god_action(world: &mut World, action: GodAction) {
                     }
                 }
             }
-            // Create crater
+            // Create crater with permanent elevation depression and biome reclassification
             let r = 5i32;
             let cx = pos[0] as i32;
             let cy = pos[1] as i32;
@@ -714,10 +753,43 @@ fn apply_god_action(world: &mut World, action: GodAction) {
                             let depth = 1.0 - (d2 as f32 / (r * r) as f32).sqrt();
                             world.terrain.elevation[idx] = (world.terrain.elevation[idx] - depth * 0.3).max(0.0);
                             world.terrain.modified[idx] = world.terrain.modified[idx].saturating_add(1);
+                            world.terrain.biome[idx] = crate::world::terrain::classify_biome(
+                                world.terrain.elevation[idx],
+                                world.terrain.temperature_base[idx],
+                                world.terrain.moisture[idx],
+                            );
+                            let cost = biome_movement_cost(world.terrain.biome[idx]);
+                            world.terrain.movement_cost[idx] = cost;
+                            world.terrain.seasonal_movement_cost[idx] = cost;
                         }
                     }
                 }
             }
+        }
+
+        GodAction::Volcano { pos } => {
+            // Permanent heightmap mutation: elevation boost in 15-cell radius with fBm-like falloff.
+            let cx = pos[0] as i32;
+            let cy = pos[1] as i32;
+            mutate_topography(world, cx, cy, 15.0, 0.4);
+            // Kill beings caught in the eruption zone
+            let kill_r2 = 25.0f32;
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let p = world.beings.hot.positions[i];
+                    let dx = p[0] - pos[0];
+                    let dy = p[1] - pos[1];
+                    if dx * dx + dy * dy <= kill_r2 {
+                        world.beings.hot.states[i] = BeingState::Dead;
+                        world.beings.hot.alive_count = world.beings.hot.alive_count.saturating_sub(1);
+                    }
+                }
+            }
+            // Danger + anger signal burst
+            let scx = (pos[0] as u32).min(world.signals.width - 1);
+            let scy = (pos[1] as u32).min(world.signals.height - 1);
+            world.signals.deposit(crate::world::signal::SignalChannel::Danger, scx, scy, 5.0);
+            world.signals.deposit(crate::world::signal::SignalChannel::Anger, scx, scy, 2.0);
         }
 
         GodAction::WildfireIgnite { x, y } => {
@@ -775,6 +847,11 @@ fn apply_god_action(world: &mut World, action: GodAction) {
                     }
                 }
             }
+            // Permanent topographic depression across the quake region (potentially forming lakes).
+            let cx = (region.x + region.w / 2) as i32;
+            let cy = (region.y + region.h / 2) as i32;
+            let radius = ((region.w.max(region.h)) as f32 * 0.5).max(10.0);
+            mutate_topography(world, cx, cy, radius, -0.3 * intensity);
         }
 
         GodAction::FloodArea { region, duration: _ } => {

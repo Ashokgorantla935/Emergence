@@ -35,7 +35,7 @@ fn earth() -> MapDefinition {
         id: "earth",
         name: "Earth",
         description: "Real-world heightmap. Civilizations emerge at river valleys.",
-        size: MapSize::Medium,
+        size: MapSize::Huge,
         difficulty_rating: 3,
         elevation_source: ElevationSource::Baked {
             data: map_assets::earth::ELEVATION_256,
@@ -46,13 +46,14 @@ fn earth() -> MapDefinition {
         water_placement: WaterPlacement::BakedMask {
             data: map_assets::earth::WATER_256,
         },
+        // Coordinates scaled from 256-space to 2048-space (factor 8). Radii scaled too.
         spawn_points: vec![
-            SpawnPoint { name: "Fertile Crescent", center: (164.0, 100.0), radius: 12.0, fertility: 2.0 },
-            SpawnPoint { name: "Nile Valley",       center: (155.0, 115.0), radius: 10.0, fertility: 2.5 },
-            SpawnPoint { name: "Indus Basin",       center: (183.0, 105.0), radius: 10.0, fertility: 2.0 },
-            SpawnPoint { name: "Yellow River",      center: (210.0,  95.0), radius: 10.0, fertility: 1.8 },
-            SpawnPoint { name: "Great Plains",      center: ( 60.0,  95.0), radius: 15.0, fertility: 1.5 },
-            SpawnPoint { name: "Amazon Basin",      center: ( 75.0, 130.0), radius: 12.0, fertility: 1.8 },
+            SpawnPoint { name: "Fertile Crescent", center: (1312.0, 800.0),  radius: 96.0,  fertility: 2.0 },
+            SpawnPoint { name: "Nile Valley",       center: (1240.0, 920.0),  radius: 80.0,  fertility: 2.5 },
+            SpawnPoint { name: "Indus Basin",       center: (1464.0, 840.0),  radius: 80.0,  fertility: 2.0 },
+            SpawnPoint { name: "Yellow River",      center: (1680.0, 760.0),  radius: 80.0,  fertility: 1.8 },
+            SpawnPoint { name: "Great Plains",      center: ( 480.0, 760.0),  radius: 120.0, fertility: 1.5 },
+            SpawnPoint { name: "Amazon Basin",      center: ( 600.0, 1040.0), radius: 96.0,  fertility: 1.8 },
         ],
         resource_modifiers: ResourceModifiers::default(),
     }
@@ -63,7 +64,7 @@ fn mars() -> MapDefinition {
         id: "mars",
         name: "Mars",
         description: "Martian terrain. Olympus Mons dominates the NW. Survival is brutal.",
-        size: MapSize::Medium,
+        size: MapSize::Huge,
         difficulty_rating: 8,
         elevation_source: ElevationSource::Baked {
             data: map_assets::mars::ELEVATION_256,
@@ -72,9 +73,10 @@ fn mars() -> MapDefinition {
         },
         biome_rules: BiomeRules::MarsRules,
         water_placement: WaterPlacement::None,
+        // Coordinates scaled from 256-space to 2048-space (factor 8). Radii scaled too.
         spawn_points: vec![
-            SpawnPoint { name: "Canyon Floor West", center: (100.0, 125.0), radius: 8.0, fertility: 0.4 },
-            SpawnPoint { name: "Canyon Floor East", center: (185.0, 125.0), radius: 8.0, fertility: 0.4 },
+            SpawnPoint { name: "Canyon Floor West", center: (800.0, 1000.0),  radius: 64.0, fertility: 0.4 },
+            SpawnPoint { name: "Canyon Floor East", center: (1480.0, 1000.0), radius: 64.0, fertility: 0.4 },
         ],
         resource_modifiers: ResourceModifiers {
             food_multiplier: 0.3,
@@ -89,7 +91,7 @@ fn pangaea() -> MapDefinition {
         id: "pangaea",
         name: "Pangaea",
         description: "One massive continent surrounded by open ocean with mountain ridges.",
-        size: MapSize::Medium,
+        size: MapSize::Huge,
         difficulty_rating: 3,
         elevation_source: ElevationSource::Procedural {
             params: ProceduralParams {
@@ -117,7 +119,7 @@ fn archipelago() -> MapDefinition {
         id: "archipelago",
         name: "Archipelago",
         description: "Scattered islands of varied sizes across a warm tropical sea.",
-        size: MapSize::Medium,
+        size: MapSize::Huge,
         difficulty_rating: 4,
         elevation_source: ElevationSource::Procedural {
             params: ProceduralParams {
@@ -149,7 +151,7 @@ fn ring_world() -> MapDefinition {
         id: "ring_world",
         name: "Ring World",
         description: "A cylindrical habitat with horizontal wrap and distinct biome bands.",
-        size: MapSize::Medium,
+        size: MapSize::Huge,
         difficulty_rating: 3,
         elevation_source: ElevationSource::Procedural {
             params: ProceduralParams {
@@ -190,7 +192,7 @@ fn fractal_continent() -> MapDefinition {
         id: "fractal_continent",
         name: "Fractal Continent",
         description: "Deep fjords and complex coastlines carved by domain-warped noise.",
-        size: MapSize::Medium,
+        size: MapSize::Huge,
         difficulty_rating: 3,
         elevation_source: ElevationSource::Procedural {
             params: ProceduralParams {
@@ -218,7 +220,7 @@ fn crucible() -> MapDefinition {
         id: "crucible",
         name: "The Crucible",
         description: "A tiny, dense arena with abundant resources and no room to hide.",
-        size: MapSize::Tiny,
+        size: MapSize::Huge,
         difficulty_rating: 5,
         elevation_source: ElevationSource::Procedural {
             params: ProceduralParams {
@@ -252,7 +254,7 @@ fn twin_peaks() -> MapDefinition {
         id: "twin_peaks",
         name: "Twin Peaks",
         description: "Two parallel mountain ranges with a fertile valley and river between them.",
-        size: MapSize::Medium,
+        size: MapSize::Huge,
         difficulty_rating: 3,
         elevation_source: ElevationSource::Procedural {
             params: ProceduralParams {
@@ -295,10 +297,10 @@ mod tests {
     }
 
     #[test]
-    fn crucible_is_tiny() {
+    fn crucible_is_huge() {
         let def = get(MapId::Crucible);
-        assert_eq!(def.size, MapSize::Tiny);
-        assert_eq!(def.size.dimensions(), (64, 64));
+        assert_eq!(def.size, MapSize::Huge);
+        assert_eq!(def.size.dimensions(), (2048, 2048));
     }
 
     #[test]

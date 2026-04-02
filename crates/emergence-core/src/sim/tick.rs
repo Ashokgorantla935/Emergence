@@ -10,7 +10,7 @@ pub const FIXED_DT: f32 = 1.0;
 use crate::being::actions::{score_actions, ScoredAction};
 use crate::being::data::*;
 use crate::being::emotions::{decay_emotions, trigger_emotion, update_emotions_from_needs};
-use crate::being::lifecycle::{age_beings, age_beings_no_death, check_death_conditions, drift_personality_humans, generate_personality};
+use crate::being::lifecycle::{age_beings, age_beings_no_death, blend_child_genotype, check_death_conditions, drift_personality_humans, generate_personality};
 use crate::being::names::generate_name;
 use crate::being::needs::decay_needs;
 use crate::being::social::{deposit_emotion_signals, init_kinship_warmth};
@@ -63,6 +63,14 @@ pub fn tick(world: &mut World) {
 
     // 3. Signal tick
     world.signals.tick();
+
+    // 3b. Toxin greenhouse effect: accumulate global temperature every 60 ticks.
+    if world.tick % 60 == 0 {
+        let toxin_sum: f32 = world.signals.channels[SignalChannel::Toxin as usize].iter().sum();
+        let heat_trap = toxin_sum * 0.00001;
+        world.climate.global_temperature += heat_trap;
+        world.climate.water_level_offset = world.climate.global_temperature * 0.01;
+    }
 
     // 4. Rebuild spatial index
     world.spatial.rebuild(&world.beings.hot.positions, &world.beings.hot.states);
@@ -478,6 +486,41 @@ pub fn tick(world: &mut World) {
         }
     }
 
+    // 6c. Trauma engrams: massive danger spikes permanently suppress exploration and boost defense.
+    // Only runs every 100 ticks to amortize cost.
+    if world.tick % 100 == 0 {
+        let grid_cells = (world.signals.width * world.signals.height) as f32;
+        let danger_sum: f32 = world.signals.channels[SignalChannel::Danger as usize].iter().sum();
+        let avg_danger = danger_sum / grid_cells;
+
+        if avg_danger > 2.0 {
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] == BeingState::Dead { continue; }
+                if world.beings.hot.creature_type[i] != crate::being::data::CreatureType::Human as u8 { continue; }
+
+                let pos = world.beings.hot.positions[i];
+                let bx = (pos[0] as u32).min(world.signals.width - 1);
+                let by = (pos[1] as u32).min(world.signals.height - 1);
+                let idx = (by * world.signals.width + bx) as usize;
+                let local_danger = world.signals.channels[SignalChannel::Danger as usize]
+                    .get(idx)
+                    .copied()
+                    .unwrap_or(0.0);
+
+                if local_danger > 1.5 {
+                    if let Some(geno) = world.beings.cold.genotypes.get_mut(i) {
+                        geno.q_baselines[crate::being::actions::Action::Explore as usize] =
+                            (geno.q_baselines[crate::being::actions::Action::Explore as usize] - 0.3)
+                                .max(-5.0);
+                        geno.q_baselines[crate::being::actions::Action::Build as usize] =
+                            (geno.q_baselines[crate::being::actions::Action::Build as usize] + 0.2)
+                                .min(5.0);
+                    }
+                }
+            }
+        }
+    }
+
     // 7. Structure decay (every 100 ticks to reduce cost)
     if world.tick % 100 == 0 {
         // decay_structures advances age by 1 per call (we call every 100 ticks = 100 age per 100 ticks)
@@ -676,8 +719,9 @@ fn apply_weather_effects(world: &mut World) {
 }
 
 fn process_births(world: &mut World) {
+    use crate::being::data::Genotype;
     let tick = world.tick;
-    let mut new_beings: Vec<([f32; 2], [f32; 5], u32, [u32; 2])> = Vec::new();
+    let mut new_beings: Vec<([f32; 2], [f32; 5], u32, [u32; 2], Genotype)> = Vec::new();
 
     // Find candidate parent pairs — humans only (fauna populations are fixed at world gen)
     for i in 0..world.beings.hot.count {
@@ -760,11 +804,14 @@ fn process_births(world: &mut World) {
                 (pos[1] + partner_pos[1]) / 2.0,
             ];
 
+            let child_genotype = blend_child_genotype(&world.beings, i, partner, &mut world.rng);
+
             new_beings.push((
                 birth_pos,
                 child_personality,
                 child_lifespan,
                 [i as u32, partner as u32],
+                child_genotype,
             ));
 
             break; // one birth per being per tick
@@ -772,7 +819,7 @@ fn process_births(world: &mut World) {
     }
 
     // Spawn new beings
-    for (pos, personality, lifespan, parents) in new_beings {
+    for (pos, personality, lifespan, parents, child_genotype) in new_beings {
         // Set birth cooldown on both parents BEFORE spawn (spawn grows vecs)
         let pa = parents[0] as usize;
         let pb = parents[1] as usize;
@@ -783,6 +830,12 @@ fn process_births(world: &mut World) {
             world.beings.cold.last_birth_tick[pb] = tick;
         }
         let idx = world.beings.spawn(pos, personality, lifespan, parents);
+        world.beings.cold.genotypes[idx] = child_genotype;
+        // Initialize brain with inherited Q-baselines seeded into output biases
+        world.beings.hot.brain_weights[idx] = init_human_brain_with_genotype(
+            &mut world.rng,
+            Some(&world.beings.cold.genotypes[idx]),
+        );
         world.beings.cold.names[idx] = generate_name(&mut world.rng);
         // New births are human by default; keep human_count in sync so capacity check stays accurate.
         world.beings.hot.human_count += 1;

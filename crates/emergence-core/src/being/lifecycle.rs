@@ -1,6 +1,63 @@
 use super::data::*;
 use crate::world::climate::Season;
 
+/// Blend genotypes from two parents, apply mutation, and return the child genotype.
+/// If only one parent index is valid (u32::MAX = no parent), single-parent clone + mutation.
+pub fn blend_child_genotype(
+    beings: &Beings,
+    parent_a: usize,
+    parent_b: usize,
+    rng: &mut fastrand::Rng,
+) -> Genotype {
+    let geno_a = if parent_a < beings.cold.genotypes.len() {
+        beings.cold.genotypes[parent_a].clone()
+    } else {
+        Genotype::default()
+    };
+    let geno_b = if parent_b < beings.cold.genotypes.len() {
+        beings.cold.genotypes[parent_b].clone()
+    } else {
+        geno_a.clone()
+    };
+
+    let mut child = Genotype {
+        q_baselines: {
+            let mut q = [0.0f32; 23];
+            for i in 0..23 {
+                q[i] = (geno_a.q_baselines[i] + geno_b.q_baselines[i]) * 0.5;
+            }
+            q
+        },
+        speed_factor: (geno_a.speed_factor + geno_b.speed_factor) * 0.5,
+        cold_resistance: (geno_a.cold_resistance + geno_b.cold_resistance) * 0.5,
+        heat_tolerance: (geno_a.heat_tolerance + geno_b.heat_tolerance) * 0.5,
+        calorie_efficiency: (geno_a.calorie_efficiency + geno_b.calorie_efficiency) * 0.5,
+        skin_hue_shift: 0.0, // derived below
+        body_scale: 1.0,     // derived below
+        generation: geno_a.generation.max(geno_b.generation) + 1,
+    };
+
+    // Mutation: ±0.05 on each q_baseline
+    for q in &mut child.q_baselines {
+        *q += (rng.f32() - 0.5) * 0.1;
+        *q = q.clamp(-2.0, 2.0);
+    }
+    child.speed_factor        += (rng.f32() - 0.5) * 0.02;
+    child.speed_factor         = child.speed_factor.clamp(0.7, 1.3);
+    child.cold_resistance     += (rng.f32() - 0.5) * 0.02;
+    child.cold_resistance      = child.cold_resistance.clamp(0.0, 1.0);
+    child.heat_tolerance       += (rng.f32() - 0.5) * 0.02;
+    child.heat_tolerance        = child.heat_tolerance.clamp(0.0, 1.0);
+    child.calorie_efficiency   += (rng.f32() - 0.5) * 0.02;
+    child.calorie_efficiency    = child.calorie_efficiency.clamp(0.8, 1.2);
+
+    // Derive visual traits from physical coefficients
+    child.skin_hue_shift = (child.cold_resistance - 0.5) * 0.4; // cold-adapted → paler
+    child.body_scale     = (0.85 + child.speed_factor * 0.23).clamp(0.85, 1.15);
+
+    child
+}
+
 /// Award earned traits to a being based on their current state.
 /// Call periodically (e.g. every 600 ticks) from the tick loop.
 pub fn check_and_award_traits(beings: &mut Beings, idx: usize, _tick: u32) {

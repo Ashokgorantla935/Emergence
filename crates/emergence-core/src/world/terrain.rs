@@ -25,6 +25,9 @@ pub enum StructureType {
     Hut = 3,        // 100 ticks build, comfort bonus
     Wall = 4,       // 50 ticks build, blocks movement
     ResourceCache = 5, // 20 ticks build, stores food+stone
+    DirtPath = 6,      // naturally forms from being traffic
+    StoneRoad = 7,     // constructed by beings with stone
+    SignalBeacon = 8,  // comfort signal amplifier
 }
 
 impl StructureType {
@@ -36,6 +39,9 @@ impl StructureType {
             StructureType::Hut => 100,
             StructureType::Wall => 50,
             StructureType::ResourceCache => 20,
+            StructureType::DirtPath => 0,
+            StructureType::StoneRoad => 80,
+            StructureType::SignalBeacon => 40,
         }
     }
 
@@ -46,6 +52,9 @@ impl StructureType {
             3 => StructureType::Hut,
             4 => StructureType::Wall,
             5 => StructureType::ResourceCache,
+            6 => StructureType::DirtPath,
+            7 => StructureType::StoneRoad,
+            8 => StructureType::SignalBeacon,
             _ => StructureType::None,
         }
     }
@@ -84,6 +93,8 @@ pub struct Terrain {
     pub cache_food: Vec<f32>,
     /// Cache: stored stone in ResourceCache structures.
     pub cache_stone: Vec<f32>,
+    /// Traffic accumulator per cell. Increments on every being movement; at 200 triggers DirtPath formation.
+    pub trample: Vec<u8>,
 }
 
 impl Terrain {
@@ -218,6 +229,7 @@ impl Terrain {
             dominant_style: vec![0u8; len],
             cache_food: vec![0.0f32; len],
             cache_stone: vec![0.0f32; len],
+            trample: vec![0u8; len],
         }
     }
 
@@ -338,6 +350,10 @@ impl Terrain {
                 if matches!(st, StructureType::Hut | StructureType::LeanTo | StructureType::Campfire) {
                     self.shelter[idx] = false;
                 }
+                // Reset trample counter on path decay
+                if matches!(st, StructureType::DirtPath | StructureType::StoneRoad) {
+                    self.trample[idx] = 0;
+                }
                 // Un-block wall
                 if st == StructureType::Wall {
                     let x = (idx as u32) % self.width;
@@ -410,7 +426,11 @@ fn dispatch_elevation_source(
             super::terrain_gen::generate_triad_world(w, h, params.seed)
         }
         ElevationSource::Baked { data, width: bw, height: bh } => {
-            decode_baked_elevation(data, *bw, *bh)
+            if *bw == w && *bh == h {
+                decode_baked_elevation(data, *bw, *bh)
+            } else {
+                upsample_baked_elevation(data, *bw, *bh, w, h)
+            }
         }
         ElevationSource::Blank => {
             let len = (w * h) as usize;
@@ -426,6 +446,47 @@ fn decode_baked_elevation(data: &[u8], w: u32, h: u32) -> (Vec<f32>, Vec<f32>, V
     // Pad if data is short
     let mut elevation = elevation;
     elevation.resize(len, 0.3);
+    let moisture: Vec<f32> = elevation.iter().map(|&e| (0.5 + (1.0 - e) * 0.3).clamp(0.0, 1.0)).collect();
+    let temperature_base: Vec<f32> = elevation.iter().map(|&e| (0.8 - e * 0.6).clamp(0.0, 1.0)).collect();
+    (elevation, moisture, temperature_base)
+}
+
+/// Bilinearly upsample a baked elevation asset from (src_w x src_h) to (dst_w x dst_h).
+fn upsample_baked_elevation(
+    data: &[u8],
+    src_w: u32, src_h: u32,
+    dst_w: u32, dst_h: u32,
+) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    let dst_len = (dst_w * dst_h) as usize;
+    let mut elevation = vec![0.0f32; dst_len];
+
+    for dy in 0..dst_h {
+        for dx in 0..dst_w {
+            // Map destination pixel to source space
+            let sx = dx as f32 / (dst_w - 1) as f32 * (src_w - 1) as f32;
+            let sy = dy as f32 / (dst_h - 1) as f32 * (src_h - 1) as f32;
+
+            let x0 = sx.floor() as u32;
+            let y0 = sy.floor() as u32;
+            let x1 = (x0 + 1).min(src_w - 1);
+            let y1 = (y0 + 1).min(src_h - 1);
+            let tx = sx - x0 as f32;
+            let ty = sy - y0 as f32;
+
+            let s00 = data[(y0 * src_w + x0) as usize] as f32 / 255.0;
+            let s10 = data[(y0 * src_w + x1) as usize] as f32 / 255.0;
+            let s01 = data[(y1 * src_w + x0) as usize] as f32 / 255.0;
+            let s11 = data[(y1 * src_w + x1) as usize] as f32 / 255.0;
+
+            let e = s00 * (1.0 - tx) * (1.0 - ty)
+                  + s10 * tx * (1.0 - ty)
+                  + s01 * (1.0 - tx) * ty
+                  + s11 * tx * ty;
+
+            elevation[(dy * dst_w + dx) as usize] = e;
+        }
+    }
+
     let moisture: Vec<f32> = elevation.iter().map(|&e| (0.5 + (1.0 - e) * 0.3).clamp(0.0, 1.0)).collect();
     let temperature_base: Vec<f32> = elevation.iter().map(|&e| (0.8 - e * 0.6).clamp(0.0, 1.0)).collect();
     (elevation, moisture, temperature_base)
@@ -458,6 +519,19 @@ fn assign_biomes(
             assign_banded_biomes(elevation, &water_mask, w, h, bands)
         }
         BiomeRules::MarsRules => assign_mars_biomes(elevation, &water_mask, w, h),
+    }
+}
+
+/// Movement cost for a given biome. Mirrors the costs assigned during terrain generation.
+pub fn biome_movement_cost(biome: Biome) -> f32 {
+    match biome {
+        Biome::Grassland => 1.0,
+        Biome::Forest    => 1.2,
+        Biome::Wetland   => 1.5,
+        Biome::Mountain  => 2.0,
+        Biome::Desert    => 1.3,
+        Biome::Water     => f32::MAX,
+        Biome::Snow      => 2.5,
     }
 }
 
@@ -680,15 +754,38 @@ fn place_water(
     }
 }
 
-/// Decode a 1-bit-per-cell water mask.
+/// Decode a 1-bit-per-cell water mask, upscaling via nearest-neighbor if needed.
+/// The asset is assumed to be sqrt(data.len() * 8) x sqrt(data.len() * 8) square.
 fn decode_water_mask(data: &[u8], w: u32, h: u32) -> Vec<bool> {
-    let len = (w * h) as usize;
-    let mut mask = vec![false; len];
-    for i in 0..len {
-        let byte = i / 8;
-        let bit = i % 8;
-        if byte < data.len() {
-            mask[i] = (data[byte] >> bit) & 1 == 1;
+    // Infer source dimensions from data length (square 1-bit mask)
+    let total_bits = data.len() * 8;
+    let src_dim = (total_bits as f32).sqrt() as u32;
+    // If dimensions match exactly, decode directly
+    if src_dim == w && src_dim == h {
+        let len = (w * h) as usize;
+        let mut mask = vec![false; len];
+        for i in 0..len {
+            let byte = i / 8;
+            let bit = i % 8;
+            if byte < data.len() {
+                mask[i] = (data[byte] >> bit) & 1 == 1;
+            }
+        }
+        return mask;
+    }
+    // Nearest-neighbor upscale from src_dim x src_dim to w x h
+    let dst_len = (w * h) as usize;
+    let mut mask = vec![false; dst_len];
+    for dy in 0..h {
+        for dx in 0..w {
+            let sx = (dx as f32 / (w - 1) as f32 * (src_dim - 1) as f32).round() as u32;
+            let sy = (dy as f32 / (h - 1) as f32 * (src_dim - 1) as f32).round() as u32;
+            let src_i = (sy * src_dim + sx) as usize;
+            let byte = src_i / 8;
+            let bit = src_i % 8;
+            if byte < data.len() {
+                mask[(dy * w + dx) as usize] = (data[byte] >> bit) & 1 == 1;
+            }
         }
     }
     mask

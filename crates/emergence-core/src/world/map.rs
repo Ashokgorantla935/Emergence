@@ -18,6 +18,8 @@ pub enum MapSize {
     Small,  // 128x128
     Medium, // 256x256
     Large,  // 512x512
+    Epic,   // 1024x1024
+    Huge,   // 2048x2048
 }
 
 impl MapSize {
@@ -27,6 +29,8 @@ impl MapSize {
             MapSize::Small => (128, 128),
             MapSize::Medium => (256, 256),
             MapSize::Large => (512, 512),
+            MapSize::Epic => (1024, 1024),
+            MapSize::Huge => (2048, 2048),
         }
     }
 }

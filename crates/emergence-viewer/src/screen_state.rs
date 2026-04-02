@@ -34,6 +34,8 @@ pub enum SimSpeed {
     Speed10x,
     Speed50x,
     Speed100x,
+    Speed200x,
+    Speed500x,
 }
 
 impl SimSpeed {
@@ -46,6 +48,8 @@ impl SimSpeed {
             SimSpeed::Speed10x => 10,
             SimSpeed::Speed50x => 50,
             SimSpeed::Speed100x => 100,
+            SimSpeed::Speed200x => 200,
+            SimSpeed::Speed500x => 500,
         }
     }
 
@@ -58,11 +62,23 @@ impl SimSpeed {
             SimSpeed::Speed10x => "10x",
             SimSpeed::Speed50x => "50x",
             SimSpeed::Speed100x => "100x",
+            SimSpeed::Speed200x => "200x",
+            SimSpeed::Speed500x => "500x",
         }
     }
 
     pub fn is_paused(self) -> bool {
         self == SimSpeed::Paused
+    }
+
+    /// True for speeds where frame-skip optimizations should activate.
+    pub fn is_high_speed(self) -> bool {
+        matches!(self, SimSpeed::Speed200x | SimSpeed::Speed500x)
+    }
+
+    /// True for the highest speed tier (500x) — enables aggressive frame skip.
+    pub fn is_extreme_speed(self) -> bool {
+        self == SimSpeed::Speed500x
     }
 }
 
@@ -112,6 +128,8 @@ impl SpeedControls {
             KeyCode::Digit4 => self.set_speed(SimSpeed::Speed10x),
             KeyCode::Digit5 => self.set_speed(SimSpeed::Speed50x),
             KeyCode::Digit6 => self.set_speed(SimSpeed::Speed100x),
+            KeyCode::Digit7 => self.set_speed(SimSpeed::Speed200x),
+            KeyCode::Digit8 => self.set_speed(SimSpeed::Speed500x),
             _ => {}
         }
     }
@@ -589,11 +607,19 @@ impl PauseMenuUi {
 // In-game top bar (speed controls + tick counter)
 // ---------------------------------------------------------------------------
 
+/// Performance stats passed to the top bar each frame.
+pub struct PerfStats {
+    pub gpu_managed: bool,
+    pub fps: f32,
+    pub tps: u32,
+    pub mem_mb: f32,
+}
+
 pub struct TopBar;
 
 impl TopBar {
     /// Draw the top bar. Returns true if ESC/pause was toggled via the UI.
-    pub fn show(ctx: &egui::Context, controls: &mut SpeedControls, tick: u32, population: u32) -> bool {
+    pub fn show(ctx: &egui::Context, controls: &mut SpeedControls, tick: u32, population: u32, perf: &PerfStats) -> bool {
         let esc_pressed = false;
 
         egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
@@ -607,6 +633,8 @@ impl TopBar {
                     SimSpeed::Speed10x,
                     SimSpeed::Speed50x,
                     SimSpeed::Speed100x,
+                    SimSpeed::Speed200x,
+                    SimSpeed::Speed500x,
                 ] {
                     let active = controls.speed == speed;
                     let label = if active {
@@ -629,7 +657,31 @@ impl TopBar {
                     format!("Pop: {population}"),
                 );
                 ui.separator();
-                ui.label("WASD:pan  Scroll:zoom  Esc:menu  S:stats  N:news  L:laws  1-6:speed");
+                ui.label("WASD:pan  Scroll:zoom  Esc:menu  S:stats  N:news  L:laws  1-8:speed");
+
+                // Right-side performance stats
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Mem
+                    ui.label(format!("Mem: {:.0}MB", perf.mem_mb));
+                    ui.separator();
+                    // TPS
+                    ui.label(format!("TPS: {}", perf.tps));
+                    ui.separator();
+                    // FPS
+                    let fps_color = if perf.fps < 30.0 {
+                        egui::Color32::from_rgb(220, 180, 60)
+                    } else {
+                        egui::Color32::from_rgb(100, 220, 100)
+                    };
+                    ui.colored_label(fps_color, format!("FPS: {:.0}", perf.fps));
+                    ui.separator();
+                    // GPU/CPU indicator
+                    if perf.gpu_managed {
+                        ui.colored_label(egui::Color32::from_rgb(80, 220, 80), "GPU");
+                    } else {
+                        ui.colored_label(egui::Color32::from_rgb(220, 80, 80), "CPU");
+                    }
+                });
             });
         });
 

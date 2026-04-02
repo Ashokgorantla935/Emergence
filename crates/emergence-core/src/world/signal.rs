@@ -9,10 +9,11 @@ pub enum SignalChannel {
     Anger = 5,
     Scent = 6,
     Crime = 7,
+    Toxin = 8,
 }
 
 impl SignalChannel {
-    pub const COUNT: usize = 8;
+    pub const COUNT: usize = 9;
 
     pub fn from_index(i: usize) -> Option<Self> {
         match i {
@@ -24,6 +25,7 @@ impl SignalChannel {
             5 => Some(Self::Anger),
             6 => Some(Self::Scent),
             7 => Some(Self::Crime),
+            8 => Some(Self::Toxin),
             _ => None,
         }
     }
@@ -34,9 +36,12 @@ pub struct SignalGrid {
     pub height: u32,
     pub channels: Vec<Vec<f32>>,
     pub wrap_horizontal: bool,
-    decay_factors: [f32; 8],
-    diffusion_rates: [f32; 8],
+    decay_factors: [f32; 9],
+    diffusion_rates: [f32; 9],
     scratch: Vec<f32>, // reusable scratch buffer for diffusion
+    /// When true, the GPU compute pipeline handles diffusion+evaporation.
+    /// tick() will run reaction_step() only and skip the CPU diffusion pass.
+    pub gpu_managed: bool,
 }
 
 impl SignalGrid {
@@ -60,6 +65,7 @@ impl SignalGrid {
             0.9965,     // Anger: half-life 200
             0.9931,     // Scent: half-life 100
             0.9931,     // Crime: half-life 100
+            1.0,        // Toxin: infinite half-life (never decays)
         ];
 
         let diffusion_rates = [
@@ -71,6 +77,7 @@ impl SignalGrid {
             0.12,     // Anger: fast
             0.06,     // Scent: moderate
             0.12,     // Crime: fast (like Anger, guards need to track quickly)
+            0.04,     // Toxin: slow global diffusion
         ];
 
         SignalGrid {
@@ -81,6 +88,7 @@ impl SignalGrid {
             decay_factors,
             diffusion_rates,
             scratch: vec![0.0f32; len],
+            gpu_managed: false,
         }
     }
 
@@ -164,7 +172,22 @@ impl SignalGrid {
         let _ = ww;
     }
 
+    /// Returns (decay, diffusion) for each channel in channel order.
+    /// Used by the GPU compute pipeline to populate its uniform buffer.
+    pub fn channel_params(&self) -> [(f32, f32); 9] {
+        let mut params = [(0.0f32, 0.0f32); 9];
+        for i in 0..9 {
+            params[i] = (self.decay_factors[i], self.diffusion_rates[i]);
+        }
+        params
+    }
+
     pub fn tick(&mut self) {
+        // When GPU is managing both reaction and diffusion+evaporation, skip all CPU passes.
+        if self.gpu_managed {
+            return;
+        }
+
         self.reaction_step();
 
         let w = self.width;

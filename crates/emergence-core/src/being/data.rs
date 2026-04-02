@@ -203,6 +203,40 @@ pub struct BeingsHot {
     pub fauna_indices: Vec<usize>,
 }
 
+/// Inherited genetic coefficients. Blended from parents + mutation at birth.
+/// Stored in cold data — only read at brain init, movement, and render update.
+#[derive(Clone, Debug)]
+pub struct Genotype {
+    /// Inherited Q-weight baselines — added to Xavier init weights at brain initialization.
+    /// Length matches Action::ALL (23 actions). Mutated ±0.05 per generation.
+    pub q_baselines: [f32; 23],
+    /// Physical coefficients derived from long-term Q-weight stability.
+    pub speed_factor: f32,        // 0.7 - 1.3 multiplier on base_speed()
+    pub cold_resistance: f32,     // 0.0 - 1.0
+    pub heat_tolerance: f32,      // 0.0 - 1.0
+    pub calorie_efficiency: f32,  // 0.8 - 1.2 multiplier on food consumption
+    /// Visual traits derived from physical coefficients (used by renderer).
+    pub skin_hue_shift: f32,      // -0.2 to 0.2 — shifts skin tone toward cold/warm
+    pub body_scale: f32,          // 0.85 - 1.15 — size variation visible on screen
+    /// Generational depth from the founding population.
+    pub generation: u32,
+}
+
+impl Genotype {
+    pub fn default() -> Self {
+        Genotype {
+            q_baselines: [0.0; 23],
+            speed_factor: 1.0,
+            cold_resistance: 0.5,
+            heat_tolerance: 0.5,
+            calorie_efficiency: 1.0,
+            skin_hue_shift: 0.0,
+            body_scale: 1.0,
+            generation: 0,
+        }
+    }
+}
+
 /// Cold data — accessed only for inspector, social actions, and memory lookups.
 pub struct BeingsCold {
     pub causal_memories: Vec<CausalMemoryRing>,
@@ -217,6 +251,8 @@ pub struct BeingsCold {
     pub names: Vec<String>,
     /// SIRS meme slots. 4 slots per being. Humans only: fauna slots are never ticked or transmitted.
     pub meme_slots: Vec<MemeSlots>,
+    /// Inherited genetic data. Default genotype for initial population; evolved from generation 1+.
+    pub genotypes: Vec<Genotype>,
 }
 
 /// Wrapper that owns both hot and cold sub-structs. All callers go through this.
@@ -268,6 +304,7 @@ impl Beings {
                 last_birth_tick: Vec::new(),
                 names: Vec::new(),
                 meme_slots: Vec::new(),
+                genotypes: Vec::new(),
             },
         }
     }
@@ -313,6 +350,7 @@ impl Beings {
         self.cold.last_birth_tick.push(0);
         self.cold.names.push(String::new());
         self.cold.meme_slots.push([super::memes::MemeSlotState::default(); 4]);
+        self.cold.genotypes.push(Genotype::default());
         self.hot.count += 1;
         self.hot.alive_count += 1;
         idx
@@ -390,11 +428,17 @@ impl Beings {
     }
 
     pub fn base_speed(&self, index: usize) -> f32 {
-        match self.life_phase(index) {
+        let phase_speed = match self.life_phase(index) {
             LifePhase::Youth => 0.08,
             LifePhase::Adult => 0.10,
             LifePhase::Elder => 0.07,
-        }
+        };
+        let speed_factor = if index < self.cold.genotypes.len() {
+            self.cold.genotypes[index].speed_factor
+        } else {
+            1.0
+        };
+        phase_speed * speed_factor
     }
 
     /// Rebuild human/fauna index partition lists. O(n). ~0.1ms for 11.5K beings.
@@ -465,6 +509,13 @@ impl Beings {
 /// Architecture: 14 input → 8 hidden (tanh) → 22 output (Q-values)
 /// W1 indices 0..112, b1 indices 112..120, W2 indices 120..296, b2 indices 296..318
 pub fn init_human_brain(rng: &mut fastrand::Rng) -> [f32; 318] {
+    init_human_brain_with_genotype(rng, None)
+}
+
+/// Xavier-initialized brain with genotype Q-baselines seeded into b2 (output biases).
+/// The first 22 entries of `genotype.q_baselines` are added to b2, giving inherited
+/// behavioral tendencies that are refined by TD learning during the being's lifetime.
+pub fn init_human_brain_with_genotype(rng: &mut fastrand::Rng, genotype: Option<&Genotype>) -> [f32; 318] {
     let mut w = [0.0f32; 318];
     // W1: Xavier scale = sqrt(6 / (14+8)) = sqrt(6/22)
     let w1_scale = (6.0f32 / 22.0).sqrt();
@@ -477,7 +528,12 @@ pub fn init_human_brain(rng: &mut fastrand::Rng) -> [f32; 318] {
     for v in w[120..296].iter_mut() {
         *v = (rng.f32() * 2.0 - 1.0) * w2_scale;
     }
-    // b2: indices 296..318 stay 0.0
+    // b2: indices 296..318 — seed from genotype q_baselines (first 22 of 23 actions)
+    if let Some(geno) = genotype {
+        for k in 0..22 {
+            w[296 + k] = geno.q_baselines[k];
+        }
+    }
     w
 }
 

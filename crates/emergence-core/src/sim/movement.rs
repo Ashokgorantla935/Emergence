@@ -688,6 +688,47 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                 }
             }
         }
+        Action::Appease => {
+            // Tribute economy: transfer half of held_food to threatening being to buy safety.
+            if let Some(target_idx) = action.target_being {
+                if target_idx < world.beings.hot.count
+                    && world.beings.hot.states[target_idx] != BeingState::Dead
+                {
+                    let tribute = world.beings.hot.carry[being_index][0] * 0.5;
+                    if tribute > 0.01 {
+                        // Transfer food
+                        world.beings.hot.carry[being_index][0] -= tribute;
+                        let cap = world.beings.carry_capacity(target_idx);
+                        world.beings.hot.carry[target_idx][0] =
+                            (world.beings.hot.carry[target_idx][0] + tribute).min(cap);
+
+                        // Relationship: high positive trust toward the threatener
+                        let tick = world.tick;
+                        let imp = world.beings.cold.relationships[being_index]
+                            .get_or_create(target_idx as u32, tick);
+                        imp.trust = (imp.trust + 0.3).min(1.0);
+                        imp.warmth = (imp.warmth + 0.05).min(1.0);
+                        imp.last_interaction = tick;
+
+                        // Threatener gets a Comfort reward signal at their position
+                        let tp = world.beings.hot.positions[target_idx];
+                        let tx = (tp[0] as u32).min(world.signals.width - 1);
+                        let ty = (tp[1] as u32).min(world.signals.height - 1);
+                        world.signals.deposit(
+                            crate::world::signal::SignalChannel::Comfort,
+                            tx,
+                            ty,
+                            0.5,
+                        );
+                    } else {
+                        // No food to give: move toward target
+                        if let Some(tp) = action.target_pos {
+                            move_toward(world, being_index, tp, speed);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Wake up sleeping beings when rest is satisfied
@@ -732,7 +773,15 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
         return; // impassable
     }
 
-    let effective_speed = speed / cost;
+    // Road speed bonus
+    let cell_idx = (cy * world.terrain.width + cx) as usize;
+    let road_multiplier = match world.terrain.structure[cell_idx] {
+        6 => 0.5,  // DirtPath: 2x speed
+        7 => 0.3,  // StoneRoad: 3.3x speed
+        _ => 1.0,
+    };
+
+    let effective_speed = speed / (cost * road_multiplier);
     let move_dist = effective_speed.min(dist);
 
     // Clamp per-tick displacement to species max speed (prevents MLP brain from
@@ -781,6 +830,15 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
             world.beings.hot.velocities[being_index] = [0.0, 0.0];
         } else {
             world.beings.hot.velocities[being_index] = [vx, vy];
+            // Trample tracking — accumulate traffic, auto-create DirtPath at threshold
+            let dest_idx = (ncy * world.terrain.width + ncx) as usize;
+            if dest_idx < world.terrain.trample.len() {
+                world.terrain.trample[dest_idx] = world.terrain.trample[dest_idx].saturating_add(1);
+                if world.terrain.trample[dest_idx] > 200 && world.terrain.structure[dest_idx] == 0 {
+                    world.terrain.structure[dest_idx] = 6; // Auto-create DirtPath
+                    world.terrain.trample[dest_idx] = 0;
+                }
+            }
         }
     }
 }

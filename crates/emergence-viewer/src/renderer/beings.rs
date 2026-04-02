@@ -29,7 +29,10 @@ pub struct BeingInstance {
 }
 // 64 bytes. 11,500 instances = 736KB.
 
+/// Cell size in the shared terrain atlas (32x32 grid), used by fauna.
 const ATLAS_CELL: f32 = 1.0 / 32.0;
+/// Cell size in the entity spritesheet (4x4 grid), used by humans.
+const ENTITY_CELL: f32 = 1.0 / 4.0;
 
 pub struct BeingRenderer {
     pub vertex_buffer:    wgpu::Buffer,
@@ -96,6 +99,8 @@ impl BeingRenderer {
         frame_frac:      f32,
         game_tick:       u32,
         pixels_per_unit: f32,
+        world_width:     u32,
+        world_height:    u32,
     ) {
         let lod = if pixels_per_unit > 10.0 { 0u8 }
             else if pixels_per_unit > 3.0  { 1 }
@@ -114,10 +119,12 @@ impl BeingRenderer {
                 continue;
             }
 
-            let atlas_uv   = anim.atlas_uv(beings, i);
-            let atlas_size = [ATLAS_CELL, ATLAS_CELL];
+            let atlas_uv = anim.atlas_uv(beings, i);
+            let is_human = beings.hot.creature_type[i] == CreatureType::Human as u8;
+            let cell = if is_human { ENTITY_CELL } else { ATLAS_CELL };
+            let atlas_size = [cell, cell];
 
-            let (emotion_tint, size) = state_color_and_size(
+            let (emotion_tint, mut size) = state_color_and_size(
                 i,
                 &beings.hot.needs[i],
                 &beings.hot.emotions[i],
@@ -125,7 +132,18 @@ impl BeingRenderer {
                 beings.hot.creature_type[i],
                 beings.life_phase(i),
             );
-            let skin_tone    = personality_skin_tone(&beings.hot.personalities[i]);
+            let mut skin_tone = personality_skin_tone(&beings.hot.personalities[i]);
+
+            // Apply genotype visual traits for humans
+            if is_human && i < beings.cold.genotypes.len() {
+                let geno = &beings.cold.genotypes[i];
+                // Scale size by body_scale (0.85–1.15)
+                size *= geno.body_scale;
+                // Shift skin tone by skin_hue_shift: positive = warmer (more red), negative = cooler (more blue)
+                let shift = geno.skin_hue_shift;
+                skin_tone[0] = (skin_tone[0] + shift).clamp(0.0, 1.0);
+                skin_tone[2] = (skin_tone[2] - shift).clamp(0.0, 1.0);
+            }
 
             let lowest_need = beings.hot.needs[i].iter().copied().fold(f32::MAX, f32::min);
             let brightness  = if lowest_need < 0.3 { 1.15 } else { 1.0 };
@@ -174,6 +192,12 @@ impl BeingRenderer {
                 // LOD 0: full quality (no override)
                 _ => (atlas_uv, atlas_size, size, bob_flip),
             };
+
+            // Skip beings outside world bounds to avoid rendering garbage
+            let (px, py) = (beings.hot.positions[i][0], beings.hot.positions[i][1]);
+            if px < 0.0 || px >= world_width as f32 || py < 0.0 || py >= world_height as f32 {
+                continue;
+            }
 
             instances.push(BeingInstance {
                 position,

@@ -8,3 +8,4 @@ pub mod particles;
 pub mod post_process;
 pub mod kingdom_overlay;
 pub mod compute;
+pub mod memetic_compute;

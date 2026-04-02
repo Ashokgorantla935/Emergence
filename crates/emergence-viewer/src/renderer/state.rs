@@ -4,6 +4,7 @@ use wgpu::util::DeviceExt;
 use super::super::camera::CameraUniform;
 use crate::atlas::Atlas;
 use super::compute::SignalComputePipeline;
+use super::memetic_compute::MemeticComputePipeline;
 
 /// Extended camera uniform including sprite rendering fields.
 /// Kept backward-compatible: the original view_proj is always binding 0.
@@ -68,6 +69,9 @@ pub struct RenderState {
     pub heatmap_pipeline: wgpu::RenderPipeline,
     /// Atlas texture + bind group, shared across all sprite pipelines.
     pub atlas: Atlas,
+    /// Dedicated entity texture + bind group for being sprites (decoupled from terrain atlas).
+    /// Uses the same bind_group_layout as atlas (texture + sampler at bindings 0 and 1).
+    pub entity_bind_group: wgpu::BindGroup,
     /// V1: World objects (resources + structures) — single instanced draw call.
     pub object_pipeline: wgpu::RenderPipeline,
     /// V2: Unified particle system — single instanced draw call for ALL particles.
@@ -76,6 +80,9 @@ pub struct RenderState {
     pub postprocess: super::post_process::PostProcessRenderer,
     /// GPU compute pipeline for signal grid diffusion (ping-pong storage buffers).
     pub signal_compute: SignalComputePipeline,
+    /// GPU compute pipeline for memetic (knowledge/technology) diffusion.
+    /// Runs after signal compute, gates diffusion on low-danger areas.
+    pub memetic_compute: Option<MemeticComputePipeline>,
 }
 
 impl RenderState {
@@ -130,6 +137,94 @@ impl RenderState {
 
         // ── Atlas ──────────────────────────────────────────────────────────
         let atlas = Atlas::new(&device, &queue);
+
+        // ── Entity texture (character spritesheet, decoupled from terrain atlas) ──
+        // Sprout Lands "Basic Charakter Spritesheet.png": 192x192, 4x4 grid of 48x48 cells.
+        // Row 0: walk down, Row 1: walk up, Row 2: walk right, Row 3: walk left.
+        // Falls back to atlas bind group if the file is missing or malformed.
+        let entity_bind_group = {
+            let spritesheet_path = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../assets/sprites/packs/Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/Characters/Basic Charakter Spritesheet.png"
+            );
+            let loaded = (|| -> Option<wgpu::BindGroup> {
+                let img = image::open(spritesheet_path).ok()?.to_rgba8();
+                let (w, h) = img.dimensions();
+                let pixels = img.into_raw();
+
+                let texture = device.create_texture_with_data(
+                    &queue,
+                    &wgpu::TextureDescriptor {
+                        label: Some("Entity Texture"),
+                        size: wgpu::Extent3d {
+                            width: w,
+                            height: h,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                        view_formats: &[],
+                    },
+                    wgpu::util::TextureDataOrder::LayerMajor,
+                    bytemuck::cast_slice(&pixels),
+                );
+
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                    label: Some("Entity Sampler"),
+                    address_mode_u: wgpu::AddressMode::ClampToEdge,
+                    address_mode_v: wgpu::AddressMode::ClampToEdge,
+                    address_mode_w: wgpu::AddressMode::ClampToEdge,
+                    mag_filter: wgpu::FilterMode::Nearest,
+                    min_filter: wgpu::FilterMode::Nearest,
+                    mipmap_filter: wgpu::FilterMode::Nearest,
+                    ..Default::default()
+                });
+
+                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Entity BG"),
+                    layout: &atlas.bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&sampler),
+                        },
+                    ],
+                });
+
+                eprintln!("[entity] Loaded {}x{} character spritesheet", w, h);
+                Some(bg)
+            })();
+
+            match loaded {
+                Some(bg) => bg,
+                None => {
+                    eprintln!("[entity] Spritesheet not found — falling back to atlas bind group");
+                    // Re-create a bind group from atlas view+sampler since we can't clone bind groups
+                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("Entity BG (atlas fallback)"),
+                        layout: &atlas.bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&atlas.view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&atlas.sampler),
+                            },
+                        ],
+                    })
+                }
+            }
+        };
 
         // ── Camera uniform buffer (extended) ──────────────────────────────
         let default_ext_cam = ExtCameraUniform {
@@ -259,8 +354,8 @@ impl RenderState {
                 }],
             });
 
-        // time f32 + 3 padding floats = 16 bytes
-        let water_time_data: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
+        // [time, signal_danger, signal_comfort, signal_grief, illumination, _pad1, _pad2, _pad3] = 32 bytes
+        let water_time_data: [f32; 8] = [0.0; 8];
         let water_time_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Water Time Buffer"),
             contents: bytemuck::cast_slice(&water_time_data),
@@ -341,24 +436,28 @@ impl RenderState {
         });
 
         // ── Terrain pipeline (instanced quad tilemap) ──────────────────────
-        // TerrainInstance: 24 bytes
-        //   0  world_pos  vec2  8B
-        //   8  tile_uv    vec2  8B
-        //  16  flags      f32   4B
-        //  20  _pad       f32   4B
+        // TerrainInstance: 32 bytes
+        //   0  world_pos      vec2  8B
+        //   8  tile_uv        vec2  8B
+        //  16  flags          f32   4B
+        //  20  elevation      f32   4B
+        //  24  structure_type f32   4B
+        //  28  _pad (stride)  f32   4B  ← carries LOD stride for quad scaling
         let terrain_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label:  Some("Terrain Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/terrain.wgsl").into()),
         });
 
         let terrain_instance_layout = wgpu::VertexBufferLayout {
-            array_stride: 24,
+            array_stride: 32,
             step_mode:    wgpu::VertexStepMode::Instance,
             attributes: &[
                 wgpu::VertexAttribute { offset:  0, shader_location: 2, format: wgpu::VertexFormat::Float32x2 }, // world_pos
                 wgpu::VertexAttribute { offset:  8, shader_location: 3, format: wgpu::VertexFormat::Float32x2 }, // tile_uv
                 wgpu::VertexAttribute { offset: 16, shader_location: 4, format: wgpu::VertexFormat::Float32   }, // flags
-                wgpu::VertexAttribute { offset: 20, shader_location: 5, format: wgpu::VertexFormat::Float32   }, // _pad
+                wgpu::VertexAttribute { offset: 20, shader_location: 5, format: wgpu::VertexFormat::Float32   }, // elevation
+                wgpu::VertexAttribute { offset: 24, shader_location: 6, format: wgpu::VertexFormat::Float32   }, // structure_type
+                wgpu::VertexAttribute { offset: 28, shader_location: 7, format: wgpu::VertexFormat::Float32   }, // _pad (stride scale)
             ],
         };
 
@@ -721,9 +820,21 @@ impl RenderState {
         let mut postprocess = super::post_process::PostProcessRenderer::new(&device, surface_format);
         postprocess.resize(&device, size.width.max(1), size.height.max(1), surface_format);
 
-        // ── Signal compute pipeline (ping-pong GPU diffusion) ─────────────
-        // Default grid 128x128; decay 0.95, diffusion 0.08 per tick.
-        let signal_compute = SignalComputePipeline::new(&device, 128, 128, 0.95, 0.08);
+        // ── Signal compute pipeline (ping-pong GPU diffusion, all 9 channels) ──
+        // Default channel params matching signal.rs values. World size injected
+        // at first frame via reinit_for_world(); using Small (128x128) as placeholder.
+        let default_channel_params: [(f32, f32); 9] = [
+            (0.9862, 0.15), // Danger
+            (0.9965, 0.08), // FoodTrail
+            (0.9986, 0.03), // Comfort
+            (0.9983, 0.05), // Grief
+            (0.9954, 0.10), // Celebration
+            (0.9965, 0.12), // Anger
+            (0.9931, 0.06), // Scent
+            (0.9931, 0.12), // Crime
+            (0.9950, 0.08), // Toxin
+        ];
+        let signal_compute = SignalComputePipeline::new(&device, 128, 128, &default_channel_params);
 
         RenderState {
             device,
@@ -748,11 +859,27 @@ impl RenderState {
             sprite_pipeline,
             heatmap_pipeline,
             atlas,
+            entity_bind_group,
             object_pipeline,
             particle_pipeline,
             postprocess,
             signal_compute,
+            memetic_compute: None,
         }
+    }
+
+    /// Rebuild the signal compute pipeline for the actual world dimensions.
+    /// Call once after world creation so the GPU buffers match the real grid size.
+    pub fn reinit_signal_compute(&mut self, width: u32, height: u32, channel_params: &[(f32, f32); 9]) {
+        self.signal_compute = SignalComputePipeline::new(&self.device, width, height, channel_params);
+        // Rebuild memetic compute pipeline alongside signal compute so it references
+        // the new (correctly-sized) signal buffer.
+        self.memetic_compute = Some(MemeticComputePipeline::new(
+            &self.device,
+            width,
+            height,
+            self.signal_compute.current_read_buf(),
+        ));
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -775,21 +902,23 @@ impl RenderState {
     }
 
     pub fn update_water_time(&self, time: f32) {
-        let data: [f32; 4] = [time, 0.0, 0.0, 0.0];
+        let data: [f32; 8] = [time, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
         self.queue.write_buffer(&self.water_time_buffer, 0, bytemuck::cast_slice(&data));
     }
 
-    /// Update water time uniform with signal tint values.
+    /// Update water time uniform with signal tint values and day/night illumination.
     /// `signal_danger`, `signal_comfort`, `signal_grief` are normalised [0, 1]
     /// global averages of the corresponding signal channels.
+    /// `illumination` is from `climate.light_level()` — 0.0 = full night, 1.0 = full day.
     pub fn update_water_time_signals(
         &self,
         time: f32,
         signal_danger: f32,
         signal_comfort: f32,
         signal_grief: f32,
+        illumination: f32,
     ) {
-        let data: [f32; 4] = [time, signal_danger, signal_comfort, signal_grief];
+        let data: [f32; 8] = [time, signal_danger, signal_comfort, signal_grief, illumination, 0.0, 0.0, 0.0];
         self.queue.write_buffer(&self.water_time_buffer, 0, bytemuck::cast_slice(&data));
     }
 

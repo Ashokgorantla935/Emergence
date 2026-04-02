@@ -1,5 +1,5 @@
 // Sprite shader for being instances.
-// Renders instanced billboard quads sampling the 512x512 pixel-art atlas.
+// Renders instanced billboard quads sampling the 1024x1024 pixel-art atlas.
 // Enforces 8px minimum screen size so beings are never invisible dots.
 // Walking bob: sine-wave Y offset only when moving (bob_flip != 0).
 // Outline: 1px black border sampled from neighboring texels.
@@ -87,7 +87,11 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     var pos = instance.world_pos;
     pos.y += bob_offset;
     let world_xy = pos + vertex.vertex_pos * final_size;
-    out.clip_position = camera.view_proj * vec4<f32>(world_xy, 0.0, 1.0);
+    var clip_pos = camera.view_proj * vec4<f32>(world_xy, 0.0, 1.0);
+    // Y-sort depth bias: beings further south (higher world Y) render behind northern ones.
+    let depth_bias = clamp(instance.world_pos.y / 512.0, 0.0, 1.0) * 0.9;
+    clip_pos.z = depth_bias * clip_pos.w;
+    out.clip_position = clip_pos;
 
     // Map vertex [-0.5,0.5] to atlas UV within the cell.
     // Apply horizontal flip by mirroring the U component around cell center.
@@ -124,11 +128,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(final_rgb, in.alpha);
     }
 
-    let atlas_color = textureSample(sprite_atlas, atlas_sampler, in.uv);
-    let alpha = atlas_color.a;
+    var texel = textureSample(sprite_atlas, atlas_sampler, in.uv);
+    let alpha = texel.a;
 
-    // Pixel size in atlas UV space (atlas is 512x512)
-    let px = 1.0 / 512.0;
+    // Pixel size in atlas UV space (atlas is 1024x1024)
+    let px = 1.0 / 1024.0;
 
     // Transparent pixel: check for outline or shadow before discarding.
     if (alpha < 0.1) {
@@ -155,9 +159,27 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
 
-    // Opaque/semi-opaque pixel: render atlas color as-is from the sprite sheet.
-    // No skin/cloth threshold — Sunnyside sprites carry their own color information.
-    let final_rgb = atlas_color.rgb * in.brightness;
+    // Skin and clothing tinting (opaque pixels only).
+    if (texel.a > 0.1) {
+        // Skin detection: pixels close to default skin tone get tinted toward being's skin_tone.
+        let default_skin = vec3<f32>(1.0, 0.835, 0.639);
+        let skin_dist = length(texel.rgb - default_skin);
+        if (skin_dist < 0.25) {
+            let blend = 1.0 - (skin_dist / 0.25);
+            texel = vec4<f32>(mix(texel.rgb, in.skin_tone, blend * 0.6), texel.a);
+        }
+
+        // Clothing detection: pixels close to default outfit color (purple/blue) tint to emotion.
+        let default_outfit = vec3<f32>(0.545, 0.388, 0.757);
+        let outfit_dist = length(texel.rgb - default_outfit);
+        if (outfit_dist < 0.30) {
+            let blend = 1.0 - (outfit_dist / 0.30);
+            texel = vec4<f32>(mix(texel.rgb, in.emotion_tint, blend * 0.5), texel.a);
+        }
+    }
+
+    // Opaque/semi-opaque pixel: apply brightness and per-instance alpha.
+    let final_rgb = texel.rgb * in.brightness;
 
     return vec4<f32>(final_rgb, alpha * in.alpha);
 }

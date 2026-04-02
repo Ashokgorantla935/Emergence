@@ -117,16 +117,16 @@ impl Atlas {
     }
 
     /// Decode the embedded atlas PNG and return raw RGBA8 pixels (512*512*4 bytes).
-    /// Returns None if the PNG is not 512x512 or cannot be decoded.
+    /// Load the 1024x1024 atlas PNG from disk. Returns None if missing or wrong size.
     fn load_png_pixels() -> Option<Vec<u8>> {
-        const PNG_BYTES: &[u8] =
-            include_bytes!("../../../../assets/sprites/atlas.png");
-        let img = image::load_from_memory(PNG_BYTES).ok()?;
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/sprites/atlas.png");
+        let img = image::open(path).ok()?.to_rgba8();
         let (w, h) = img.dimensions();
-        if w != 512 || h != 512 {
+        if w != 1024 || h != 1024 {
+            eprintln!("[atlas] atlas.png is {}x{}, expected 1024x1024", w, h);
             return None;
         }
-        Some(img.into_rgba8().into_raw())
+        Some(img.into_raw())
     }
 }
 

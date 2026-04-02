@@ -39,6 +39,10 @@ pub struct Climate {
     pub light_level: f32,
     pub temperature_modifier: f32,
     pub active_weather: Option<WeatherEvent>,
+    /// Accumulated global temperature from toxin greenhouse effect. Starts at 0.0.
+    pub global_temperature: f32,
+    /// Sea level rise derived from global_temperature. Each 1.0 of temperature = +0.01 offset.
+    pub water_level_offset: f32,
     seasons_enabled: bool,
     day_night_enabled: bool,
     prev_season: Season,
@@ -53,6 +57,8 @@ impl Climate {
             light_level: 1.0,
             temperature_modifier: 0.0,
             active_weather: None,
+            global_temperature: 0.0,
+            water_level_offset: 0.0,
             seasons_enabled: config.seasons,
             day_night_enabled: config.day_night,
             prev_season: Season::Spring,

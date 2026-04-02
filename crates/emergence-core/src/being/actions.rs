@@ -43,10 +43,11 @@ pub enum Action {
     CreateMark = 19,     // content being creates art mark
     ShareResource = 20,  // carry stone to settlement that needs it
     PickUpStone = 21,    // pick up stone near mountain
+    Appease = 22,        // tribute economy: transfer food to threatening being to buy safety
 }
 
 impl Action {
-    pub const ALL: [Action; 22] = [
+    pub const ALL: [Action; 23] = [
         Action::Wander,
         Action::SeekFood,
         Action::SeekShelter,
@@ -69,6 +70,7 @@ impl Action {
         Action::CreateMark,
         Action::ShareResource,
         Action::PickUpStone,
+        Action::Appease,
     ];
 
     /// Return the action subset allowed for the given creature type.
@@ -260,13 +262,31 @@ pub fn score_actions(
             q_values[Action::Hunt as usize] += 20.0;
         }
 
+        let hunger = beings.hot.needs[being_index][NEED_HUNGER];
+        let safety = beings.hot.needs[being_index][NEED_SAFETY];
+
+        // ── Maslow hierarchy overrides ────────────────────────────────────────
+        // Survival priority: starving beings desperately seek food.
+        if hunger < 0.30 {
+            q_values[Action::SeekFood as usize] += 100.0;
+            q_values[Action::PickUpFood as usize] += 100.0;
+        }
+        // Higher needs suppression: cannot create art/bond while starving or under attack.
+        if hunger < 0.25 || safety < 0.25 {
+            q_values[Action::CreateMark as usize] = 0.0;
+            q_values[Action::Memorialize as usize] = 0.0;
+            q_values[Action::Bond as usize] = 0.0;
+        }
+
         // Build allowed action indices for Boltzmann selection
-        let mut allowed_indices: Vec<u8> = Action::ALL.iter().map(|&a| a as u8).collect();
+        // Appease is excluded from brain q_values (brain has 22 outputs); handled post-Boltzmann.
+        let mut allowed_indices: Vec<u8> = Action::ALL.iter()
+            .filter(|&&a| a != Action::Appease)
+            .map(|&a| a as u8)
+            .collect();
 
         // ACTION MASKING: Humans may only Hunt when they have a legitimate reason.
         // Evaluated every tick; fauna are unaffected (they exit via the heuristic path below).
-        let hunger = beings.hot.needs[being_index][NEED_HUNGER];
-        let safety = beings.hot.needs[being_index][NEED_SAFETY];
 
         let mut hunt_justified = crime_at_pos > 2.0 && beings.hot.personalities[being_index][TRAIT_BOLD] > 0.8; // only bold guards near crime source
 
@@ -413,6 +433,48 @@ pub fn score_actions(
             Action::Wander | Action::Sleep => {
                 let angle = rng.f32() * std::f32::consts::TAU;
                 target_pos = Some([pos[0] + angle.cos() * 3.0, pos[1] + angle.sin() * 3.0]);
+            }
+            // Appease is selected via post-Boltzmann override below; this arm is unreachable
+            // during normal Boltzmann selection (Appease is excluded from allowed_indices).
+            Action::Appease => {}
+        }
+
+        // ── Appease override: evaluate post-Boltzmann ─────────────────────────
+        // Appease is not part of the 22-output brain; scored here and overrides
+        // Boltzmann winner if conditions are met and score is higher.
+        if safety < 0.3 {
+            let appease_target = nearby.iter().copied().find(|&ni| {
+                ni != being_index
+                    && beings.hot.states[ni] != BeingState::Dead
+                    && beings.hot.personalities[ni][TRAIT_BOLD] > 0.6
+                    && {
+                        let np = beings.hot.positions[ni];
+                        let nx = (np[0] as u32).min(signals.width - 1);
+                        let ny = (np[1] as u32).min(signals.height - 1);
+                        signals.read(SignalChannel::Danger, nx, ny) > 0.3
+                    }
+            });
+            if let Some(appease_idx) = appease_target {
+                let appease_score = (1.0 - safety) * 50.0;
+                if appease_score > chosen_q {
+                    let signal_levels = local.values;
+                    let biome = terrain.biome_at(cx, cy);
+                    let nearby_count = nearby.len().min(255) as u8;
+                    let context_hash = compute_context_hash(biome, signal_levels, nearby_count, climate.day_phase());
+                    let causal = beings.cold.causal_memories[being_index].score_for_action(Action::Appease as u8, context_hash);
+                    let signal_contrib = local.values.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+                    return ScoredAction {
+                        action: Action::Appease,
+                        score: appease_score,
+                        target_being: Some(appease_idx),
+                        target_pos: Some(beings.hot.positions[appease_idx]),
+                        runner_up_action: chosen_action as u8,
+                        runner_up_score: chosen_q,
+                        causal_contrib: causal.abs(),
+                        relationship_contrib: 0.0,
+                        signal_contrib,
+                    };
+                }
             }
         }
 
@@ -685,6 +747,11 @@ pub fn score_actions(
                     score = 0.0; // no prey visible
                 }
             }
+            Action::Appease => {
+                // Fauna never have Appease in their allowed_actions list; score=0 is correct.
+                // For humans this arm is handled via the post-Boltzmann override above.
+                score = 0.0;
+            }
         }
 
         // Species-specific behavior overrides (applied after generic scoring)
@@ -706,6 +773,18 @@ pub fn score_actions(
             &mut target_pos,
             &mut target_being,
         );
+
+        // ── Maslow hierarchy overrides (heuristic path) ───────────────────────
+        // Survival priority: starving beings must seek food above all else.
+        if needs[NEED_HUNGER] < 0.30 && (action == Action::SeekFood || action == Action::PickUpFood) {
+            score *= 100.0;
+        }
+        // Higher needs suppression: can't create art or bond while starving or unsafe.
+        if (needs[NEED_HUNGER] < 0.25 || needs[NEED_SAFETY] < 0.25)
+            && matches!(action, Action::CreateMark | Action::Memorialize | Action::Bond)
+        {
+            score = 0.0;
+        }
 
         // Jitter
         score += rng.f32() * 0.05;
@@ -1292,6 +1371,9 @@ fn logistic_need_score(action: Action, needs: &[f32; MAX_NEEDS]) -> f32 {
         // Grief-driven: low base, always available
         Action::Mourn => 0.3,
         Action::Memorialize => 0.4,
+
+        // Safety-driven tribute: only when safety is critical
+        Action::Appease => logistic(safety_urgency, 10.0, 0.8) * 0.7,
     }
 }
 

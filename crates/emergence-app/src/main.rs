@@ -18,13 +18,13 @@ use emergence_viewer::observation::settlement::SettlementDetector;
 use emergence_viewer::renderer::beings::BeingRenderer;
 use emergence_viewer::renderer::heatmap::HeatmapRenderer;
 use emergence_viewer::renderer::kingdom_overlay::{KingdomFrame, KingdomInfo, KingdomOverlay};
-use emergence_viewer::renderer::objects::ObjectRenderer;
+use emergence_viewer::renderer::objects::ChunkedObjectRenderer;
 use emergence_viewer::renderer::particles::ParticleSystem;
 use emergence_viewer::renderer::state::RenderState;
 use emergence_viewer::renderer::terrain::TerrainRenderer;
 use emergence_viewer::screen_state::{
     FaunaDensity, MainMenuAction, MainMenuUi, OnboardingTooltip, PauseMenuAction, PauseMenuUi,
-    SaveSlotInfo, ScenarioSelectAction, ScenarioSelectUi, ScreenState, SpeedControls,
+    PerfStats, SaveSlotInfo, ScenarioSelectAction, ScenarioSelectUi, ScreenState, SpeedControls,
     TopBar,
 };
 use emergence_viewer::god_tools::{GodToolState, CursorPreview, palette as god_palette};
@@ -75,7 +75,7 @@ struct App {
     terrain_renderer: Option<TerrainRenderer>,
     being_renderer: Option<BeingRenderer>,
     heatmap_renderer: Option<HeatmapRenderer>,
-    object_renderer: Option<ObjectRenderer>,
+    object_renderer: Option<ChunkedObjectRenderer>,
     particle_system: Option<ParticleSystem>,
     kingdom_overlay: Option<KingdomOverlay>,
 
@@ -108,6 +108,12 @@ struct App {
     last_frame: Instant,
     tick_timer: Instant,
     ticks_since_timer: u32,
+
+    // FPS/TPS display
+    last_fps_time: Instant,
+    frames_since_last_sec: u32,
+    current_fps: f32,
+    current_tps: u32,
 
     window: Option<Arc<Window>>,
     mouse_pos: [f32; 2],
@@ -163,6 +169,26 @@ struct App {
 
     // Toast queue: persistent floating action labels with 2-second fade-out
     toast_queue: FloatingToastQueue,
+
+    // Frame profiling
+    last_profile_time: Instant,
+    profile_accum: ProfileAccum,
+}
+
+#[derive(Default)]
+struct ProfileAccum {
+    frames: u32,
+    sim_ms: f32,
+    camera_ms: f32,
+    being_ms: f32,
+    terrain_ms: f32,
+    kingdom_ms: f32,
+    particle_ms: f32,
+    egui_ms: f32,
+    gpu_render_ms: f32,
+    signal_ms: f32,
+    egui_render_ms: f32,
+    total_ms: f32,
 }
 
 /// A floating world annotation shown over game events.
@@ -268,6 +294,10 @@ impl App {
             last_frame: Instant::now(),
             tick_timer: Instant::now(),
             ticks_since_timer: 0,
+            last_fps_time: Instant::now(),
+            frames_since_last_sec: 0,
+            current_fps: 0.0,
+            current_tps: 0,
             window: None,
             mouse_pos: [0.0, 0.0],
             pending_load_slot: None,
@@ -298,6 +328,8 @@ impl App {
             show_kingdom_colors: true,
             world_annotations: Vec::new(),
             toast_queue: FloatingToastQueue::new(),
+            last_profile_time: Instant::now(),
+            profile_accum: ProfileAccum::default(),
         }
     }
 
@@ -382,11 +414,10 @@ impl App {
                     &rs.simple_texture_bind_group_layout,
                 )
             };
-            let mut object_renderer = ObjectRenderer::new(&rs.device);
-            {
+            let object_renderer = {
                 let w = world.read().unwrap();
-                object_renderer.rebuild(&rs.queue, &w.terrain, &w.resources);
-            }
+                ChunkedObjectRenderer::new(&rs.device, w.config.size.0, w.config.size.1)
+            };
             self.terrain_renderer = Some(terrain_renderer);
             self.heatmap_renderer = Some(heatmap_renderer);
             self.object_renderer = Some(object_renderer);
@@ -440,11 +471,10 @@ impl App {
                             &rs.simple_texture_bind_group_layout,
                         )
                     };
-                    let mut object_renderer = ObjectRenderer::new(&rs.device);
-                    {
+                    let object_renderer = {
                         let w_ref = world.read().unwrap();
-                        object_renderer.rebuild(&rs.queue, &w_ref.terrain, &w_ref.resources);
-                    }
+                        ChunkedObjectRenderer::new(&rs.device, w_ref.config.size.0, w_ref.config.size.1)
+                    };
                     self.terrain_renderer = Some(terrain_renderer);
                     self.heatmap_renderer = Some(heatmap_renderer);
                     self.object_renderer = Some(object_renderer);
@@ -534,8 +564,7 @@ impl ApplicationHandler for App {
                 world.config.size.1,
                 &render_state.simple_texture_bind_group_layout,
             ));
-            let mut object_renderer = ObjectRenderer::new(&render_state.device);
-            object_renderer.rebuild(&render_state.queue, &world.terrain, &world.resources);
+            let object_renderer = ChunkedObjectRenderer::new(&render_state.device, world.config.size.0, world.config.size.1);
             self.object_renderer = Some(object_renderer);
         }
 
@@ -815,10 +844,20 @@ impl ApplicationHandler for App {
 
         // --- Timing ---
         let now = Instant::now();
+        let frame_start = now;
         let dt = (now - self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = now;
 
+        // --- FPS tracking ---
+        self.frames_since_last_sec += 1;
+        if now.duration_since(self.last_fps_time).as_secs_f32() >= 1.0 {
+            self.current_fps = self.frames_since_last_sec as f32;
+            self.frames_since_last_sec = 0;
+            self.last_fps_time = now;
+        }
+
         // --- Tick simulation (only while Playing) ---
+        let sim_t = Instant::now();
         if self.screen == ScreenState::Playing {
             let ticks = self.speed.ticks_this_frame();
             if ticks > 0 {
@@ -896,7 +935,18 @@ impl ApplicationHandler for App {
                     }
 
                     let mut world = world.write().unwrap();
-                    emergence_core::step_n(&mut world, ticks);
+
+                    // Time-budgeted ticking: never spend more than 12ms per frame.
+                    const TICK_BUDGET_MS: u128 = 12;
+                    let tick_start = std::time::Instant::now();
+                    let mut ticked = 0u32;
+                    for _ in 0..ticks {
+                        if ticked > 0 && tick_start.elapsed().as_millis() >= TICK_BUDGET_MS {
+                            break;
+                        }
+                        emergence_core::step(&mut world);
+                        ticked += 1;
+                    }
 
                     // Auto-save trigger
                     if world.tick % AUTO_SAVE_INTERVAL == 0 && world.tick > 0 {
@@ -1035,20 +1085,23 @@ impl ApplicationHandler for App {
                         });
                     }
 
-                    self.ticks_since_timer += ticks;
+                    self.ticks_since_timer += ticked;
                 }
             }
         }
+        self.profile_accum.sim_ms += sim_t.elapsed().as_secs_f32() * 1000.0;
 
         // Tick rate measurement
         let timer_elapsed = self.tick_timer.elapsed().as_secs_f32();
         if timer_elapsed >= 1.0 {
             self.dashboard.tick_rate = self.ticks_since_timer as f32 / timer_elapsed;
+            self.current_tps = (self.ticks_since_timer as f32 / timer_elapsed).round() as u32;
             self.ticks_since_timer = 0;
             self.tick_timer = now;
         }
 
         // Update camera
+        let camera_t = Instant::now();
         self.camera.update(dt);
 
         // Apply screen shake offset to camera position
@@ -1061,6 +1114,7 @@ impl ApplicationHandler for App {
             self.camera.position[0] += offset[0];
             self.camera.position[1] += offset[1];
         }
+        self.profile_accum.camera_ms += camera_t.elapsed().as_secs_f32() * 1000.0;
 
         // Decay flash alpha (~10 ticks at 60fps ≈ 160ms)
         if self.flash_alpha > 0.0 {
@@ -1083,7 +1137,7 @@ impl ApplicationHandler for App {
                     (danger.min(1.0), comfort.min(1.0), grief.min(1.0))
                 })
                 .unwrap_or((0.0, 0.0, 0.0));
-            rs.update_water_time_signals(self.elapsed_time, sig_danger, sig_comfort, sig_grief);
+            rs.update_water_time_signals(self.elapsed_time, sig_danger, sig_comfort, sig_grief, 1.0);
             rs.update_object_time(self.elapsed_time);
             rs.update_being_time(self.elapsed_time);
         }
@@ -1204,7 +1258,7 @@ impl ApplicationHandler for App {
         self.world_laws_panel.tick_pulse();
 
         // --- Render ---
-        let rs = match self.render_state.as_ref() {
+        let rs = match self.render_state.as_mut() {
             Some(rs) => rs,
             None => return,
         };
@@ -1238,23 +1292,36 @@ impl ApplicationHandler for App {
 
             self.anim.update(dt, &world.beings);
 
+            let being_t = Instant::now();
             if let Some(ref mut br) = self.being_renderer {
                 // frame_frac: fractional progress into the current simulation tick.
                 // At high speeds (many ticks/frame) we always render at 1.0.
                 // At Speed1x the tick runs at end of each frame so frac = 1.0.
                 let frame_frac = 1.0f32;
-                br.update(&rs.queue, &world.beings, &self.anim, frame_frac, world.tick as u32, pixels_per_unit);
+                br.update(&rs.queue, &world.beings, &self.anim, frame_frac, world.tick as u32, pixels_per_unit, world.terrain.width, world.terrain.height);
             }
+            self.profile_accum.being_ms += being_t.elapsed().as_secs_f32() * 1000.0;
+
             if let Some(ref hm) = self.heatmap_renderer {
                 hm.update(&rs.queue, &world.signals);
             }
 
-            // Object renderer update (resources + structures)
+            // Object renderer update — viewport culled
             if let Some(ref mut obj) = self.object_renderer {
-                obj.update(&rs.queue, &world.terrain, &world.resources, pixels_per_unit);
+                obj.update(
+                    &rs.queue,
+                    &world.terrain,
+                    &world.resources,
+                    pixels_per_unit,
+                    self.camera.position[0],
+                    self.camera.position[1],
+                    self.camera.zoom,
+                    self.camera.aspect,
+                );
             }
 
             // Particle system update
+            let particle_t = Instant::now();
             if let Some(ref mut ps) = self.particle_system {
                 use emergence_viewer::renderer::particles::EmitterKind;
                 use emergence_core::sim::world_state::EventType;
@@ -1275,13 +1342,21 @@ impl ApplicationHandler for App {
                 }
 
                 // Campfire ember particles: emit every 6 frames for each campfire.
-                // Campfire u8 value = 1. Scan at reduced rate using frame_tick modulo.
+                // Campfire u8 value = 1. Scan only the visible viewport to avoid full-grid scan.
                 let frame_tick = world.tick;
                 if frame_tick % 6 == 0 {
                     let tw = world.terrain.width as usize;
                     let th = world.terrain.height as usize;
-                    for y in 0..th {
-                        for x in 0..tw {
+                    let half_w = (self.camera.zoom * self.camera.aspect * 0.5 + 4.0) as usize;
+                    let half_h = (self.camera.zoom * 0.5 + 4.0) as usize;
+                    let cx = self.camera.position[0] as usize;
+                    let cy = self.camera.position[1] as usize;
+                    let x_min = cx.saturating_sub(half_w);
+                    let x_max = (cx + half_w).min(tw);
+                    let y_min = cy.saturating_sub(half_h);
+                    let y_max = (cy + half_h).min(th);
+                    for y in y_min..y_max {
+                        for x in x_min..x_max {
                             let idx = y * tw + x;
                             if world.terrain.structure[idx] == 1 {
                                 // Campfire: emit 1-2 fire ember particles upward
@@ -1360,15 +1435,19 @@ impl ApplicationHandler for App {
 
                 ps.update(&rs.queue);
             }
+            self.profile_accum.particle_ms += particle_t.elapsed().as_secs_f32() * 1000.0;
 
             // Kingdom overlay prepare
+            let kingdom_t = Instant::now();
             if let Some(ref mut ko) = self.kingdom_overlay {
                 let frame = build_kingdom_frame(&self.kingdom_detector, &world, world.tick);
                 ko.prepare(&rs.queue, &frame);
             }
+            self.profile_accum.kingdom_ms += kingdom_t.elapsed().as_secs_f32() * 1000.0;
         }
 
         // --- egui frame ---
+        let egui_t = Instant::now();
         let window = self.window.as_ref().unwrap();
         let egui_input = self.egui_state.as_mut().unwrap().take_egui_input(&*window);
         self.egui_ctx.begin_pass(egui_input);
@@ -1415,7 +1494,12 @@ impl ApplicationHandler for App {
                     })
                     .unwrap_or((0, 0));
 
-                TopBar::show(&self.egui_ctx, &mut self.speed, tick, population);
+                TopBar::show(&self.egui_ctx, &mut self.speed, tick, population, &PerfStats {
+                    gpu_managed: self.world.as_ref().map(|w| w.read().unwrap().signals.gpu_managed).unwrap_or(false),
+                    fps: self.current_fps,
+                    tps: self.current_tps,
+                    mem_mb: 0.0,
+                });
 
                 // Mute toggle button — top-right corner
                 {
@@ -2135,6 +2219,8 @@ impl ApplicationHandler for App {
                                 ("SCENT", "F7 — Cultural identity. Beings recognize group members.", egui::Color32::from_rgb(200, 120, 220)),
                             emergence_core::world::signal::SignalChannel::Crime =>
                                 ("CRIME", "F8 — Murder beacon. Deposited by unprovoked killers. Bold beings hunt the source.", egui::Color32::from_rgb(200, 0, 200)),
+                            emergence_core::world::signal::SignalChannel::Toxin =>
+                                ("TOXIN", "F9 — Environmental toxin. Deposited by industrial activity.", egui::Color32::from_rgb(100, 230, 50)),
                         };
 
                         egui::Area::new(egui::Id::new("heatmap_legend"))
@@ -2253,6 +2339,8 @@ impl ApplicationHandler for App {
         }
 
         let egui_output = self.egui_ctx.end_pass();
+        self.profile_accum.egui_ms += egui_t.elapsed().as_secs_f32() * 1000.0;
+
         let paint_jobs = self
             .egui_ctx
             .tessellate(egui_output.shapes, egui_output.pixels_per_point);
@@ -2279,22 +2367,65 @@ impl ApplicationHandler for App {
                     label: Some("World Encoder"),
                 });
 
-                // ── Compute pass: signal grid diffusion ───────────────────
-                // Dispatches GPU diffusion shader before any render pass.
-                // Uploads Danger channel (index 0) when its dimensions match the
-                // compute pipeline; otherwise dispatches with existing buffer data.
-                {
-                    if let Some(ref world) = self.world {
-                        let world_r = world.read().unwrap();
-                        let channel = &world_r.signals.channels[0];
-                        let expected = (rs.signal_compute.width * rs.signal_compute.height) as usize;
-                        if channel.len() == expected {
-                            rs.signal_compute.upload_signals(&rs.queue, channel);
+                // ── Compute pass: signal grid diffusion (async GPU readback) ──
+                let signal_t = Instant::now();
+                rs.device.poll(wgpu::Maintain::Poll);
+
+                if let Some(ref world) = self.world {
+                    let mut world_w = world.write().unwrap();
+                    let expected_cells = (rs.signal_compute.width * rs.signal_compute.height) as usize;
+                    let grid_cells = (world_w.signals.width * world_w.signals.height) as usize;
+
+                    if expected_cells != grid_cells {
+                        let cp = world_w.signals.channel_params();
+                        rs.reinit_signal_compute(world_w.signals.width, world_w.signals.height, &cp);
+                    }
+                    world_w.signals.gpu_managed = true;
+
+                    // Pull finished async data from previous frame
+                    rs.signal_compute.try_complete_download(&mut world_w.signals.channels);
+
+                    // Push next frame to GPU IF previous readback completed
+                    if !rs.signal_compute.readback_flag.load(std::sync::atomic::Ordering::SeqCst) {
+                        let mut encoder = rs.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("Signal Diffuse Dispatch Encoder"),
+                        });
+                        rs.signal_compute.upload_all_channels(&rs.queue, &world_w.signals.channels);
+                        rs.signal_compute.dispatch(&mut encoder);
+                        rs.queue.submit(std::iter::once(encoder.finish()));
+                        rs.signal_compute.start_download(&rs.device, &rs.queue);
+                    }
+                }
+                self.profile_accum.signal_ms += signal_t.elapsed().as_secs_f32() * 1000.0;
+
+                // ── Compute pass: memetic grid diffusion (async GPU readback) ──
+                if let Some(ref world) = self.world {
+                    let mut world_w = world.write().unwrap();
+
+                    // Pull finished async memetic data from previous frame
+                    if let Some(ref memetic_compute) = rs.memetic_compute {
+                        memetic_compute.try_complete_download(&mut world_w.memetic.channels);
+                    }
+
+                    // Dispatch memetic diffusion IF signal compute readback is done
+                    // (signal buffer must be stable before memetic reads it)
+                    if rs.memetic_compute.is_some()
+                        && !rs.signal_compute.readback_flag.load(std::sync::atomic::Ordering::SeqCst)
+                    {
+                        let memetic_compute = rs.memetic_compute.as_ref().unwrap();
+                        if !memetic_compute.readback_flag.load(std::sync::atomic::Ordering::SeqCst) {
+                            let mut enc = rs.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("Memetic Diffuse Dispatch Encoder"),
+                            });
+                            memetic_compute.upload_all_channels(&rs.queue, &world_w.memetic.channels);
+                            memetic_compute.dispatch(&mut enc);
+                            rs.queue.submit(std::iter::once(enc.finish()));
+                            memetic_compute.start_download(&rs.device, &rs.queue);
                         }
                     }
-                    rs.signal_compute.dispatch(&mut encoder);
                 }
 
+                let gpu_render_t = Instant::now();
                 {
                     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("World Pass"),
@@ -2316,6 +2447,7 @@ impl ApplicationHandler for App {
                     });
 
                     // Rebuild terrain instances for current viewport
+                    let terrain_t = Instant::now();
                     if let Some(ref mut terrain_r) = self.terrain_renderer {
                         if let Some(ref world) = self.world {
                             let world = world.read().unwrap();
@@ -2329,6 +2461,7 @@ impl ApplicationHandler for App {
                             );
                         }
                     }
+                    self.profile_accum.terrain_ms += terrain_t.elapsed().as_secs_f32() * 1000.0;
 
                     // Terrain
                     if let Some(ref terrain_r) = self.terrain_renderer {
@@ -2360,26 +2493,19 @@ impl ApplicationHandler for App {
                         }
                     }
 
-                    // World objects (resources + structures)
-                    // DISABLED: GPU hash decorations are now painted directly in terrain.wgsl
-                    // Kept here for potential restore — just remove the `if false` wrapper.
-                    if false {
+                    // World objects (resources + structures) — chunk-based, viewport culled
                     if let Some(ref obj_r) = self.object_renderer {
-                        if obj_r.instance_count > 0 {
-                            render_pass.set_pipeline(&rs.object_pipeline);
-                            render_pass.set_bind_group(0, &rs.camera_bind_group, &[]);
-                            render_pass.set_bind_group(1, &rs.atlas.bind_group, &[]);
-                            render_pass.set_bind_group(2, &rs.object_time_bind_group, &[]);
-                            render_pass.set_vertex_buffer(0, obj_r.vertex_buffer.slice(..));
-                            render_pass.set_vertex_buffer(1, obj_r.instance_buffer.slice(..));
-                            render_pass.set_index_buffer(
-                                obj_r.index_buffer.slice(..),
-                                wgpu::IndexFormat::Uint16,
-                            );
-                            render_pass.draw_indexed(0..6, 0, 0..obj_r.instance_count);
-                        }
+                        render_pass.set_pipeline(&rs.object_pipeline);
+                        render_pass.set_bind_group(0, &rs.camera_bind_group, &[]);
+                        render_pass.set_bind_group(1, &rs.atlas.bind_group, &[]);
+                        render_pass.set_bind_group(2, &rs.object_time_bind_group, &[]);
+                        render_pass.set_vertex_buffer(0, obj_r.vertex_buffer.slice(..));
+                        render_pass.set_index_buffer(
+                            obj_r.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint16,
+                        );
+                        obj_r.draw(&mut render_pass);
                     }
-                    } // end if false
 
                     // Beings (sprites)
                     // Skip draw call entirely at macro zoom (< 2.0 px/unit = > ~150 visible cells).
@@ -2389,7 +2515,7 @@ impl ApplicationHandler for App {
                         if being_r.instance_count > 0 && being_pixels_per_unit >= 2.0 {
                             render_pass.set_pipeline(&rs.sprite_pipeline);
                             render_pass.set_bind_group(0, &rs.camera_bind_group, &[]);
-                            render_pass.set_bind_group(1, &rs.atlas.bind_group, &[]);
+                            render_pass.set_bind_group(1, &rs.entity_bind_group, &[]);
                             render_pass.set_bind_group(2, &rs.being_time_bind_group, &[]);
                             render_pass.set_vertex_buffer(0, being_r.vertex_buffer.slice(..));
                             render_pass.set_vertex_buffer(1, being_r.instance_buffer.slice(..));
@@ -2429,6 +2555,7 @@ impl ApplicationHandler for App {
                 }
 
                 rs.queue.submit(std::iter::once(encoder.finish()));
+                self.profile_accum.gpu_render_ms += gpu_render_t.elapsed().as_secs_f32() * 1000.0;
             } else {
                 // Clear to dark background for menus
                 let mut encoder = rs.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -2481,6 +2608,7 @@ impl ApplicationHandler for App {
         }
 
         // egui render pass
+        let egui_render_t = Instant::now();
         {
             let mut encoder = rs.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("egui Encoder"),
@@ -2514,8 +2642,34 @@ impl ApplicationHandler for App {
 
             rs.queue.submit(std::iter::once(encoder.finish()));
         }
+        self.profile_accum.egui_render_ms += egui_render_t.elapsed().as_secs_f32() * 1000.0;
 
         output.present();
+
+        // --- Profile report (once per second) ---
+        self.profile_accum.total_ms += frame_start.elapsed().as_secs_f32() * 1000.0;
+        self.profile_accum.frames += 1;
+        if self.last_profile_time.elapsed().as_secs_f32() >= 1.0 {
+            let p = &self.profile_accum;
+            let f = p.frames.max(1) as f32;
+            eprintln!(
+                "[PROFILE] total={:.0}ms sim={:.0}ms camera={:.1}ms being={:.0}ms terrain={:.0}ms kingdom={:.1}ms particle={:.0}ms egui={:.0}ms gpu={:.0}ms signal={:.1}ms eguiR={:.0}ms ({} frames)",
+                p.total_ms / f,
+                p.sim_ms / f,
+                p.camera_ms / f,
+                p.being_ms / f,
+                p.terrain_ms / f,
+                p.kingdom_ms / f,
+                p.particle_ms / f,
+                p.egui_ms / f,
+                p.gpu_render_ms / f,
+                p.signal_ms / f,
+                p.egui_render_ms / f,
+                p.frames,
+            );
+            self.profile_accum = ProfileAccum::default();
+            self.last_profile_time = Instant::now();
+        }
 
         for id in &egui_output.textures_delta.free {
             egui_renderer.free_texture(id);

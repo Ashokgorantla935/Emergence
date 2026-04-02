@@ -371,6 +371,7 @@ pub fn create_world_from_scenario(scenario: &ScenarioConfig) -> crate::sim::worl
     // Spawn fauna (wolves, deer, rabbits, hawks, fish, etc.) distributed by biome
     crate::spawn_fauna(&mut beings, &terrain, &mut rng);
 
+    let (w, h) = (config.size.0, config.size.1);
     World {
         terrain,
         resources,
@@ -387,6 +388,7 @@ pub fn create_world_from_scenario(scenario: &ScenarioConfig) -> crate::sim::worl
         settlements: Vec::new(),
         kingdoms: Vec::new(),
         wars: Vec::new(),
+        memetic: crate::world::memetic::MemeticGrid::new(w, h),
     }
 }
 

@@ -361,6 +361,7 @@ impl SaveFile {
             dominant_style: if self.dominant_style.len() == len { self.dominant_style.clone() } else { vec![0u8; len] },
             cache_food: if self.cache_food.len() == len { self.cache_food.clone() } else { vec![0.0f32; len] },
             cache_stone: if self.cache_stone.len() == len { self.cache_stone.clone() } else { vec![0.0f32; len] },
+            trample: vec![0u8; len],
         };
 
         // Reconstruct ResourceLayer
@@ -500,6 +501,7 @@ impl SaveFile {
             settlements: Vec::new(),   // rebuilt at next 600-tick cycle
             kingdoms: Vec::new(),
             wars: Vec::new(),
+            memetic: crate::world::memetic::MemeticGrid::new(w, h),
         }
     }
 }

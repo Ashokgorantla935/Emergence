@@ -313,7 +313,7 @@ fn draw_custom_panel(
         egui::ComboBox::from_id_salt("custom_map_size")
             .selected_text(map_size_label(state.custom_size))
             .show_ui(ui, |ui| {
-                for &sz in &[MapSize::Tiny, MapSize::Small, MapSize::Medium, MapSize::Large] {
+                for &sz in &[MapSize::Tiny, MapSize::Small, MapSize::Medium, MapSize::Large, MapSize::Epic, MapSize::Huge] {
                     if ui.selectable_label(state.custom_size == sz, map_size_label(sz)).clicked() {
                         state.custom_size = sz;
                         state.mark_preview_dirty();
@@ -397,6 +397,8 @@ fn map_size_label(sz: MapSize) -> &'static str {
         MapSize::Small => "128",
         MapSize::Medium => "256",
         MapSize::Large => "512",
+        MapSize::Epic  => "1024",
+        MapSize::Huge  => "2048",
     }
 }
 

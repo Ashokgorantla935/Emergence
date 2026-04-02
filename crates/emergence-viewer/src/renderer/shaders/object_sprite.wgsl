@@ -82,8 +82,8 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let c = textureSample(sprite_atlas, atlas_sampler, in.uv);
 
-    // Pixel size in atlas UV space (atlas is 512x512)
-    let px = 1.0 / 512.0;
+    // Pixel size in atlas UV space (atlas is 1024x1024)
+    let px = 1.0 / 1024.0;
 
     if c.a < 0.1 {
         // 1px black outline: sample 4 adjacent texels, clamped to this atlas cell.

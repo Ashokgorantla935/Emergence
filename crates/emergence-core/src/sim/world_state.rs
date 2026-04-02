@@ -35,6 +35,7 @@ pub enum EventType {
     BuildingComplete,  // actor_id = being who built, location = building cell
     MassDeath,         // actor_id = count, used for "47 beings died" merge
     GodAction,         // actor_id = power id
+    Flood,             // actor_id = count of flooded cells
 }
 
 /// Compact cause attached to an Event at emission time, when Being data is available.

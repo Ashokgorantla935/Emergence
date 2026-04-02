@@ -44,10 +44,11 @@ pub enum Action {
     ShareResource = 20,  // carry stone to settlement that needs it
     PickUpStone = 21,    // pick up stone near mountain
     Appease = 22,        // tribute economy: transfer food to threatening being to buy safety
+    BuildClean = 23,     // build clean energy infrastructure — no Toxin, high cooperation benefit
 }
 
 impl Action {
-    pub const ALL: [Action; 23] = [
+    pub const ALL: [Action; 24] = [
         Action::Wander,
         Action::SeekFood,
         Action::SeekShelter,
@@ -71,10 +72,11 @@ impl Action {
         Action::ShareResource,
         Action::PickUpStone,
         Action::Appease,
+        Action::BuildClean,
     ];
 
     /// Return the action subset allowed for the given creature type.
-    /// Fauna get simplified subsets (5-9 actions). Humans get all 22.
+    /// Fauna get simplified subsets (5-9 actions). Humans get all 24.
     /// Predators (Wolf, Bear, Hawk) include Hunt. Prey flee, seek food, avoid.
     pub fn allowed_actions(creature_type: u8) -> &'static [Action] {
         use crate::being::data::CreatureType;
@@ -278,10 +280,52 @@ pub fn score_actions(
             q_values[Action::Bond as usize] = 0.0;
         }
 
+        // ── Global famine pressure: exponential aggression when food signal is very low ──────
+        let food_signal = local.values[CH_FOOD];
+        let global_food_scarcity = if food_signal < 0.05 {
+            (1.0 - food_signal / 0.05).powf(2.0) * 50.0
+        } else {
+            0.0
+        };
+
+        if global_food_scarcity > 10.0 {
+            q_values[Action::Hunt as usize] += global_food_scarcity;
+            // SeekFood gets a moderate boost alongside Hunt
+            q_values[Action::SeekFood as usize] += global_food_scarcity * 0.5;
+        }
+
+        // ── Dual-utility fork: extreme starvation forces war or clean energy choice ─────────
+        // Path A: Fight (Hunt) — exponential war drive when no food and no knowledge
+        // Path B: BuildClean — cooperation via clean energy (handled post-Boltzmann; boosted here via exploration)
+        if hunger < 0.15 && food_signal < 0.02 {
+            // War path boosts Hunt massively — BuildClean override happens post-Boltzmann
+            q_values[Action::Hunt as usize] += (0.15 - hunger) * 500.0;
+        }
+
+        // ── Migration pressure: flooding forces inland migration ─────────────────────────────
+        let cell_idx_usize = (cy as usize) * (terrain.width as usize) + (cx as usize);
+        let is_on_water = terrain.biome[cell_idx_usize] == Biome::Water;
+        let near_water = {
+            let w = terrain.width as usize;
+            let h = terrain.height as usize;
+            let xi = cx as usize;
+            let yi = cy as usize;
+            (xi > 0 && terrain.biome[yi * w + (xi - 1)] == Biome::Water)
+                || (xi + 1 < w && terrain.biome[yi * w + (xi + 1)] == Biome::Water)
+                || (yi > 0 && terrain.biome[(yi - 1) * w + xi] == Biome::Water)
+                || (yi + 1 < h && terrain.biome[(yi + 1) * w + xi] == Biome::Water)
+        };
+        if is_on_water || near_water {
+            q_values[Action::Explore as usize] += 200.0;
+            q_values[Action::Bond as usize] = 0.0;
+            q_values[Action::CreateMark as usize] = 0.0;
+            q_values[Action::Memorialize as usize] = 0.0;
+        }
+
         // Build allowed action indices for Boltzmann selection
-        // Appease is excluded from brain q_values (brain has 22 outputs); handled post-Boltzmann.
+        // Appease and BuildClean are excluded from brain q_values (brain has 22 outputs); handled post-Boltzmann.
         let mut allowed_indices: Vec<u8> = Action::ALL.iter()
-            .filter(|&&a| a != Action::Appease)
+            .filter(|&&a| a != Action::Appease && a != Action::BuildClean)
             .map(|&a| a as u8)
             .collect();
 
@@ -437,6 +481,8 @@ pub fn score_actions(
             // Appease is selected via post-Boltzmann override below; this arm is unreachable
             // during normal Boltzmann selection (Appease is excluded from allowed_indices).
             Action::Appease => {}
+            // BuildClean is handled via post-Boltzmann override; unreachable during Boltzmann.
+            Action::BuildClean => {}
         }
 
         // ── Appease override: evaluate post-Boltzmann ─────────────────────────
@@ -468,6 +514,42 @@ pub fn score_actions(
                         score: appease_score,
                         target_being: Some(appease_idx),
                         target_pos: Some(beings.hot.positions[appease_idx]),
+                        runner_up_action: chosen_action as u8,
+                        runner_up_score: chosen_q,
+                        causal_contrib: causal.abs(),
+                        relationship_contrib: 0.0,
+                        signal_contrib,
+                    };
+                }
+            }
+        }
+
+        // ── BuildClean override: cooperation path requires tech knowledge and stone ───────────
+        // Only available in mass starvation with food scarcity. Tribes with high tool_quality
+        // (proxy for memetic tech level) choose clean energy over war.
+        {
+            let food_signal_bc = local.values[CH_FOOD];
+            let global_scarcity_bc = if food_signal_bc < 0.05 {
+                (1.0 - food_signal_bc / 0.05).powf(2.0) * 50.0
+            } else {
+                0.0
+            };
+            let tech_level = beings.hot.tool_quality[being_index]; // 0..1 proxy for tech
+            let has_stone = beings.hot.carry[being_index][1] >= 0.1;
+            if has_stone && tech_level > 0.1 && global_scarcity_bc > 20.0 {
+                let build_clean_score = tech_level * 200.0;
+                if build_clean_score > chosen_q {
+                    let signal_levels = local.values;
+                    let biome = terrain.biome_at(cx, cy);
+                    let nearby_count = nearby.len().min(255) as u8;
+                    let context_hash = compute_context_hash(biome, signal_levels, nearby_count, climate.day_phase());
+                    let causal = beings.cold.causal_memories[being_index].score_for_action(Action::BuildClean as u8, context_hash);
+                    let signal_contrib = local.values.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+                    return ScoredAction {
+                        action: Action::BuildClean,
+                        score: build_clean_score,
+                        target_being: None,
+                        target_pos: Some(pos),
                         runner_up_action: chosen_action as u8,
                         runner_up_score: chosen_q,
                         causal_contrib: causal.abs(),
@@ -752,6 +834,10 @@ pub fn score_actions(
                 // For humans this arm is handled via the post-Boltzmann override above.
                 score = 0.0;
             }
+            Action::BuildClean => {
+                // Fauna never build clean energy. Humans handled via post-Boltzmann override.
+                score = 0.0;
+            }
         }
 
         // Species-specific behavior overrides (applied after generic scoring)
@@ -782,6 +868,28 @@ pub fn score_actions(
         // Higher needs suppression: can't create art or bond while starving or unsafe.
         if (needs[NEED_HUNGER] < 0.25 || needs[NEED_SAFETY] < 0.25)
             && matches!(action, Action::CreateMark | Action::Memorialize | Action::Bond)
+        {
+            score = 0.0;
+        }
+
+        // ── Migration pressure: flooding forces inland movement ────────────────
+        let cell_idx_h = (cy as usize) * (terrain.width as usize) + (cx as usize);
+        let on_water_h = terrain.biome[cell_idx_h] == Biome::Water;
+        let near_water_h = {
+            let w = terrain.width as usize;
+            let h_size = terrain.height as usize;
+            let xi = cx as usize;
+            let yi = cy as usize;
+            (xi > 0 && terrain.biome[yi * w + (xi - 1)] == Biome::Water)
+                || (xi + 1 < w && terrain.biome[yi * w + (xi + 1)] == Biome::Water)
+                || (yi > 0 && terrain.biome[(yi - 1) * w + xi] == Biome::Water)
+                || (yi + 1 < h_size && terrain.biome[(yi + 1) * w + xi] == Biome::Water)
+        };
+        if (on_water_h || near_water_h) && action == Action::Explore {
+            score += 200.0;
+        }
+        if (on_water_h || near_water_h)
+            && matches!(action, Action::Bond | Action::CreateMark | Action::Memorialize)
         {
             score = 0.0;
         }
@@ -1374,6 +1482,9 @@ fn logistic_need_score(action: Action, needs: &[f32; MAX_NEEDS]) -> f32 {
 
         // Safety-driven tribute: only when safety is critical
         Action::Appease => logistic(safety_urgency, 10.0, 0.8) * 0.7,
+
+        // Clean energy: purpose and belonging driven, moderate urgency
+        Action::BuildClean => logistic(purpose_urgency, 6.0, 0.5) * 0.6,
     }
 }
 

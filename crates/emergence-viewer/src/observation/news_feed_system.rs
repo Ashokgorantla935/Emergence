@@ -426,6 +426,9 @@ impl NewsFeedSystem {
             EventType::MassDeath => {
                 format!("A catastrophe claimed {} lives.", event.actor_id)
             }
+            EventType::Flood => {
+                format!("The seas rise — {} coastal cells have been swallowed by the ocean.", event.actor_id)
+            }
             // Low tier — should have been filtered above
             _ => return None,
         };

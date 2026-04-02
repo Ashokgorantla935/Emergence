@@ -538,6 +538,13 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                         by.min(world.signals.height - 1),
                         0.5,
                     );
+                    // Toxin emission: civilization building accumulates greenhouse gases
+                    world.signals.deposit(
+                        crate::world::signal::SignalChannel::Toxin,
+                        bx.min(world.signals.width - 1),
+                        by.min(world.signals.height - 1),
+                        0.1,
+                    );
                     world.events.push(Event {
                         tick: world.tick,
                         actor_id: being_index as u32,
@@ -726,6 +733,56 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                             move_toward(world, being_index, tp, speed);
                         }
                     }
+                }
+            }
+        }
+        Action::BuildClean => {
+            // Clean energy infrastructure: deposits massive Comfort signal, no Toxin.
+            // Consumes stone. Places SignalBeacon structure type.
+            let cx = pos[0] as u32;
+            let cy = pos[1] as u32;
+            let cidx = (cy.min(world.terrain.height - 1) * world.terrain.width
+                + cx.min(world.terrain.width - 1)) as usize;
+
+            if world.terrain.structure[cidx] == 0
+                && world.beings.hot.carry[being_index][1] >= 0.1
+            {
+                world.terrain.build_progress[cidx] += 1;
+                let build_ticks = crate::world::terrain::StructureType::SignalBeacon.build_ticks();
+                if world.terrain.build_progress[cidx] >= build_ticks {
+                    // Consume stone
+                    let stone_cost = 0.3_f32.min(world.beings.hot.carry[being_index][1]);
+                    world.beings.hot.carry[being_index][1] -= stone_cost;
+                    let bx = cx.min(world.terrain.width - 1);
+                    let by = cy.min(world.terrain.height - 1);
+                    world.terrain.place_structure(bx, by, crate::world::terrain::StructureType::SignalBeacon, being_index as u32);
+                    trigger_emotion(&mut world.beings, being_index, EMO_JOY, 0.5);
+                    world.beings.hot.needs[being_index][NEED_PURPOSE] =
+                        (world.beings.hot.needs[being_index][NEED_PURPOSE] + 0.2).min(1.0);
+
+                    // Massive Comfort signal in 5-cell radius — no Toxin (clean energy)
+                    for dy in -5_i32..=5 {
+                        for dx in -5_i32..=5 {
+                            let nx = (bx as i32 + dx).clamp(0, world.signals.width as i32 - 1) as u32;
+                            let ny = (by as i32 + dy).clamp(0, world.signals.height as i32 - 1) as u32;
+                            let dist_sq = (dx * dx + dy * dy) as f32;
+                            let falloff = (1.0 - dist_sq / 25.0).max(0.0);
+                            world.signals.deposit(
+                                crate::world::signal::SignalChannel::Comfort,
+                                nx,
+                                ny,
+                                2.0 * falloff,
+                            );
+                        }
+                    }
+                    world.events.push(Event {
+                        tick: world.tick,
+                        actor_id: being_index as u32,
+                        target_id: crate::world::terrain::StructureType::SignalBeacon as u32,
+                        event_type: EventType::BuildingComplete,
+                        location: [bx as f32, by as f32],
+                        cause: crate::sim::world_state::EventCause::None,
+                    });
                 }
             }
         }

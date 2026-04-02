@@ -72,6 +72,40 @@ pub fn tick(world: &mut World) {
         world.climate.water_level_offset = world.climate.global_temperature * 0.01;
     }
 
+    // 3c. Sea level rise: reclassify flooded terrain every 200 ticks.
+    if world.tick % 200 == 0 && world.climate.water_level_offset > 0.001 {
+        use crate::world::terrain::Biome;
+        let water_level = 0.28 + world.climate.water_level_offset;
+        let len = world.terrain.width as usize * world.terrain.height as usize;
+        let mut flooded = 0u32;
+        for idx in 0..len {
+            if world.terrain.biome[idx] != Biome::Water
+                && world.terrain.elevation[idx] < water_level
+            {
+                world.terrain.biome[idx] = Biome::Water;
+                world.terrain.movement_cost[idx] = f32::MAX;
+                world.terrain.seasonal_movement_cost[idx] = f32::MAX;
+                world.terrain.structure[idx] = 0;
+                // Destroy cached and raw resources on flooded cells
+                world.terrain.cache_food[idx] = 0.0;
+                world.terrain.cache_stone[idx] = 0.0;
+                world.resources.food[idx] = 0.0;
+                world.resources.food_capacity[idx] = 0.0;
+                flooded += 1;
+            }
+        }
+        if flooded > 0 {
+            world.events.push(Event {
+                tick: world.tick,
+                actor_id: flooded,
+                target_id: 0,
+                event_type: EventType::Flood,
+                location: [0.0, 0.0],
+                cause: EventCause::None,
+            });
+        }
+    }
+
     // 4. Rebuild spatial index
     world.spatial.rebuild(&world.beings.hot.positions, &world.beings.hot.states);
 

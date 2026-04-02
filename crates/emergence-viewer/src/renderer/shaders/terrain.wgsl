@@ -14,14 +14,14 @@ struct CameraUniform {
 
 // group 2: water time + signal tint + day/night illumination uniform
 // Layout: vec4 [time, signal_danger, signal_comfort, signal_grief]
-//       + vec4 [illumination, _pad1, _pad2, _pad3]
+//       + vec4 [illumination, water_level, _pad2, _pad3]
 struct WaterTime {
     time:           f32,
     signal_danger:  f32,
     signal_comfort: f32,
     signal_grief:   f32,
     illumination:   f32, // day/night: 0.0 = full night, 1.0 = full day
-    _wt_pad1:       f32,
+    water_level:    f32, // dynamic sea level: base 0.28 + water_level_offset
     _wt_pad2:       f32,
     _wt_pad3:       f32,
 };
@@ -336,7 +336,12 @@ fn apply_structure(base: vec4<f32>, structure_type: u32, world_pos: vec2<f32>, t
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let t = water_time.time;
     let biome_id = u32(in.flags + 0.5);
-    let is_water = (biome_id == 1u);
+    var is_water = (biome_id == 1u);
+    // Dynamic sea level: cells whose elevation is below the current water level are flooded.
+    let dynamic_water_level = water_time.water_level;
+    if (!is_water && dynamic_water_level > 0.0 && in.elevation < dynamic_water_level) {
+        is_water = true;
+    }
     let illumination = clamp(water_time.illumination, 0.0, 1.0);
     let comfort = clamp(water_time.signal_comfort, 0.0, 1.0);
 

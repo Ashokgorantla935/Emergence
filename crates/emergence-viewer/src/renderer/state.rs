@@ -906,10 +906,11 @@ impl RenderState {
         self.queue.write_buffer(&self.water_time_buffer, 0, bytemuck::cast_slice(&data));
     }
 
-    /// Update water time uniform with signal tint values and day/night illumination.
+    /// Update water time uniform with signal tint values, day/night illumination, and sea level.
     /// `signal_danger`, `signal_comfort`, `signal_grief` are normalised [0, 1]
     /// global averages of the corresponding signal channels.
     /// `illumination` is from `climate.light_level()` — 0.0 = full night, 1.0 = full day.
+    /// `water_level` is the current sea level (base 0.28 + water_level_offset) for flood rendering.
     pub fn update_water_time_signals(
         &self,
         time: f32,
@@ -917,8 +918,9 @@ impl RenderState {
         signal_comfort: f32,
         signal_grief: f32,
         illumination: f32,
+        water_level: f32,
     ) {
-        let data: [f32; 8] = [time, signal_danger, signal_comfort, signal_grief, illumination, 0.0, 0.0, 0.0];
+        let data: [f32; 8] = [time, signal_danger, signal_comfort, signal_grief, illumination, water_level, 0.0, 0.0];
         self.queue.write_buffer(&self.water_time_buffer, 0, bytemuck::cast_slice(&data));
     }
 

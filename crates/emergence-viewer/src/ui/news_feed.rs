@@ -245,6 +245,10 @@ fn event_to_news(evt: &emergence_core::sim::world_state::Event) -> Option<NewsIt
             Importance::Gold,
         ),
         EventType::GodAction => return None,
+        EventType::Flood => (
+            format!("T{}: {} cells flooded by rising sea levels", evt.tick, evt.actor_id),
+            Importance::Gold,
+        ),
     };
     Some(NewsItem {
         tick: evt.tick,

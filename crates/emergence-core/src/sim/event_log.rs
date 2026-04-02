@@ -46,6 +46,9 @@ impl ImportanceTier {
             | EventType::StoleFood
             | EventType::Fled
             | EventType::WitnessedHarm => ImportanceTier::Low,
+
+            // CRITICAL — coastal flooding
+            EventType::Flood => ImportanceTier::Critical,
         }
     }
 }

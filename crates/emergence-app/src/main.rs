@@ -1125,7 +1125,7 @@ impl ApplicationHandler for App {
         self.elapsed_time += dt;
         if let Some(ref rs) = self.render_state {
             // Compute global signal averages for terrain tinting (sampled each frame)
-            let (sig_danger, sig_comfort, sig_grief) = self.world.as_ref()
+            let (sig_danger, sig_comfort, sig_grief, water_level) = self.world.as_ref()
                 .and_then(|w| w.read().ok())
                 .map(|w| {
                     let signals = &w.signals;
@@ -1134,10 +1134,16 @@ impl ApplicationHandler for App {
                     let danger  = signals.channels[0].iter().sum::<f32>() * scale * 4.0;
                     let comfort = signals.channels[2].iter().sum::<f32>() * scale * 4.0;
                     let grief   = signals.channels[3].iter().sum::<f32>() * scale * 4.0;
-                    (danger.min(1.0), comfort.min(1.0), grief.min(1.0))
+                    // Dynamic water level: base threshold + climate offset for GPU flood rendering
+                    let wl = if w.climate.water_level_offset > 0.0 {
+                        0.28 + w.climate.water_level_offset
+                    } else {
+                        0.0
+                    };
+                    (danger.min(1.0), comfort.min(1.0), grief.min(1.0), wl)
                 })
-                .unwrap_or((0.0, 0.0, 0.0));
-            rs.update_water_time_signals(self.elapsed_time, sig_danger, sig_comfort, sig_grief, 1.0);
+                .unwrap_or((0.0, 0.0, 0.0, 0.0));
+            rs.update_water_time_signals(self.elapsed_time, sig_danger, sig_comfort, sig_grief, 1.0, water_level);
             rs.update_object_time(self.elapsed_time);
             rs.update_being_time(self.elapsed_time);
         }

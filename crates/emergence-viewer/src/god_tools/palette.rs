@@ -7,10 +7,12 @@ use emergence_core::god_action::{GodAction, ResetKind};
 /// Lazy-initialise god_icons and ui_icons on first call.
 fn ensure_icons(ctx: &Context, state: &mut GodToolState) {
     if state.god_icons.is_none() {
-        state.god_icons = Some(load_icon_grid(ctx, "assets/god_tools_icons.png", "god_icon"));
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/god_tools_icons.png");
+        state.god_icons = Some(load_icon_grid(ctx, path, "god_icon"));
     }
     if state.ui_icons.is_none() {
-        state.ui_icons = Some(load_icon_grid(ctx, "assets/worldbox_ui_icons.png", "ui_icon"));
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/worldbox_ui_icons.png");
+        state.ui_icons = Some(load_icon_grid(ctx, path, "ui_icon"));
     }
 }
 

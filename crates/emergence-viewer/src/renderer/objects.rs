@@ -300,6 +300,13 @@ impl ChunkedObjectRenderer {
         let cy_min = (y_min as u32 / CHUNK_CELL_SIZE).min(self.chunk_grid_h.saturating_sub(1));
         let cy_max = ((y_max as u32 / CHUNK_CELL_SIZE) + 1).min(self.chunk_grid_h);
 
+        // Expand by OVERDRAW_MARGIN so entities at chunk borders don't pop out.
+        const OVERDRAW_MARGIN: u32 = 2;
+        let cx_min = cx_min.saturating_sub(OVERDRAW_MARGIN);
+        let cx_max = (cx_max + OVERDRAW_MARGIN).min(self.chunk_grid_w);
+        let cy_min = cy_min.saturating_sub(OVERDRAW_MARGIN);
+        let cy_max = (cy_max + OVERDRAW_MARGIN).min(self.chunk_grid_h);
+
         self.visible_cx_min = cx_min;
         self.visible_cx_max = cx_max;
         self.visible_cy_min = cy_min;

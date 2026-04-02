@@ -1,3 +1,5 @@
+use rayon::prelude::*;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum SignalChannel {
@@ -37,7 +39,9 @@ pub struct SignalGrid {
     pub wrap_horizontal: bool,
     decay_factors: [f32; 8],
     diffusion_rates: [f32; 8],
-    scratch: Vec<f32>, // reusable scratch buffer for diffusion
+    scratch: Vec<f32>, // reusable scratch buffer for single-threaded path (kept for tests)
+    /// Per-channel scratch buffers for parallel diffusion (one per channel).
+    par_scratch: Vec<Vec<f32>>,
     /// When true, the GPU compute pipeline handles diffusion+evaporation.
     /// tick() will run reaction_step() only and skip the CPU diffusion pass.
     pub gpu_managed: bool,
@@ -79,6 +83,9 @@ impl SignalGrid {
             // Toxin moved to ClimateGrid
         ];
 
+        // Allocate one scratch buffer per channel for parallel diffusion.
+        let par_scratch = vec![vec![0.0f32; len]; SignalChannel::COUNT];
+
         SignalGrid {
             width,
             height,
@@ -87,6 +94,7 @@ impl SignalGrid {
             decay_factors,
             diffusion_rates,
             scratch: vec![0.0f32; len],
+            par_scratch,
             gpu_managed: false,
         }
     }
@@ -181,88 +189,94 @@ impl SignalGrid {
         params
     }
 
+    /// Run both reaction and diffusion steps (full tick).
+    /// This is the standard tick used by the simulation.
     pub fn tick(&mut self) {
         // When GPU is managing both reaction and diffusion+evaporation, skip all CPU passes.
         if self.gpu_managed {
             return;
         }
-
         self.reaction_step();
+        self.diffusion_step();
+    }
 
+    /// Run only the reaction step (fast, sequential, ~0.2ms).
+    /// Safe to call every tick. Diffusion can be throttled separately.
+    pub fn reaction_tick_only(&mut self) {
+        if !self.gpu_managed {
+            self.reaction_step();
+        }
+    }
+
+    /// Run only the diffusion + evaporation step in parallel across channels.
+    /// Each channel is diffused independently using rayon. Dormant channels
+    /// (max value < 1e-5) are skipped entirely.
+    pub fn diffusion_step(&mut self) {
         let w = self.width;
         let h = self.height;
-        let len = (w * h) as usize;
 
-        for ch in 0..SignalChannel::COUNT {
-            let diffusion_rate = self.diffusion_rates[ch];
-            let decay_factor = self.decay_factors[ch];
+        // Zip channels and their per-channel scratch buffers together so rayon
+        // can process them in parallel without aliasing.
+        self.channels
+            .par_iter_mut()
+            .zip(self.par_scratch.par_iter_mut())
+            .enumerate()
+            .for_each(|(ch, (channel, scratch))| {
+                let diffusion_rate = self.diffusion_rates[ch];
+                let decay_factor   = self.decay_factors[ch];
+                let wrap           = self.wrap_horizontal;
 
-            // Zero scratch buffer
-            for v in self.scratch.iter_mut() {
-                *v = 0.0;
-            }
+                // Fast dormancy check: skip channels that carry no signal.
+                let max_val = channel.iter().cloned().fold(0.0f32, f32::max);
+                if max_val < 1e-5 {
+                    return;
+                }
 
-            // Diffusion: read from channel, write to scratch
-            let channel = &self.channels[ch];
-            let wrap = self.wrap_horizontal;
-            for y in 0..h {
-                for x in 0..w {
-                    let idx = (y * w + x) as usize;
-                    let val = channel[idx];
-                    if val < 1e-6 {
-                        continue; // skip near-zero cells for performance
-                    }
-                    let bleed = val * diffusion_rate;
-                    self.scratch[idx] += val - bleed;
+                // Zero scratch
+                for v in scratch.iter_mut() { *v = 0.0; }
 
-                    // Determine neighbors (with optional horizontal wrap)
-                    let left = if x > 0 {
-                        Some((y * w + x - 1) as usize)
-                    } else if wrap {
-                        Some((y * w + w - 1) as usize)
-                    } else {
-                        None
-                    };
-                    let right = if x + 1 < w {
-                        Some((y * w + x + 1) as usize)
-                    } else if wrap {
-                        Some((y * w) as usize)
-                    } else {
-                        None
-                    };
-                    let up = if y > 0 {
-                        Some(((y - 1) * w + x) as usize)
-                    } else {
-                        None
-                    };
-                    let down = if y + 1 < h {
-                        Some(((y + 1) * w + x) as usize)
-                    } else {
-                        None
-                    };
+                // Diffusion pass: read from channel, accumulate into scratch.
+                for y in 0..h {
+                    for x in 0..w {
+                        let idx = (y * w + x) as usize;
+                        let val = channel[idx];
+                        if val < 1e-6 { continue; }
 
-                    let neighbor_count = [left, right, up, down]
-                        .iter()
-                        .filter(|n| n.is_some())
-                        .count() as f32;
+                        let bleed = val * diffusion_rate;
+                        scratch[idx] += val - bleed;
 
-                    if neighbor_count == 0.0 {
-                        continue;
-                    }
+                        let left = if x > 0 {
+                            Some((y * w + x - 1) as usize)
+                        } else if wrap {
+                            Some((y * w + w - 1) as usize)
+                        } else { None };
 
-                    let per_neighbor = bleed / neighbor_count;
-                    for nb in [left, right, up, down].into_iter().flatten() {
-                        self.scratch[nb] += per_neighbor;
+                        let right = if x + 1 < w {
+                            Some((y * w + x + 1) as usize)
+                        } else if wrap {
+                            Some((y * w) as usize)
+                        } else { None };
+
+                        let up   = if y > 0     { Some(((y - 1) * w + x) as usize) } else { None };
+                        let down = if y + 1 < h { Some(((y + 1) * w + x) as usize) } else { None };
+
+                        let neighbor_count = [left, right, up, down]
+                            .iter().filter(|n| n.is_some()).count() as f32;
+                        if neighbor_count == 0.0 { continue; }
+
+                        let per_neighbor = bleed / neighbor_count;
+                        for nb in [left, right, up, down].into_iter().flatten() {
+                            scratch[nb] += per_neighbor;
+                        }
                     }
                 }
-            }
 
-            // Swap scratch into channel and apply evaporation
-            let channel = &mut self.channels[ch];
-            for i in 0..len {
-                channel[i] = self.scratch[i] * decay_factor;
-            }
-        }
+                // Write back: scratch → channel, apply evaporation.
+                let len = (w * h) as usize;
+                for i in 0..len {
+                    channel[i] = scratch[i] * decay_factor;
+                }
+            });
     }
 
     pub fn deposit(&mut self, channel: SignalChannel, x: u32, y: u32, amount: f32) {

@@ -985,8 +985,10 @@ impl ApplicationHandler for App {
 
                     let mut world = world.write().unwrap();
 
-                    // Time-budgeted ticking: never spend more than 12ms per frame.
-                    const TICK_BUDGET_MS: u128 = 12;
+                    // Time-budgeted ticking: never spend more than 8ms per frame on simulation.
+                    // With parallel signal diffusion + rayon being updates, one tick at 1x speed
+                    // should complete in ~8ms, leaving ~8ms for render + egui at 60fps.
+                    const TICK_BUDGET_MS: u128 = 8;
                     let tick_start = std::time::Instant::now();
                     let mut ticked = 0u32;
                     for _ in 0..ticks {

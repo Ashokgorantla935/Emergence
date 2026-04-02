@@ -61,8 +61,14 @@ pub fn tick(world: &mut World) {
         world.laws.infinite_food,
     );
 
-    // 3. Signal tick
-    world.signals.tick();
+    // 3. Signal tick — reactions every tick, diffusion every 2 ticks.
+    // Diffusion is the expensive O(N) pass (8 channels × 1M cells on large maps).
+    // Throttling to 2 ticks halves cost; rayon parallelism in diffusion_step() does the rest.
+    if world.tick % 2 == 0 {
+        world.signals.tick(); // reaction + diffusion
+    } else {
+        world.signals.reaction_tick_only(); // reaction only (~0.2ms)
+    }
 
     // 3b. Toxin greenhouse effect: accumulate global temperature every 60 ticks.
     // Toxin now lives on the downsampled ClimateGrid (bypasses Metal 128MB buffer limit).

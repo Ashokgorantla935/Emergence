@@ -3,7 +3,7 @@ use wgpu::util::DeviceExt;
 
 pub mod generator;
 
-/// UV region within the 512x512 atlas (32x32 grid of 16x16 cells).
+/// UV region within the 1024x1024 atlas (32x32 grid of 32x32 cells).
 #[derive(Clone, Copy, Debug)]
 pub struct AtlasRegion {
     pub u: f32, // top-left UV x
@@ -34,7 +34,7 @@ pub struct Atlas {
 }
 
 impl Atlas {
-    /// Load the 512x512 atlas from the embedded PNG, falling back to the procedural generator.
+    /// Load the 1024x1024 atlas from the embedded PNG, falling back to the procedural generator.
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let pixels = Self::load_png_pixels().unwrap_or_else(|| {
             eprintln!("[atlas] PNG decode failed — falling back to procedural generator");
@@ -46,8 +46,8 @@ impl Atlas {
             &wgpu::TextureDescriptor {
                 label: Some("Sprite Atlas"),
                 size: wgpu::Extent3d {
-                    width: 512,
-                    height: 512,
+                    width: 1024,
+                    height: 1024,
                     depth_or_array_layers: 1,
                 },
                 mip_level_count: 1,
@@ -145,7 +145,7 @@ mod tests {
         );
 
         let (pixels, report) = generator::compose_from_assets(packs_root);
-        assert_eq!(pixels.len(), 512 * 512 * 4, "composer must return 512x512 RGBA");
+        assert_eq!(pixels.len(), 1024 * 1024 * 4, "composer must return 1024x1024 RGBA");
 
         // Print the mapping report
         println!("[regenerate_atlas] Asset mapping report:");
@@ -154,7 +154,7 @@ mod tests {
         }
 
         let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
-            ImageBuffer::from_raw(512, 512, pixels)
+            ImageBuffer::from_raw(1024, 1024, pixels)
                 .expect("pixel buffer dimensions must match");
 
         let out_path = concat!(

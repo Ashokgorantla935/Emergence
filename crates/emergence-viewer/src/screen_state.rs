@@ -773,8 +773,8 @@ impl OnboardingTooltip {
                 });
         }
 
-        // Main onboarding overlay
-        if self.shown && !self.dismissed {
+        // Main onboarding overlay — disabled, replaced by LaunchOverlay
+        if false && self.shown && !self.dismissed {
             let mut close = false;
             egui::Window::new("Welcome to Emergence")
                 .collapsible(false)

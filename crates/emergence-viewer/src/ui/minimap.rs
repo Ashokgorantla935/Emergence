@@ -109,11 +109,15 @@ impl Minimap {
 
         egui::Window::new("Map")
             .id(egui::Id::new("minimap"))
-            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-4.0, -4.0))
-            .fixed_size(egui::vec2(160.0, 200.0))
-            .title_bar(true)
-            .collapsible(true)
+            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-4.0, -54.0))
+            .fixed_size(egui::vec2(160.0, 190.0))
+            .title_bar(false)
+            .collapsible(false)
             .resizable(false)
+            .frame(egui::Frame::none()
+                .fill(egui::Color32::from_rgba_premultiplied(12, 12, 16, 200))
+                .rounding(egui::CornerRadius::same(6))
+                .inner_margin(egui::Margin::same(2)))
             .show(egui_ctx, |ui| {
                 let (resp, painter) = ui.allocate_painter(
                     egui::vec2(MAP_SIZE as f32, MAP_SIZE as f32),

@@ -45,21 +45,38 @@ use winit::window::Window;
 // ---------------------------------------------------------------------------
 
 fn apply_game_theme(ctx: &egui::Context) {
-    let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = egui::Color32::from_rgb(25, 22, 18);
-    visuals.window_fill = egui::Color32::from_rgb(30, 27, 22);
-    visuals.extreme_bg_color = egui::Color32::from_rgb(18, 15, 12);
-    visuals.override_text_color = Some(egui::Color32::from_rgb(230, 220, 200));
-    visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(40, 35, 28);
-    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(50, 44, 35);
-    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(70, 60, 45);
-    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(200, 170, 80);
-    visuals.widgets.noninteractive.bg_stroke =
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 60, 40));
-    visuals.window_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 60, 40));
-    visuals.selection.bg_fill = egui::Color32::from_rgba_premultiplied(200, 170, 80, 60);
-    visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 170, 80));
-    ctx.set_visuals(visuals);
+    let mut style = egui::Style::default();
+
+    // Dark slate theme — deep, semi-transparent windows for maximum world visibility
+    style.visuals.window_fill = egui::Color32::from_rgba_premultiplied(20, 20, 24, 230);
+    style.visuals.window_corner_radius = egui::CornerRadius::same(8);
+    style.visuals.window_stroke = egui::Stroke::NONE;
+    style.visuals.panel_fill = egui::Color32::from_rgba_premultiplied(15, 15, 18, 220);
+
+    // Rounded buttons
+    style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(4);
+    style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(4);
+    style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(4);
+    style.visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(4);
+
+    // Widget fills
+    style.visuals.extreme_bg_color = egui::Color32::from_rgba_premultiplied(10, 10, 12, 220);
+    style.visuals.override_text_color = Some(egui::Color32::from_rgb(210, 210, 220));
+    style.visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgba_premultiplied(30, 30, 36, 200);
+    style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgba_premultiplied(40, 40, 48, 200);
+    style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgba_premultiplied(55, 55, 68, 220);
+    style.visuals.widgets.active.bg_fill = egui::Color32::from_rgb(200, 170, 80);
+
+    // Subtle borders only on interactive elements
+    style.visuals.widgets.noninteractive.bg_stroke = egui::Stroke::NONE;
+    style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(60, 60, 80, 120));
+    style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(100, 100, 140, 180));
+
+    // Selection
+    style.visuals.selection.bg_fill = egui::Color32::from_rgba_premultiplied(200, 170, 80, 60);
+    style.visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 170, 80));
+
+    ctx.set_style(style);
 }
 
 // ---------------------------------------------------------------------------
@@ -1524,11 +1541,16 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                // God tool palette — left side panel, always rendered while Playing
+                // God tool palette — collapsible floating bottom dock
                 let power_before = self.god_tool_state.active_power;
-                egui::SidePanel::left("god_palette_panel")
-                    .exact_width(200.0)
+                egui::Window::new("God Tools")
+                    .id(egui::Id::new("god_palette_panel"))
+                    .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(4.0, -54.0))
+                    .default_width(204.0)
+                    .max_height(500.0)
                     .resizable(false)
+                    .collapsible(true)
+                    .title_bar(true)
                     .show(&self.egui_ctx, |ui| {
                         god_palette::render_palette(ui, &mut self.god_tool_state);
                     });

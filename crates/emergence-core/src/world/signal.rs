@@ -9,11 +9,11 @@ pub enum SignalChannel {
     Anger = 5,
     Scent = 6,
     Crime = 7,
-    Toxin = 8,
+    // Toxin moved to ClimateGrid (downsampled) to avoid Metal's 128MB storage buffer limit.
 }
 
 impl SignalChannel {
-    pub const COUNT: usize = 9;
+    pub const COUNT: usize = 8;
 
     pub fn from_index(i: usize) -> Option<Self> {
         match i {
@@ -25,7 +25,6 @@ impl SignalChannel {
             5 => Some(Self::Anger),
             6 => Some(Self::Scent),
             7 => Some(Self::Crime),
-            8 => Some(Self::Toxin),
             _ => None,
         }
     }
@@ -36,8 +35,8 @@ pub struct SignalGrid {
     pub height: u32,
     pub channels: Vec<Vec<f32>>,
     pub wrap_horizontal: bool,
-    decay_factors: [f32; 9],
-    diffusion_rates: [f32; 9],
+    decay_factors: [f32; 8],
+    diffusion_rates: [f32; 8],
     scratch: Vec<f32>, // reusable scratch buffer for diffusion
     /// When true, the GPU compute pipeline handles diffusion+evaporation.
     /// tick() will run reaction_step() only and skip the CPU diffusion pass.
@@ -65,7 +64,7 @@ impl SignalGrid {
             0.9965,     // Anger: half-life 200
             0.9931,     // Scent: half-life 100
             0.9931,     // Crime: half-life 100
-            1.0,        // Toxin: infinite half-life (never decays)
+            // Toxin moved to ClimateGrid
         ];
 
         let diffusion_rates = [
@@ -76,8 +75,8 @@ impl SignalGrid {
             0.10,     // Celebration: moderate-fast
             0.12,     // Anger: fast
             0.06,     // Scent: moderate
-            0.12,     // Crime: fast (like Anger, guards need to track quickly)
-            0.04,     // Toxin: slow global diffusion
+            0.12,     // Crime: fast
+            // Toxin moved to ClimateGrid
         ];
 
         SignalGrid {
@@ -174,9 +173,9 @@ impl SignalGrid {
 
     /// Returns (decay, diffusion) for each channel in channel order.
     /// Used by the GPU compute pipeline to populate its uniform buffer.
-    pub fn channel_params(&self) -> [(f32, f32); 9] {
-        let mut params = [(0.0f32, 0.0f32); 9];
-        for i in 0..9 {
+    pub fn channel_params(&self) -> [(f32, f32); 8] {
+        let mut params = [(0.0f32, 0.0f32); 8];
+        for i in 0..8 {
             params[i] = (self.decay_factors[i], self.diffusion_rates[i]);
         }
         params

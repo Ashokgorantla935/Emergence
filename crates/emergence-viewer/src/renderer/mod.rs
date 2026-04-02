@@ -9,3 +9,4 @@ pub mod post_process;
 pub mod kingdom_overlay;
 pub mod compute;
 pub mod memetic_compute;
+pub mod climate_compute;

@@ -5,6 +5,7 @@ use super::super::camera::CameraUniform;
 use crate::atlas::Atlas;
 use super::compute::SignalComputePipeline;
 use super::memetic_compute::MemeticComputePipeline;
+use super::climate_compute::ClimateComputePipeline;
 
 /// Extended camera uniform including sprite rendering fields.
 /// Kept backward-compatible: the original view_proj is always binding 0.
@@ -83,6 +84,9 @@ pub struct RenderState {
     /// GPU compute pipeline for memetic (knowledge/technology) diffusion.
     /// Runs after signal compute, gates diffusion on low-danger areas.
     pub memetic_compute: Option<MemeticComputePipeline>,
+    /// GPU compute pipeline for the downsampled ClimateGrid (Toxin diffusion).
+    /// Tiny buffers (~16KB) — runs at chunk resolution to avoid Metal's 128MB limit.
+    pub climate_compute: Option<ClimateComputePipeline>,
 }
 
 impl RenderState {
@@ -820,10 +824,11 @@ impl RenderState {
         let mut postprocess = super::post_process::PostProcessRenderer::new(&device, surface_format);
         postprocess.resize(&device, size.width.max(1), size.height.max(1), surface_format);
 
-        // ── Signal compute pipeline (ping-pong GPU diffusion, all 9 channels) ──
+        // ── Signal compute pipeline (ping-pong GPU diffusion, 8 channels) ──
+        // Toxin moved to ClimateGrid (downsampled) to avoid Metal's 128MB storage buffer limit.
         // Default channel params matching signal.rs values. World size injected
         // at first frame via reinit_for_world(); using Small (128x128) as placeholder.
-        let default_channel_params: [(f32, f32); 9] = [
+        let default_channel_params: [(f32, f32); 8] = [
             (0.9862, 0.15), // Danger
             (0.9965, 0.08), // FoodTrail
             (0.9986, 0.03), // Comfort
@@ -832,7 +837,6 @@ impl RenderState {
             (0.9965, 0.12), // Anger
             (0.9931, 0.06), // Scent
             (0.9931, 0.12), // Crime
-            (0.9950, 0.08), // Toxin
         ];
         let signal_compute = SignalComputePipeline::new(&device, 128, 128, &default_channel_params);
 
@@ -865,12 +869,13 @@ impl RenderState {
             postprocess,
             signal_compute,
             memetic_compute: None,
+            climate_compute: None,
         }
     }
 
     /// Rebuild the signal compute pipeline for the actual world dimensions.
     /// Call once after world creation so the GPU buffers match the real grid size.
-    pub fn reinit_signal_compute(&mut self, width: u32, height: u32, channel_params: &[(f32, f32); 9]) {
+    pub fn reinit_signal_compute(&mut self, width: u32, height: u32, channel_params: &[(f32, f32); 8]) {
         self.signal_compute = SignalComputePipeline::new(&self.device, width, height, channel_params);
         // Rebuild memetic compute pipeline alongside signal compute so it references
         // the new (correctly-sized) signal buffer.

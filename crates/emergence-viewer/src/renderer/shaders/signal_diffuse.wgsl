@@ -1,6 +1,7 @@
-// Channel-major layout: buffer holds [ch0_cells..., ch1_cells..., ..., ch8_cells...]
+// Channel-major layout: buffer holds [ch0_cells..., ch1_cells..., ..., ch7_cells...]
 // Each section is width*height f32 values.
-// Each thread processes one (x,y) cell across all 9 channels.
+// Each thread processes one (x,y) cell across all 8 channels.
+// Toxin (was ch8) moved to ClimateGrid (downsampled) to avoid Metal's 128MB storage buffer limit.
 
 @group(0) @binding(0) var<storage, read> signal_read: array<f32>;
 @group(0) @binding(1) var<storage, read_write> signal_write: array<f32>;
@@ -13,10 +14,10 @@ struct GridParams {
 }
 @group(0) @binding(2) var<uniform> grid_params: GridParams;
 
-// Per-channel params: 9 pairs of (decay, diffusion) packed as 18 f32 values (20 allocated, 5 vec4s).
-// Layout: [decay0, diffusion0, decay1, diffusion1, ..., decay8, diffusion8, 0, 0]
+// Per-channel params: 8 pairs of (decay, diffusion) packed as 16 f32 values (4 vec4s).
+// Layout: [decay0, diffusion0, decay1, diffusion1, ..., decay7, diffusion7]
 struct ChannelParams {
-    data: array<vec4<f32>, 5>, // 5 vec4s = 20 floats, 18 used for 9 channels * 2 params
+    data: array<vec4<f32>, 4>, // 4 vec4s = 16 floats for 8 channels * 2 params
 }
 @group(0) @binding(3) var<uniform> ch_params: ChannelParams;
 
@@ -71,7 +72,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Pack post-reaction values for the diffusion loop to use
     // (Replace the raw signal_read values with reacted versions)
 
-    for (var ch: u32 = 0u; ch < 9u; ch++) {
+    for (var ch: u32 = 0u; ch < 8u; ch++) {
         let ch_offset = ch * cell_count;
         let idx = ch_offset + cell_idx;
 

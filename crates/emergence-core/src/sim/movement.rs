@@ -538,13 +538,9 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                         by.min(world.signals.height - 1),
                         0.5,
                     );
-                    // Toxin emission: civilization building accumulates greenhouse gases
-                    world.signals.deposit(
-                        crate::world::signal::SignalChannel::Toxin,
-                        bx.min(world.signals.width - 1),
-                        by.min(world.signals.height - 1),
-                        0.1,
-                    );
+                    // Toxin emission: civilization building accumulates greenhouse gases.
+                    // Toxin lives on the downsampled ClimateGrid (not SignalGrid).
+                    world.climate_grid.deposit_toxin(bx as f32, by as f32, 0.1);
                     world.events.push(Event {
                         tick: world.tick,
                         actor_id: being_index as u32,

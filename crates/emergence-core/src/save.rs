@@ -7,7 +7,7 @@ use crate::being::data::{BeingState, Beings};
 use crate::being::memory::{CausalMemory, Impression};
 use crate::sim::spatial::SpatialIndex;
 use crate::sim::world_state::{World, WorldLaws};
-use crate::world::climate::{Climate, DayPhase, Season};
+use crate::world::climate::{Climate, ClimateGrid, DayPhase, Season};
 use crate::world::config::WorldConfig;
 use crate::world::map::MapSelection;
 use crate::world::resource::{FoodType, ResourceLayer};
@@ -541,6 +541,7 @@ impl SaveFile {
             terrain,
             resources,
             climate,
+            climate_grid: ClimateGrid::new(w, h),
             signals,
             beings,
             spatial,

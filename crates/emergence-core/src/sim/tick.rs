@@ -65,8 +65,9 @@ pub fn tick(world: &mut World) {
     world.signals.tick();
 
     // 3b. Toxin greenhouse effect: accumulate global temperature every 60 ticks.
+    // Toxin now lives on the downsampled ClimateGrid (bypasses Metal 128MB buffer limit).
     if world.tick % 60 == 0 {
-        let toxin_sum: f32 = world.signals.channels[SignalChannel::Toxin as usize].iter().sum();
+        let toxin_sum = world.climate_grid.total_toxin();
         let heat_trap = toxin_sum * 0.00001;
         world.climate.global_temperature += heat_trap;
         world.climate.water_level_offset = world.climate.global_temperature * 0.01;

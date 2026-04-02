@@ -2225,8 +2225,6 @@ impl ApplicationHandler for App {
                                 ("SCENT", "F7 — Cultural identity. Beings recognize group members.", egui::Color32::from_rgb(200, 120, 220)),
                             emergence_core::world::signal::SignalChannel::Crime =>
                                 ("CRIME", "F8 — Murder beacon. Deposited by unprovoked killers. Bold beings hunt the source.", egui::Color32::from_rgb(200, 0, 200)),
-                            emergence_core::world::signal::SignalChannel::Toxin =>
-                                ("TOXIN", "F9 — Environmental toxin. Deposited by industrial activity.", egui::Color32::from_rgb(100, 230, 50)),
                         };
 
                         egui::Area::new(egui::Id::new("heatmap_legend"))
@@ -2385,6 +2383,14 @@ impl ApplicationHandler for App {
                     if expected_cells != grid_cells {
                         let cp = world_w.signals.channel_params();
                         rs.reinit_signal_compute(world_w.signals.width, world_w.signals.height, &cp);
+                        // Init climate compute pipeline alongside signal compute.
+                        rs.climate_compute = Some(
+                            emergence_viewer::renderer::climate_compute::ClimateComputePipeline::new(
+                                &rs.device,
+                                world_w.climate_grid.width,
+                                world_w.climate_grid.height,
+                            )
+                        );
                     }
                     world_w.signals.gpu_managed = true;
 
@@ -2427,6 +2433,29 @@ impl ApplicationHandler for App {
                             memetic_compute.dispatch(&mut enc);
                             rs.queue.submit(std::iter::once(enc.finish()));
                             memetic_compute.start_download(&rs.device, &rs.queue);
+                        }
+                    }
+
+                    // ── Climate compute: Toxin diffusion on downsampled grid ──
+                    if let Some(ref climate_compute) = rs.climate_compute {
+                        // Pull finished readback from previous frame
+                        let mut toxin_tmp = Vec::new();
+                        if climate_compute.try_complete_download(&mut toxin_tmp) {
+                            let len = (world_w.climate_grid.width * world_w.climate_grid.height) as usize;
+                            if toxin_tmp.len() == len {
+                                world_w.climate_grid.toxin = toxin_tmp;
+                                world_w.climate_grid.gpu_managed = true;
+                            }
+                        }
+                        // Dispatch next frame if not in flight
+                        if !climate_compute.readback_flag.load(std::sync::atomic::Ordering::SeqCst) {
+                            let mut enc = rs.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("Climate Diffuse Dispatch Encoder"),
+                            });
+                            climate_compute.upload(&rs.queue, &world_w.climate_grid.toxin);
+                            climate_compute.dispatch(&mut enc);
+                            rs.queue.submit(std::iter::once(enc.finish()));
+                            climate_compute.start_download(&rs.device, &rs.queue);
                         }
                     }
                 }

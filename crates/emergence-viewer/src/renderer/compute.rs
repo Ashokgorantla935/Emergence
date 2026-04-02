@@ -8,8 +8,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use wgpu::util::DeviceExt;
 
-/// Number of signal channels (must match SignalChannel::COUNT in emergence-core).
-pub const CHANNEL_COUNT: usize = 9;
+/// Number of signal channels handled by GPU compute (primary grid).
+/// Toxin runs on a separate downsampled climate grid to avoid Metal's 128MB storage buffer limit.
+pub const CHANNEL_COUNT: usize = 8;
 
 /// Per-dispatch uniform passed to the compute shader (matches WGSL GridParams).
 #[repr(C)]
@@ -57,7 +58,7 @@ impl SignalComputePipeline {
         device: &wgpu::Device,
         width: u32,
         height: u32,
-        channel_params: &[(f32, f32); 9],
+        channel_params: &[(f32, f32); 8],
     ) -> Self {
         let cell_count = (width * height) as usize;
         let total_floats = cell_count * CHANNEL_COUNT;
@@ -89,8 +90,8 @@ impl SignalComputePipeline {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // Per-channel params uniform (binding 3): 9 × (decay, diffusion) packed as 18 f32 → 5 vec4s (20 floats, 18 used).
-        let mut ch_data = [0.0f32; 20];
+        // Per-channel params uniform (binding 3): 8 × (decay, diffusion) packed as 16 f32 → 4 vec4s.
+        let mut ch_data = [0.0f32; 16];
         for (i, &(decay, diffusion)) in channel_params.iter().enumerate() {
             ch_data[i * 2] = decay;
             ch_data[i * 2 + 1] = diffusion;

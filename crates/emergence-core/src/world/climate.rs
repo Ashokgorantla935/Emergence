@@ -1,5 +1,56 @@
 use super::config::WorldConfig;
 
+/// Downsampled climate grid for macro-level phenomena (Toxin, Temperature).
+/// Runs at chunk resolution (world_size / 32) for massive VRAM savings.
+pub struct ClimateGrid {
+    pub width: u32,
+    pub height: u32,
+    pub toxin: Vec<f32>,
+    pub temperature: Vec<f32>,
+    pub gpu_managed: bool,
+}
+
+impl ClimateGrid {
+    pub fn new(world_width: u32, world_height: u32) -> Self {
+        let w = (world_width / 32).max(1);
+        let h = (world_height / 32).max(1);
+        let len = (w * h) as usize;
+        Self {
+            width: w,
+            height: h,
+            toxin: vec![0.0; len],
+            temperature: vec![0.0; len],
+            gpu_managed: false,
+        }
+    }
+
+    /// Deposit toxin at a world coordinate (maps to chunk grid).
+    pub fn deposit_toxin(&mut self, world_x: f32, world_y: f32, amount: f32) {
+        let cx = (world_x / 32.0) as u32;
+        let cy = (world_y / 32.0) as u32;
+        if cx < self.width && cy < self.height {
+            let idx = (cy * self.width + cx) as usize;
+            self.toxin[idx] = (self.toxin[idx] + amount).min(10.0);
+        }
+    }
+
+    /// Read toxin at a world coordinate.
+    pub fn read_toxin(&self, world_x: f32, world_y: f32) -> f32 {
+        let cx = (world_x / 32.0) as u32;
+        let cy = (world_y / 32.0) as u32;
+        if cx < self.width && cy < self.height {
+            self.toxin[(cy * self.width + cx) as usize]
+        } else {
+            0.0
+        }
+    }
+
+    /// Sum all toxin values (for greenhouse effect accumulation).
+    pub fn total_toxin(&self) -> f32 {
+        self.toxin.iter().sum()
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum DayPhase {

@@ -13,7 +13,7 @@ use being::names::generate_name;
 use god_action::GodActionQueue;
 use sim::spatial::SpatialIndex;
 use sim::world_state::{EventLog, World};
-use world::climate::Climate;
+use world::climate::{Climate, ClimateGrid};
 use world::config::WorldConfig;
 use world::resource::ResourceLayer;
 use world::signal::SignalGrid;
@@ -24,6 +24,7 @@ pub fn create_world(config: WorldConfig) -> World {
     let terrain = Terrain::generate(&config);
     let resources = ResourceLayer::new(&terrain);
     let climate = Climate::new(&config);
+    let climate_grid = ClimateGrid::new(config.size.0, config.size.1);
     let signals = SignalGrid::new(config.size.0, config.size.1);
     let memetic = MemeticGrid::new(config.size.0, config.size.1);
     let spatial = SpatialIndex::new(config.size.0, config.size.1, 4.0);
@@ -110,6 +111,7 @@ pub fn create_world(config: WorldConfig) -> World {
         terrain,
         resources,
         climate,
+        climate_grid,
         signals,
         memetic,
         beings,

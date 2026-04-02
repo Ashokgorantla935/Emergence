@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::being::data::Beings;
 use crate::god_action::GodActionQueue;
-use crate::world::climate::Climate;
+use crate::world::climate::{Climate, ClimateGrid};
 use crate::world::config::WorldConfig;
 use crate::world::resource::ResourceLayer;
 use crate::world::signal::SignalGrid;
@@ -190,6 +190,7 @@ pub struct World {
     pub terrain: Terrain,
     pub resources: ResourceLayer,
     pub climate: Climate,
+    pub climate_grid: ClimateGrid,
     pub signals: SignalGrid,
     pub memetic: MemeticGrid,
     pub beings: Beings,

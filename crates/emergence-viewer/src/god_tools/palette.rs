@@ -1,7 +1,181 @@
-use egui::{Color32, RichText, Ui};
+use egui::{Color32, Context, RichText, Ui};
 use super::mod_types::{GodToolState, ToolTab, PowerDef};
 use super::power_catalog::POWER_CATALOG;
 use emergence_core::god_action::{GodAction, ResetKind};
+
+// ---------------------------------------------------------------------------
+// Bottom dock rendering (Task 2 replacement for the left SidePanel)
+// ---------------------------------------------------------------------------
+
+/// Bottom dock: icon ribbon + floating sub-tray above it.
+/// Call this instead of the old egui::Window("God Tools") wrapper.
+pub fn render_dock(ctx: &Context, state: &mut GodToolState) {
+    // ── Bottom ribbon (~48px) ─────────────────────────────────────────────
+    egui::TopBottomPanel::bottom("god_tool_dock")
+        .exact_height(48.0)
+        .resizable(false)
+        .frame(
+            egui::Frame::none()
+                .fill(Color32::from_rgba_premultiplied(14, 14, 18, 235))
+                .stroke(egui::Stroke::new(1.0, Color32::from_rgba_premultiplied(50, 50, 70, 160))),
+        )
+        .show(ctx, |ui| {
+            ui.horizontal_centered(|ui| {
+                ui.add_space(8.0);
+
+                // 8 icon tabs
+                for &(tab, icon, tip) in tab_icons() {
+                    let active = state.active_tab == tab;
+                    let icon_rt = RichText::new(icon)
+                        .size(15.0)
+                        .strong()
+                        .color(if active { Color32::from_rgb(210, 185, 100) } else { Color32::from_rgb(180, 180, 200) });
+                    let btn = egui::Button::new(icon_rt)
+                        .selected(active)
+                        .fill(if active {
+                            Color32::from_rgba_premultiplied(50, 42, 8, 200)
+                        } else {
+                            Color32::from_rgba_premultiplied(22, 22, 28, 180)
+                        })
+                        .min_size(egui::vec2(36.0, 32.0));
+                    if ui.add(btn).on_hover_text(tip).clicked() {
+                        state.active_tab = tab;
+                    }
+                    ui.add_space(2.0);
+                }
+
+                ui.separator();
+                ui.add_space(6.0);
+
+                // Brush size (compact, always visible)
+                ui.label(RichText::new("Brush:").small().weak());
+                for &sz in &[1u8, 3, 5, 10] {
+                    let active = state.brush_size == sz;
+                    let btn = egui::Button::new(format!("{sz}"))
+                        .fill(if active { Color32::from_rgb(60, 50, 0) } else { Color32::from_rgb(28, 28, 32) })
+                        .min_size(egui::vec2(26.0, 28.0));
+                    if ui.add(btn).clicked() {
+                        state.brush_size = sz;
+                    }
+                }
+
+                // Active power label (right side of dock)
+                if let Some(pid) = state.active_power {
+                    if let Some(pw) = POWER_CATALOG.iter().find(|p| p.id == pid) {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add_space(8.0);
+                            ui.label(
+                                RichText::new(pw.name)
+                                    .color(Color32::from_rgb(210, 185, 100))
+                                    .strong(),
+                            );
+                            ui.label(RichText::new("Active:").small().weak());
+                        });
+                    }
+                }
+            });
+        });
+
+    // ── Floating sub-tray above the dock ─────────────────────────────────
+    let tray_title = tab_label(state.active_tab);
+    egui::Window::new(tray_title)
+        .id(egui::Id::new("god_sub_tray"))
+        .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(4.0, -56.0))
+        .default_width(220.0)
+        .max_height(320.0)
+        .resizable(false)
+        .collapsible(true)
+        .title_bar(true)
+        .frame(
+            egui::Frame::window(&ctx.style())
+                .fill(Color32::from_rgba_premultiplied(14, 14, 18, 222))
+                .stroke(egui::Stroke::new(1.0, Color32::from_rgba_premultiplied(50, 50, 70, 160)))
+                .corner_radius(egui::CornerRadius::same(6))
+                .inner_margin(egui::Margin::symmetric(8, 6)),
+        )
+        .show(ctx, |ui| {
+            render_active_tab_powers(ui, state);
+            ui.separator();
+            render_brush_size(ui, state);
+        });
+}
+
+/// Map each ToolTab to (icon_str, tooltip).
+fn tab_icons() -> &'static [(ToolTab, &'static str, &'static str)] {
+    &[
+        (ToolTab::Creation,    "+", "Creation — spawn beings, fauna, structures"),
+        (ToolTab::Terrain,     "^", "Terrain — reshape the landscape"),
+        (ToolTab::Weather,     "~", "Weather — rain, drought, storm"),
+        (ToolTab::Destruction, "X", "Destruction — lightning, meteor, plague"),
+        (ToolTab::Blessing,    "*", "Blessing — heal, feed, inspire"),
+        (ToolTab::Curse,       "!", "Curse — fear, rage, disease"),
+        (ToolTab::Kingdom,     "#", "Kingdom — alliances, war, laws"),
+        (ToolTab::World,       "o", "World — seasons, laws, reset"),
+    ]
+}
+
+fn tab_label(tab: ToolTab) -> &'static str {
+    match tab {
+        ToolTab::Creation    => "Creation",
+        ToolTab::Terrain     => "Terrain",
+        ToolTab::Weather     => "Weather",
+        ToolTab::Destruction => "Destruction",
+        ToolTab::Blessing    => "Blessing",
+        ToolTab::Curse       => "Curse",
+        ToolTab::Kingdom     => "Kingdom",
+        ToolTab::World       => "World",
+    }
+}
+
+fn render_active_tab_powers(ui: &mut Ui, state: &mut GodToolState) {
+    match state.active_tab {
+        ToolTab::Creation => render_creation_tab(ui, state),
+        ToolTab::World    => render_world_tab_powers(ui, state),
+        tab => {
+            let powers: Vec<&PowerDef> = POWER_CATALOG
+                .iter()
+                .filter(|p| p.tab == tab)
+                .collect();
+            ui.vertical(|ui| {
+                for power in powers {
+                    render_power_button(ui, state, power);
+                }
+            });
+        }
+    }
+}
+
+fn render_world_tab_powers(ui: &mut Ui, state: &mut GodToolState) {
+    let powers: Vec<&PowerDef> = POWER_CATALOG
+        .iter()
+        .filter(|p| p.tab == ToolTab::World)
+        .collect();
+    ui.vertical(|ui| {
+        for power in powers {
+            render_power_button(ui, state, power);
+        }
+    });
+
+    ui.add_space(4.0);
+    ui.separator();
+
+    let btn = egui::Button::new(
+        RichText::new("Regenerate World")
+            .color(Color32::from_rgb(255, 160, 60))
+            .strong(),
+    )
+    .fill(Color32::from_rgb(50, 30, 10))
+    .stroke(egui::Stroke::new(1.5, Color32::from_rgb(200, 100, 30)))
+    .min_size(egui::vec2(178.0, 28.0));
+
+    if ui.add(btn).on_hover_text("Destroy this world and generate a brand-new one with the same settings").clicked() {
+        state.action_queue.push(GodAction::WorldReset { kind: ResetKind::Hard });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Original left-panel rendering (kept for reference / fallback)
+// ---------------------------------------------------------------------------
 
 /// Left-panel egui rendering: collapsible category tree + 78 power buttons.
 pub fn render_palette(ui: &mut Ui, state: &mut GodToolState) {

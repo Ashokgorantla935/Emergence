@@ -1,4 +1,4 @@
-/// God Tool Palette — 240px left panel, 8 tabs, 78 powers, brush size, cooldowns.
+/// God Tool Palette — horizontal bottom dock, 8 icon tabs, floating sub-trays.
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ToolTab {
@@ -23,6 +23,20 @@ impl ToolTab {
             ToolTab::Curse       => "Curse",
             ToolTab::WorldLaw    => "Law",
             ToolTab::Observation => "Observe",
+        }
+    }
+
+    /// Single-character icon shown in the dock ribbon.
+    pub fn icon(self) -> &'static str {
+        match self {
+            ToolTab::Creation    => "+",
+            ToolTab::Terrain     => "^",
+            ToolTab::Weather     => "~",
+            ToolTab::Destruction => "X",
+            ToolTab::Blessing    => "*",
+            ToolTab::Curse       => "!",
+            ToolTab::WorldLaw    => "#",
+            ToolTab::Observation => "O",
         }
     }
 
@@ -91,117 +105,153 @@ impl ToolPalette {
     }
 
     pub fn ui(&mut self, egui_ctx: &egui::Context) {
-        if !self.visible {
-            // Collapsed: show a small toggle button
-            egui::Area::new(egui::Id::new("palette_toggle"))
-                .fixed_pos(egui::pos2(4.0, 200.0))
-                .show(egui_ctx, |ui| {
-                    if ui.button(">").clicked() {
-                        self.visible = true;
+        // ── Bottom dock ribbon ─────────────────────────────────────────────
+        egui::TopBottomPanel::bottom("god_tool_dock")
+            .exact_height(48.0)
+            .resizable(false)
+            .frame(
+                egui::Frame::none()
+                    .fill(egui::Color32::from_rgba_premultiplied(14, 14, 18, 230))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(50, 50, 70, 160))),
+            )
+            .show(egui_ctx, |ui| {
+                ui.horizontal_centered(|ui| {
+                    ui.add_space(8.0);
+
+                    // Toggle visibility button on the far left
+                    let vis_icon = if self.visible { "v" } else { "^" };
+                    if ui.add(
+                        egui::Button::new(vis_icon)
+                            .min_size(egui::vec2(28.0, 32.0)),
+                    ).clicked() {
+                        self.visible = !self.visible;
+                    }
+
+                    ui.separator();
+                    ui.add_space(4.0);
+
+                    if self.visible {
+                        // 8 icon buttons — one per tab
+                        for &tab in ToolTab::all() {
+                            let active = self.active_tab == tab;
+                            let icon_text = egui::RichText::new(tab.icon())
+                                .size(16.0)
+                                .strong();
+                            let btn = egui::Button::new(icon_text)
+                                .selected(active)
+                                .min_size(egui::vec2(36.0, 32.0));
+                            let resp = ui.add(btn).on_hover_text(tab.label());
+                            if resp.clicked() {
+                                if self.active_tab == tab {
+                                    // Second click on same tab closes the sub-tray
+                                    // (toggle off — represented by deselecting power)
+                                    self.selected_power = None;
+                                } else {
+                                    self.active_tab = tab;
+                                }
+                            }
+                        }
+
+                        ui.separator();
+                        ui.add_space(4.0);
+
+                        // Brush size — always visible in dock when relevant
+                        let powers = tab_powers(self.active_tab);
+                        let show_brush = powers
+                            .iter()
+                            .any(|p| p.area_tool && self.selected_power == Some(p.id));
+                        if show_brush || self.active_tab == ToolTab::Terrain || self.active_tab == ToolTab::Destruction {
+                            ui.label(egui::RichText::new("Brush:").small());
+                            for &sz in &[1u8, 3, 5, 10] {
+                                let selected = self.brush_size == sz;
+                                let btn = egui::Button::new(format!("{sz}"))
+                                    .selected(selected)
+                                    .min_size(egui::vec2(28.0, 28.0));
+                                if ui.add(btn).clicked() {
+                                    self.brush_size = sz;
+                                }
+                            }
+                        }
+
+                        // Selected power label on far right of dock
+                        if let Some(pid) = self.selected_power {
+                            let powers = tab_powers(self.active_tab);
+                            if let Some(pw) = powers.iter().find(|p| p.id == pid) {
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    ui.add_space(8.0);
+                                    ui.label(
+                                        egui::RichText::new(pw.name)
+                                            .color(egui::Color32::from_rgb(210, 185, 100))
+                                            .strong(),
+                                    );
+                                    ui.label(egui::RichText::new("Active:").small().weak());
+                                });
+                            }
+                        }
                     }
                 });
-            return;
-        }
-
-        egui::SidePanel::left("tool_palette")
-            .exact_width(240.0)
-            .resizable(false)
-            .show(egui_ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading("God Tools");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("<").clicked() {
-                            self.visible = false;
-                        }
-                    });
-                });
-
-                ui.separator();
-
-                // 8 tab buttons in a 4x2 grid
-                egui::Grid::new("tab_grid")
-                    .num_columns(4)
-                    .spacing([2.0, 2.0])
-                    .show(ui, |ui| {
-                        for (i, &tab) in ToolTab::all().iter().enumerate() {
-                            let selected = self.active_tab == tab;
-                            let btn = egui::Button::new(tab.label())
-                                .selected(selected)
-                                .min_size(egui::vec2(54.0, 28.0));
-                            if ui.add(btn).clicked() {
-                                self.active_tab = tab;
-                            }
-                            if i == 3 {
-                                ui.end_row();
-                            }
-                        }
-                    });
-
-                ui.separator();
-
-                // Power grid for current tab
-                let powers = tab_powers(self.active_tab);
-                egui::ScrollArea::vertical()
-                    .max_height(400.0)
-                    .show(ui, |ui| {
-                        egui::Grid::new("power_grid")
-                            .num_columns(2)
-                            .spacing([4.0, 4.0])
-                            .show(ui, |ui| {
-                                for (i, power) in powers.iter().enumerate() {
-                                    let pid = power.id;
-                                    let cd = self.cooldowns[pid.0 as usize];
-                                    let on_cooldown = cd > 0;
-                                    let is_selected = self.selected_power == Some(pid);
-
-                                    ui.vertical(|ui| {
-                                        let btn = egui::Button::new(power.name)
-                                            .selected(is_selected)
-                                            .min_size(egui::vec2(110.0, 36.0));
-                                        let resp = ui.add_enabled(!on_cooldown, btn)
-                                            .on_hover_text(power_tooltip(power.id));
-                                        if resp.clicked() {
-                                            self.selected_power = Some(pid);
-                                        }
-                                        if on_cooldown {
-                                            // Cooldown overlay text
-                                            let frac = cd as f32 / power.cooldown_ticks as f32;
-                                            ui.add(
-                                                egui::ProgressBar::new(frac)
-                                                    .desired_width(110.0)
-                                                    .text(format!("{}t", cd)),
-                                            );
-                                        }
-                                    });
-
-                                    if i % 2 == 1 {
-                                        ui.end_row();
-                                    }
-                                }
-                            });
-                    });
-
-                ui.separator();
-
-                // Brush size (only shown for terrain/area tools)
-                let show_brush = powers
-                    .iter()
-                    .any(|p| p.area_tool && self.selected_power == Some(p.id));
-                if show_brush || self.active_tab == ToolTab::Terrain || self.active_tab == ToolTab::Destruction {
-                    ui.label("Brush Size");
-                    ui.horizontal(|ui| {
-                        for &sz in &[1u8, 3, 5, 10] {
-                            let selected = self.brush_size == sz;
-                            let btn = egui::Button::new(format!("{sz}"))
-                                .selected(selected)
-                                .min_size(egui::vec2(40.0, 24.0));
-                            if ui.add(btn).clicked() {
-                                self.brush_size = sz;
-                            }
-                        }
-                    });
-                }
             });
+
+        // ── Floating sub-tray above the dock ──────────────────────────────
+        if self.visible {
+            let powers = tab_powers(self.active_tab);
+            egui::Window::new(self.active_tab.label())
+                .id(egui::Id::new("god_sub_tray"))
+                .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(4.0, -56.0))
+                .default_width(340.0)
+                .max_height(280.0)
+                .resizable(false)
+                .collapsible(false)
+                .title_bar(true)
+                .frame(
+                    egui::Frame::window(&egui_ctx.style())
+                        .fill(egui::Color32::from_rgba_premultiplied(14, 14, 18, 220))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(50, 50, 70, 160)))
+                        .corner_radius(egui::CornerRadius::same(6))
+                        .inner_margin(egui::Margin::symmetric(8, 6)),
+                )
+                .show(egui_ctx, |ui| {
+                    egui::ScrollArea::vertical()
+                        .max_height(240.0)
+                        .show(ui, |ui| {
+                            // Powers in a 3-column icon grid
+                            egui::Grid::new("power_grid")
+                                .num_columns(3)
+                                .spacing([4.0, 4.0])
+                                .show(ui, |ui| {
+                                    for (i, power) in powers.iter().enumerate() {
+                                        let pid = power.id;
+                                        let cd = self.cooldowns[pid.0 as usize];
+                                        let on_cooldown = cd > 0;
+                                        let is_selected = self.selected_power == Some(pid);
+
+                                        ui.vertical(|ui| {
+                                            let btn = egui::Button::new(power.name)
+                                                .selected(is_selected)
+                                                .min_size(egui::vec2(104.0, 32.0));
+                                            let resp = ui.add_enabled(!on_cooldown, btn)
+                                                .on_hover_text(power_tooltip(power.id));
+                                            if resp.clicked() {
+                                                self.selected_power = Some(pid);
+                                            }
+                                            if on_cooldown {
+                                                let frac = cd as f32 / power.cooldown_ticks.max(1) as f32;
+                                                ui.add(
+                                                    egui::ProgressBar::new(frac)
+                                                        .desired_width(104.0)
+                                                        .text(format!("{}t", cd)),
+                                                );
+                                            }
+                                        });
+
+                                        if i % 3 == 2 {
+                                            ui.end_row();
+                                        }
+                                    }
+                                });
+                        });
+                });
+        }
     }
 }
 

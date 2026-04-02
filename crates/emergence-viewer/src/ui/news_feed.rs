@@ -1,4 +1,5 @@
-/// World News Feed — bottom-left panel, scrolling event messages with importance borders.
+/// World News Feed — fading toast notifications in the bottom-left corner.
+/// Events spawn as text lines that drift upward and fade to transparent over 6 seconds.
 
 use emergence_core::sim::world_state::EventLog;
 
@@ -16,7 +17,7 @@ impl Importance {
             Importance::Gold   => egui::Color32::from_rgb(255, 215, 0),
             Importance::Silver => egui::Color32::from_rgb(192, 192, 192),
             Importance::Bronze => egui::Color32::from_rgb(205, 127, 50),
-            Importance::Normal => egui::Color32::GRAY,
+            Importance::Normal => egui::Color32::from_rgb(180, 180, 180),
         }
     }
 }
@@ -30,11 +31,24 @@ pub struct NewsItem {
     pub world_pos: Option<[f32; 2]>,
 }
 
+/// A single fading toast notification.
+#[derive(Clone)]
+pub struct Toast {
+    pub text: String,
+    pub spawn_time: f32,
+    pub alpha: f32,
+    pub color: egui::Color32,
+}
+
+const TOAST_LIFETIME: f32 = 6.0;
+
 pub struct NewsFeed {
     pub visible: bool,
     pub show_full_history: bool,
     pub items: Vec<NewsItem>,
     pub camera_jump: Option<[f32; 2]>,
+    /// Active fading toasts.
+    pub toasts: Vec<Toast>,
     /// Last known EventLog head position — used to detect ring-buffer wraparound.
     last_head: usize,
     /// Last known EventLog vec length — when len stops growing, we use head tracking.
@@ -48,6 +62,7 @@ impl NewsFeed {
             show_full_history: false,
             items: Vec::new(),
             camera_jump: None,
+            toasts: Vec::new(),
             last_head: 0,
             last_len: 0,
         }
@@ -61,7 +76,7 @@ impl NewsFeed {
         self.show_full_history = !self.show_full_history;
     }
 
-    pub fn ingest_events(&mut self, events: &EventLog) {
+    pub fn ingest_events(&mut self, events: &EventLog, elapsed: f32) {
         let vec_len = events.events.len();
         let cap = events.capacity;
 
@@ -70,7 +85,7 @@ impl NewsFeed {
             if vec_len > self.last_len {
                 let new_events = &events.events[self.last_len..vec_len];
                 for evt in new_events {
-                    self.push_news(evt);
+                    self.push_news(evt, elapsed);
                 }
             }
             self.last_len = vec_len;
@@ -79,25 +94,34 @@ impl NewsFeed {
         }
 
         // Phase 2: ring buffer full. Events are written at head, which wraps around.
-        // Drain from last_head to current head, wrapping through the ring.
         let current_head = events.head;
         if current_head == self.last_head && self.last_len == cap {
-            // No new events written
             return;
         }
         self.last_len = cap;
 
-        // Collect indices from last_head to current_head (exclusive), wrapping.
         let mut idx = self.last_head;
         while idx != current_head {
-            self.push_news(&events.events[idx]);
+            self.push_news(&events.events[idx], elapsed);
             idx = (idx + 1) % cap;
         }
         self.last_head = current_head;
     }
 
-    fn push_news(&mut self, evt: &emergence_core::sim::world_state::Event) {
+    fn push_news(&mut self, evt: &emergence_core::sim::world_state::Event, elapsed: f32) {
         if let Some(item) = event_to_news(evt) {
+            // Spawn a toast for this event
+            self.toasts.push(Toast {
+                text: item.text.clone(),
+                spawn_time: elapsed,
+                alpha: 1.0,
+                color: item.importance.color(),
+            });
+            // Cap toast queue at 20 active toasts
+            if self.toasts.len() > 20 {
+                self.toasts.remove(0);
+            }
+
             self.items.push(item);
             if self.items.len() > 500 {
                 self.items.remove(0);
@@ -105,64 +129,58 @@ impl NewsFeed {
         }
     }
 
+    /// Update toast alphas. Call once per frame with current elapsed time.
+    pub fn update_toasts(&mut self, elapsed: f32) {
+        for toast in &mut self.toasts {
+            let age = elapsed - toast.spawn_time;
+            toast.alpha = if age >= TOAST_LIFETIME {
+                0.0
+            } else if age > TOAST_LIFETIME * 0.6 {
+                // Fade during last 40% of lifetime
+                1.0 - (age - TOAST_LIFETIME * 0.6) / (TOAST_LIFETIME * 0.4)
+            } else {
+                1.0
+            };
+        }
+        self.toasts.retain(|t| t.alpha > 0.0);
+    }
 
     pub fn ui(&mut self, egui_ctx: &egui::Context) {
         if !self.visible {
             return;
         }
 
-        let height = if self.show_full_history { 400.0 } else { 160.0 };
+        // Render fading toasts as an overlay area in the bottom-left
+        let toast_count = self.toasts.len();
+        if toast_count == 0 {
+            return;
+        }
 
-        egui::Window::new("World Events")
-            .id(egui::Id::new("news_feed"))
-            .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(10.0, -80.0))
-            .fixed_size(egui::vec2(240.0, height))
-            .title_bar(true)
-            .collapsible(false)
-            .resizable(false)
-            .frame(egui::Frame::window(&egui_ctx.style()).fill(
-                egui::Color32::from_rgba_unmultiplied(26, 26, 46, 217),
-            ))
+        egui::Area::new(egui::Id::new("news_toasts"))
+            .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(12.0, -80.0))
+            .order(egui::Order::Foreground)
+            .interactable(false)
             .show(egui_ctx, |ui| {
-                ui.horizontal(|ui| {
-                    let history_label = if self.show_full_history { "Compact" } else { "Full History" };
-                    if ui.small_button(history_label).clicked() {
-                        self.show_full_history = !self.show_full_history;
-                    }
-                    if ui.small_button("X").clicked() {
-                        self.visible = false;
+                ui.set_width(280.0);
+
+                // Render newest toasts at bottom, older toasts above
+                // We show at most 8 toasts simultaneously
+                let start = toast_count.saturating_sub(8);
+                let visible_toasts: Vec<_> = self.toasts[start..].iter().collect();
+
+                ui.vertical(|ui| {
+                    for toast in visible_toasts.iter() {
+                        let alpha_byte = (toast.alpha * 255.0) as u8;
+                        let base_color = toast.color;
+                        let faded_color = egui::Color32::from_rgba_unmultiplied(
+                            base_color.r(),
+                            base_color.g(),
+                            base_color.b(),
+                            alpha_byte,
+                        );
+                        ui.colored_label(faded_color, &toast.text);
                     }
                 });
-                ui.separator();
-
-                let display_count = if self.show_full_history { self.items.len() } else { 8 };
-                let items: Vec<_> = self.items.iter().rev().take(display_count).collect();
-
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false; 2])
-                    .show(ui, |ui| {
-                        for item in items.iter() {
-                            let color = item.importance.color();
-                            let resp = ui.colored_label(color, &item.text);
-                            if resp.clicked() {
-                                if let Some(pos) = item.world_pos {
-                                    self.camera_jump = Some(pos);
-                                }
-                            }
-                            if item.importance != Importance::Normal {
-                                // Draw a left border by painting a rect
-                                let rect = resp.rect;
-                                ui.painter().rect_filled(
-                                    egui::Rect::from_min_size(
-                                        egui::pos2(rect.min.x - 4.0, rect.min.y),
-                                        egui::vec2(3.0, rect.height()),
-                                    ),
-                                    0.0,
-                                    color,
-                                );
-                            }
-                        }
-                    });
             });
     }
 }

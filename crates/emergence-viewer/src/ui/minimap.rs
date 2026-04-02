@@ -1,7 +1,9 @@
-/// Minimap — 160x160px bottom-right. Terrain biome + being dots + camera viewport rect.
+/// Minimap — top-right corner. Terrain biome + being dots + camera viewport rect.
+/// Speed controls are rendered directly below the minimap image.
 
 use emergence_core::being::data::Beings;
 use emergence_core::sim::kingdom::Kingdom;
+use crate::screen_state::{SimSpeed, SpeedControls};
 
 pub struct Minimap {
     pub visible: bool,
@@ -93,7 +95,7 @@ impl Minimap {
         }
     }
 
-    pub fn ui(&mut self, egui_ctx: &egui::Context) {
+    pub fn ui(&mut self, egui_ctx: &egui::Context, speed: &mut SpeedControls) {
         if !self.visible {
             return;
         }
@@ -109,16 +111,17 @@ impl Minimap {
 
         egui::Window::new("Map")
             .id(egui::Id::new("minimap"))
-            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-4.0, -54.0))
-            .fixed_size(egui::vec2(160.0, 190.0))
+            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-4.0, 4.0))
+            .auto_sized()
             .title_bar(false)
             .collapsible(false)
             .resizable(false)
             .frame(egui::Frame::none()
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(80, 80, 100, 180)))
                 .fill(egui::Color32::from_rgba_premultiplied(12, 12, 16, 200))
-                .rounding(egui::CornerRadius::same(6))
                 .inner_margin(egui::Margin::same(2)))
             .show(egui_ctx, |ui| {
+                // Map image
                 let (resp, painter) = ui.allocate_painter(
                     egui::vec2(MAP_SIZE as f32, MAP_SIZE as f32),
                     egui::Sense::click(),
@@ -170,6 +173,34 @@ impl Minimap {
                         self.jump_target = Some([wx, wy]);
                     }
                 }
+
+                // Speed controls directly below the map image
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    for &spd in &[
+                        SimSpeed::Paused,
+                        SimSpeed::Speed1x,
+                        SimSpeed::Speed2x,
+                        SimSpeed::Speed5x,
+                        SimSpeed::Speed10x,
+                        SimSpeed::Speed50x,
+                    ] {
+                        let active = speed.speed == spd;
+                        let label = spd.label();
+                        let btn = egui::Button::new(
+                            egui::RichText::new(label).size(10.0)
+                        ).min_size(egui::vec2(22.0, 16.0));
+                        let btn = if active {
+                            btn.fill(egui::Color32::from_rgb(200, 160, 40))
+                        } else {
+                            btn.fill(egui::Color32::from_rgba_premultiplied(40, 40, 50, 200))
+                        };
+                        if ui.add(btn).clicked() {
+                            speed.set_speed(spd);
+                        }
+                    }
+                });
             });
     }
 }

@@ -8,6 +8,8 @@ use emergence_core::world::map_thumbnail;
 /// Top-level screen state machine for the application.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum ScreenState {
+    /// Drop-in launch: world runs live in background, overlay shown on top.
+    LaunchOverlay,
     MainMenu,
     ScenarioSelect,
     Playing,
@@ -16,7 +18,7 @@ pub enum ScreenState {
 
 impl ScreenState {
     pub fn is_playing(&self) -> bool {
-        *self == ScreenState::Playing
+        matches!(self, ScreenState::Playing | ScreenState::LaunchOverlay)
     }
 }
 
@@ -207,44 +209,48 @@ impl MainMenuUi {
     pub fn show(&mut self, ctx: &egui::Context) {
         self.action = MainMenuAction::None;
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space(80.0);
+        // Transparent overlay (no CentralPanel — world is visible behind)
+        egui::Area::new(egui::Id::new("main_menu_overlay"))
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(80.0);
 
-                ui.heading(
-                    egui::RichText::new("EMERGENCE")
-                        .size(48.0)
-                        .strong(),
-                );
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new("A world of emergent intelligence")
-                        .size(16.0)
-                        .italics()
-                        .color(egui::Color32::from_rgb(150, 180, 220)),
-                );
+                    ui.heading(
+                        egui::RichText::new("EMERGENCE")
+                            .size(48.0)
+                            .strong(),
+                    );
+                    ui.add_space(8.0);
+                    ui.label(
+                        egui::RichText::new("A world of emergent intelligence")
+                            .size(16.0)
+                            .italics()
+                            .color(egui::Color32::from_rgb(150, 180, 220)),
+                    );
 
-                ui.add_space(60.0);
+                    ui.add_space(60.0);
 
-                let btn_size = egui::vec2(200.0, 40.0);
+                    let btn_size = egui::vec2(200.0, 40.0);
 
-                if ui.add_sized(btn_size, egui::Button::new("New Game")).clicked() {
-                    self.action = MainMenuAction::NewGame;
-                }
-                ui.add_space(8.0);
-                if ui.add_sized(btn_size, egui::Button::new("Load Game")).clicked() {
-                    self.action = MainMenuAction::LoadGame;
-                }
-                ui.add_space(8.0);
-                if ui.add_sized(btn_size, egui::Button::new("Settings")).clicked() {
-                    self.action = MainMenuAction::Settings;
-                }
-                ui.add_space(8.0);
-                if ui.add_sized(btn_size, egui::Button::new("Quit")).clicked() {
-                    self.action = MainMenuAction::Quit;
-                }
+                    if ui.add_sized(btn_size, egui::Button::new("New Game")).clicked() {
+                        self.action = MainMenuAction::NewGame;
+                    }
+                    ui.add_space(8.0);
+                    if ui.add_sized(btn_size, egui::Button::new("Load Game")).clicked() {
+                        self.action = MainMenuAction::LoadGame;
+                    }
+                    ui.add_space(8.0);
+                    if ui.add_sized(btn_size, egui::Button::new("Settings")).clicked() {
+                        self.action = MainMenuAction::Settings;
+                    }
+                    ui.add_space(8.0);
+                    if ui.add_sized(btn_size, egui::Button::new("Quit")).clicked() {
+                        self.action = MainMenuAction::Quit;
+                    }
+                });
             });
-        });
     }
 }
 
@@ -893,5 +899,187 @@ impl OnboardingTooltip {
                 self.dismiss_god_power_hint();
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Launch overlay (drop-in launch: live world behind a transparent title screen)
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LaunchAction {
+    None,
+    /// User clicked "Start Simulation" — proceed to ScenarioSelect.
+    StartSimulation,
+    /// User clicked Quit.
+    Quit,
+}
+
+pub struct LaunchOverlayUi {
+    pub action: LaunchAction,
+    /// Whether the "World Options" gear panel is expanded.
+    pub options_open: bool,
+    /// Difficulty 0.0–1.0
+    pub difficulty: f32,
+    /// World size 0.0–1.0
+    pub world_size: f32,
+    /// Seed text (empty = random)
+    pub seed_text: String,
+    /// Cached logo texture (loaded on first show).
+    logo_texture: Option<egui::TextureHandle>,
+}
+
+impl LaunchOverlayUi {
+    pub fn new() -> Self {
+        LaunchOverlayUi {
+            action: LaunchAction::None,
+            options_open: false,
+            difficulty: 0.5,
+            world_size: 0.5,
+            seed_text: String::new(),
+            logo_texture: None,
+        }
+    }
+
+    fn ensure_logo(&mut self, ctx: &egui::Context) {
+        if self.logo_texture.is_some() {
+            return;
+        }
+        // Load from file at runtime
+        let logo_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/emergence_logo.png");
+        if let Ok(img) = image::open(logo_path) {
+            let rgba = img.to_rgba8();
+            let size = [rgba.width() as usize, rgba.height() as usize];
+            let pixels = rgba.as_raw()
+                .chunks_exact(4)
+                .map(|c| egui::Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]))
+                .collect();
+            let color_image = egui::ColorImage { size, pixels };
+            self.logo_texture = Some(ctx.load_texture(
+                "emergence_logo",
+                color_image,
+                egui::TextureOptions::LINEAR,
+            ));
+        }
+    }
+
+    /// Render the transparent launch overlay on top of the live background world.
+    pub fn show(&mut self, ctx: &egui::Context) {
+        self.action = LaunchAction::None;
+        self.ensure_logo(ctx);
+
+        // ── Gear icon (World Options) — top-right corner ───────────────────
+        egui::Area::new(egui::Id::new("launch_gear"))
+            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 12.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                let gear_label = if self.options_open { "x  Options" } else { "=  Options" };
+                if ui.button(gear_label).clicked() {
+                    self.options_open = !self.options_open;
+                }
+            });
+
+        // ── World Options panel (slides in from top-right when gear clicked) ─
+        if self.options_open {
+            egui::Window::new("World Options")
+                .id(egui::Id::new("launch_options"))
+                .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 44.0))
+                .fixed_size(egui::vec2(280.0, 160.0))
+                .title_bar(false)
+                .collapsible(false)
+                .resizable(false)
+                .frame(
+                    egui::Frame::window(&ctx.style())
+                        .fill(egui::Color32::from_rgba_premultiplied(12, 12, 16, 210))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(60, 60, 80, 140)))
+                        .corner_radius(egui::CornerRadius::same(8))
+                        .inner_margin(egui::Margin::symmetric(12, 10)),
+                )
+                .show(ctx, |ui| {
+                    ui.label(egui::RichText::new("World Options").strong());
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label("Difficulty:");
+                        ui.add(
+                            egui::Slider::new(&mut self.difficulty, 0.0..=1.0)
+                                .text("")
+                                .custom_formatter(|v, _| {
+                                    if v < 0.33 { "Easy".into() }
+                                    else if v < 0.67 { "Normal".into() }
+                                    else { "Hard".into() }
+                                }),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("World Size:");
+                        ui.add(
+                            egui::Slider::new(&mut self.world_size, 0.0..=1.0)
+                                .text("")
+                                .custom_formatter(|v, _| {
+                                    if v < 0.33 { "Small".into() }
+                                    else if v < 0.67 { "Medium".into() }
+                                    else { "Large".into() }
+                                }),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Seed:");
+                        ui.text_edit_singleline(&mut self.seed_text);
+                        if ui.small_button("Rnd").clicked() {
+                            self.seed_text.clear();
+                        }
+                    });
+                });
+        }
+
+        // ── Central logo + CTA ─────────────────────────────────────────────
+        egui::Area::new(egui::Id::new("launch_center"))
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -60.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    // Logo image (falls back to text if not loaded)
+                    if let Some(ref tex) = self.logo_texture {
+                        let img = egui::Image::new(tex)
+                            .max_width(320.0)
+                            .rounding(egui::CornerRadius::same(8));
+                        ui.add(img);
+                    } else {
+                        ui.label(
+                            egui::RichText::new("EMERGENCE")
+                                .size(64.0)
+                                .strong()
+                                .color(egui::Color32::from_rgba_unmultiplied(230, 220, 190, 240)),
+                        );
+                    }
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new("A world of emergent intelligence")
+                            .size(15.0)
+                            .italics()
+                            .color(egui::Color32::from_rgba_unmultiplied(140, 170, 210, 200)),
+                    );
+                    ui.add_space(40.0);
+
+                    // "Start Simulation" CTA button
+                    let btn = egui::Button::new(
+                        egui::RichText::new("Start Simulation")
+                            .strong()
+                            .size(18.0)
+                            .color(egui::Color32::BLACK),
+                    )
+                    .fill(egui::Color32::from_rgb(210, 185, 100))
+                    .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(180, 150, 60)))
+                    .min_size(egui::vec2(220.0, 50.0));
+                    if ui.add(btn).clicked() {
+                        self.action = LaunchAction::StartSimulation;
+                    }
+
+                    ui.add_space(12.0);
+                    if ui.small_button("Quit").clicked() {
+                        self.action = LaunchAction::Quit;
+                    }
+                });
+            });
     }
 }

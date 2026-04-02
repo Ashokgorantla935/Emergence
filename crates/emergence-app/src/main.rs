@@ -23,9 +23,9 @@ use emergence_viewer::renderer::particles::ParticleSystem;
 use emergence_viewer::renderer::state::RenderState;
 use emergence_viewer::renderer::terrain::TerrainRenderer;
 use emergence_viewer::screen_state::{
-    FaunaDensity, MainMenuAction, MainMenuUi, OnboardingTooltip, PauseMenuAction, PauseMenuUi,
-    PerfStats, SaveSlotInfo, ScenarioSelectAction, ScenarioSelectUi, ScreenState, SpeedControls,
-    TopBar,
+    FaunaDensity, LaunchAction, LaunchOverlayUi, MainMenuAction, MainMenuUi, OnboardingTooltip,
+    PauseMenuAction, PauseMenuUi, PerfStats, SaveSlotInfo, ScenarioSelectAction, ScenarioSelectUi,
+    ScreenState, SpeedControls, TopBar,
 };
 use emergence_viewer::god_tools::{GodToolState, CursorPreview, palette as god_palette};
 use emergence_viewer::renderer::post_process::ScreenShake;
@@ -47,34 +47,37 @@ use winit::window::Window;
 fn apply_game_theme(ctx: &egui::Context) {
     let mut style = egui::Style::default();
 
-    // Dark slate theme — deep, semi-transparent windows for maximum world visibility
-    style.visuals.window_fill = egui::Color32::from_rgba_premultiplied(20, 20, 24, 230);
-    style.visuals.window_corner_radius = egui::CornerRadius::same(8);
+    // Glassmorphism — translucent, borderless panels over the live world
+    style.visuals.window_fill = egui::Color32::from_black_alpha(160);
+    style.visuals.window_corner_radius = egui::CornerRadius::same(12);
     style.visuals.window_stroke = egui::Stroke::NONE;
-    style.visuals.panel_fill = egui::Color32::from_rgba_premultiplied(15, 15, 18, 220);
+    style.visuals.panel_fill = egui::Color32::from_black_alpha(140);
 
-    // Rounded buttons
-    style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(4);
-    style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(4);
-    style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(4);
+    // Rounded widgets
+    style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(6);
+    style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(6);
+    style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(6);
     style.visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(4);
 
-    // Widget fills
-    style.visuals.extreme_bg_color = egui::Color32::from_rgba_premultiplied(10, 10, 12, 220);
-    style.visuals.override_text_color = Some(egui::Color32::from_rgb(210, 210, 220));
-    style.visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgba_premultiplied(30, 30, 36, 200);
-    style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgba_premultiplied(40, 40, 48, 200);
-    style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgba_premultiplied(55, 55, 68, 220);
-    style.visuals.widgets.active.bg_fill = egui::Color32::from_rgb(200, 170, 80);
+    // Progressively brighter widget fills: inactive -> hovered -> active
+    style.visuals.extreme_bg_color = egui::Color32::from_black_alpha(200);
+    style.visuals.override_text_color = Some(egui::Color32::from_gray(230));
+    style.visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgba_premultiplied(30, 30, 40, 140);
+    style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgba_premultiplied(40, 45, 60, 160);
+    style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgba_premultiplied(55, 65, 90, 200);
+    style.visuals.widgets.active.bg_fill = egui::Color32::from_rgba_premultiplied(70, 85, 120, 230);
+
+    // Noninteractive text uses secondary color
+    style.visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, egui::Color32::from_gray(160));
 
     // Subtle borders only on interactive elements
     style.visuals.widgets.noninteractive.bg_stroke = egui::Stroke::NONE;
-    style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(60, 60, 80, 120));
-    style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(100, 100, 140, 180));
+    style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(60, 80, 120, 80));
+    style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(80, 110, 180, 140));
 
-    // Selection
-    style.visuals.selection.bg_fill = egui::Color32::from_rgba_premultiplied(200, 170, 80, 60);
-    style.visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 170, 80));
+    // Selection — blue-tinted
+    style.visuals.selection.bg_fill = egui::Color32::from_rgba_premultiplied(60, 100, 200, 80);
+    style.visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(80, 130, 220, 180));
 
     ctx.set_style(style);
 }
@@ -107,6 +110,7 @@ struct App {
 
     // Screen state machine
     screen: ScreenState,
+    launch_overlay_ui: LaunchOverlayUi,
     main_menu_ui: MainMenuUi,
     scenario_select_ui: ScenarioSelectUi,
     pause_menu_ui: PauseMenuUi,
@@ -180,6 +184,8 @@ struct App {
     // Social emergence overlay toggles
     show_bond_lines: bool,
     show_kingdom_colors: bool,
+    /// When false, all egui UI is hidden for full immersion mode (Tab key toggles).
+    ui_visible: bool,
 
     // World annotations: floating dramatic callouts (wars, kingdoms, alliances)
     world_annotations: Vec<WorldAnnotation>,
@@ -298,7 +304,8 @@ impl App {
             inspector: Inspector::new(),
             dashboard: Dashboard::new(),
             speed: SpeedControls::new(),
-            screen: ScreenState::MainMenu,
+            screen: ScreenState::LaunchOverlay,
+            launch_overlay_ui: LaunchOverlayUi::new(),
             main_menu_ui: MainMenuUi::new(),
             scenario_select_ui: ScenarioSelectUi::new(),
             pause_menu_ui: PauseMenuUi::new(),
@@ -343,6 +350,7 @@ impl App {
             shake: ScreenShake::new(),
             show_bond_lines: true,
             show_kingdom_colors: true,
+            ui_visible: true,
             world_annotations: Vec::new(),
             toast_queue: FloatingToastQueue::new(),
             last_profile_time: Instant::now(),
@@ -610,6 +618,20 @@ impl ApplicationHandler for App {
 
         // Apply warm dark game theme once at init.
         apply_game_theme(&self.egui_ctx);
+
+        // Auto-start a default Genesis world so the launch overlay has a live
+        // background. The world runs at 1x; when the user clicks "Start
+        // Simulation" we transition to ScenarioSelect without recreating it.
+        if self.world.is_none() {
+            self.start_scenario(
+                emergence_core::scenario::ScenarioId::Genesis,
+                emergence_core::world::map::MapSelection::Default,
+                10,
+                FaunaDensity::Low,
+            );
+            // Stay on LaunchOverlay, not Playing.
+            self.screen = ScreenState::LaunchOverlay;
+        }
     }
 
     fn window_event(
@@ -721,6 +743,9 @@ impl ApplicationHandler for App {
                                     KeyCode::Slash if self.shift_held => {
                                         self.onboarding.toggle();
                                     }
+                                    KeyCode::Tab => {
+                                        self.ui_visible = !self.ui_visible;
+                                    }
                                     KeyCode::KeyB => {
                                         self.show_bond_lines = !self.show_bond_lines;
                                     }
@@ -752,6 +777,11 @@ impl ApplicationHandler for App {
                                     // Resume
                                     self.speed.toggle_pause();
                                     self.screen = ScreenState::Playing;
+                                }
+                            }
+                            ScreenState::LaunchOverlay => {
+                                if key == KeyCode::Enter || key == KeyCode::Space || key == KeyCode::NumpadEnter {
+                                    self.screen = ScreenState::ScenarioSelect;
                                 }
                             }
                             ScreenState::MainMenu => {
@@ -873,9 +903,9 @@ impl ApplicationHandler for App {
             self.last_fps_time = now;
         }
 
-        // --- Tick simulation (only while Playing) ---
+        // --- Tick simulation (while Playing or LaunchOverlay background world) ---
         let sim_t = Instant::now();
-        if self.screen == ScreenState::Playing {
+        if self.screen == ScreenState::Playing || self.screen == ScreenState::LaunchOverlay {
             let ticks = self.speed.ticks_this_frame();
             if ticks > 0 {
                 if let Some(ref world) = self.world {
@@ -994,8 +1024,29 @@ impl ApplicationHandler for App {
                         world.tick,
                     );
 
-                    // Feed deduped items from news_feed_system into the UI (not raw events)
-                    self.news_feed_ui.items = self.news_feed_system.to_legacy_items();
+                    // Feed deduped items from news_feed_system into the UI (not raw events).
+                    // Spawn toasts for any newly arrived items, then prune expired ones.
+                    {
+                        let new_items = self.news_feed_system.to_legacy_items();
+                        let old_count = self.news_feed_ui.items.len();
+                        if new_items.len() > old_count {
+                            for item in &new_items[old_count..] {
+                                self.news_feed_ui.toasts.push(
+                                    emergence_viewer::ui::news_feed::Toast {
+                                        text: item.text.clone(),
+                                        spawn_time: self.elapsed_time,
+                                        alpha: 1.0,
+                                        color: item.importance.color(),
+                                    }
+                                );
+                                if self.news_feed_ui.toasts.len() > 20 {
+                                    self.news_feed_ui.toasts.remove(0);
+                                }
+                            }
+                        }
+                        self.news_feed_ui.items = new_items;
+                        self.news_feed_ui.update_toasts(self.elapsed_time);
+                    }
 
                     // World event sounds: scan recent events (last `ticks` worth)
                     // We sample at most one sound per category per frame to avoid spam.
@@ -1476,6 +1527,19 @@ impl ApplicationHandler for App {
         self.egui_ctx.begin_pass(egui_input);
 
         match &self.screen {
+            ScreenState::LaunchOverlay => {
+                // Background world already rendered; just show the transparent overlay.
+                self.launch_overlay_ui.show(&self.egui_ctx);
+                match self.launch_overlay_ui.action {
+                    LaunchAction::StartSimulation => {
+                        self.screen = ScreenState::ScenarioSelect;
+                    }
+                    LaunchAction::Quit => {
+                        self.pending_quit = true;
+                    }
+                    LaunchAction::None => {}
+                }
+            }
             ScreenState::MainMenu => {
                 self.main_menu_ui.show(&self.egui_ctx);
                 match self.main_menu_ui.action.clone() {
@@ -1517,6 +1581,8 @@ impl ApplicationHandler for App {
                     })
                     .unwrap_or((0, 0));
 
+                if self.ui_visible {
+
                 TopBar::show(&self.egui_ctx, &mut self.speed, tick, population, &PerfStats {
                     gpu_managed: self.world.as_ref().map(|w| w.read().unwrap().signals.gpu_managed).unwrap_or(false),
                     fps: self.current_fps,
@@ -1541,19 +1607,9 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                // God tool palette — collapsible floating bottom dock
+                // God tool palette — bottom dock ribbon + floating sub-tray
                 let power_before = self.god_tool_state.active_power;
-                egui::Window::new("God Tools")
-                    .id(egui::Id::new("god_palette_panel"))
-                    .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(4.0, -54.0))
-                    .default_width(204.0)
-                    .max_height(500.0)
-                    .resizable(false)
-                    .collapsible(true)
-                    .title_bar(true)
-                    .show(&self.egui_ctx, |ui| {
-                        god_palette::render_palette(ui, &mut self.god_tool_state);
-                    });
+                god_palette::render_dock(&self.egui_ctx, &mut self.god_tool_state);
                 // Notify onboarding on first god power selection.
                 if power_before.is_none() && self.god_tool_state.active_power.is_some() {
                     self.onboarding.notify_god_power_selected();
@@ -1614,11 +1670,13 @@ impl ApplicationHandler for App {
                         self.camera.zoom,
                     ];
                 }
-                self.minimap.ui(&self.egui_ctx);
+                self.minimap.ui(&self.egui_ctx, &mut self.speed);
                 // Handle minimap camera jumps
                 if let Some(jump) = self.minimap.jump_target.take() {
                     self.camera.position = jump;
                 }
+
+                } // end if self.ui_visible
 
                 // Brush preview circle overlay (world-space → screen-space projection)
                 if self.god_tool_state.active_power.is_some() {
@@ -2386,8 +2444,8 @@ impl ApplicationHandler for App {
             egui_renderer.update_texture(&rs.device, &rs.queue, *id, delta);
         }
 
-        // World render pass (only when Playing and world exists)
-        if self.screen == ScreenState::Playing || self.screen == ScreenState::PauseMenu {
+        // World render pass (when world exists: Playing, PauseMenu, or LaunchOverlay background)
+        if self.screen == ScreenState::Playing || self.screen == ScreenState::PauseMenu || self.screen == ScreenState::LaunchOverlay {
             if self.world.is_some() {
                 let mut encoder = rs.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("World Encoder"),

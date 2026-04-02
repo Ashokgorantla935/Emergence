@@ -1,3 +1,4 @@
+use egui::TextureHandle;
 use super::cooldowns::CooldownTracker;
 
 /// The 8 tool tabs.
@@ -53,6 +54,10 @@ pub struct GodToolState {
     pub god_mode:      bool,
     /// Pending teleport: first click selects being, second click moves
     pub teleport_src:  Option<usize>,
+    /// Lazily-loaded tab icon textures (god_tools_icons.png, 8 icons row 0)
+    pub god_icons: Option<Vec<TextureHandle>>,
+    /// Lazily-loaded UI icon textures (worldbox_ui_icons.png)
+    pub ui_icons: Option<Vec<TextureHandle>>,
 }
 
 impl GodToolState {
@@ -69,6 +74,8 @@ impl GodToolState {
             action_queue: Vec::with_capacity(16),
             god_mode:     false,
             teleport_src: None,
+            god_icons:    None,
+            ui_icons:     None,
         }
     }
 

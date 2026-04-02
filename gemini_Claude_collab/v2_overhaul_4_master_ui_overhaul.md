@@ -14,8 +14,9 @@ Destroy `ui/main_menu.rs`. Our game does not start on a grey 680x480 screen.
 ## 2. The Bottom Dock (Icon-First Navigation)
 Destroy the left-hand `egui::SidePanel`. We need 90% of the screen for the simulation.
 - Utilize a horizontal `egui::TopBottomPanel::bottom()`. It takes up strictly 15% of the screen height.
-- **The Main Ribbon:** Use `egui::ImageButton` combined with `egui::TextureHandle` to load the UI icons located at `assets/worldbox_ui_icons.png`. There should be no raw text here—icons only.
-- **Contextual Sub-Trays:** Clicking an icon (e.g., Terrain) floats a secondary tray directly above the bottom ribbon holding the specific brushes.
+- **The Main Ribbon & Tools:** You must load `assets/worldbox_ui_icons.png` and `assets/god_tools_icons.png` via the `image` crate, slice the 32x32 regions into an `egui::ColorImage`, and register them via `ctx.load_texture()`. 
+- **ABSOLUTELY ZERO TEXT LABELS:** The dock must ONLY use `egui::ImageButton` displaying these loaded sprite textures. Text is strictly forbidden outside of hover tooltips.
+- **Contextual Sub-Trays:** Clicking a parent icon (e.g., Terrain) floats a secondary tray directly above the bottom ribbon holding the specific sub-power brushes (e.g. Volcano, Rain).
 
 ## 3. Corner Chromes & News Toasts
 - **Minimap:** A rigid 10% screen-width square floating in the Top-Right with 1px borders, holding the time controls below it.

@@ -1,7 +1,18 @@
 use egui::{Color32, Context, RichText, Ui};
+use super::icon_loader::load_icon_grid;
 use super::mod_types::{GodToolState, ToolTab, PowerDef};
 use super::power_catalog::POWER_CATALOG;
 use emergence_core::god_action::{GodAction, ResetKind};
+
+/// Lazy-initialise god_icons and ui_icons on first call.
+fn ensure_icons(ctx: &Context, state: &mut GodToolState) {
+    if state.god_icons.is_none() {
+        state.god_icons = Some(load_icon_grid(ctx, "assets/god_tools_icons.png", "god_icon"));
+    }
+    if state.ui_icons.is_none() {
+        state.ui_icons = Some(load_icon_grid(ctx, "assets/worldbox_ui_icons.png", "ui_icon"));
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Bottom dock rendering (Task 2 replacement for the left SidePanel)
@@ -10,6 +21,9 @@ use emergence_core::god_action::{GodAction, ResetKind};
 /// Bottom dock: icon ribbon + floating sub-tray above it.
 /// Call this instead of the old egui::Window("God Tools") wrapper.
 pub fn render_dock(ctx: &Context, state: &mut GodToolState) {
+    // Lazy-load icon sheets on first frame.
+    ensure_icons(ctx, state);
+
     // ── Bottom ribbon (~48px) ─────────────────────────────────────────────
     egui::TopBottomPanel::bottom("god_tool_dock")
         .exact_height(48.0)
@@ -23,22 +37,59 @@ pub fn render_dock(ctx: &Context, state: &mut GodToolState) {
             ui.horizontal_centered(|ui| {
                 ui.add_space(8.0);
 
-                // 8 icon tabs
-                for &(tab, icon, tip) in tab_icons() {
+                // 8 icon tabs — each is row 0, col 0..7 in god_tools_icons.png
+                for (tab_idx, &(tab, tip)) in tab_entries().iter().enumerate() {
                     let active = state.active_tab == tab;
-                    let icon_rt = RichText::new(icon)
-                        .size(15.0)
-                        .strong()
-                        .color(if active { Color32::from_rgb(210, 185, 100) } else { Color32::from_rgb(180, 180, 200) });
-                    let btn = egui::Button::new(icon_rt)
-                        .selected(active)
-                        .fill(if active {
+
+                    let icon_tex = state.god_icons.as_ref()
+                        .and_then(|icons| icons.get(tab_idx)); // row 0, col tab_idx
+
+                    let resp = if let Some(tex) = icon_tex {
+                        let tint = if active {
+                            Color32::from_rgb(255, 220, 100)
+                        } else {
+                            Color32::from_rgb(180, 180, 200)
+                        };
+                        let btn = egui::ImageButton::new(
+                            egui::load::SizedTexture::new(tex.id(), egui::vec2(28.0, 28.0)),
+                        )
+                        .tint(tint)
+                        .frame(true);
+                        let frame_fill = if active {
                             Color32::from_rgba_premultiplied(50, 42, 8, 200)
                         } else {
                             Color32::from_rgba_premultiplied(22, 22, 28, 180)
-                        })
-                        .min_size(egui::vec2(36.0, 32.0));
-                    if ui.add(btn).on_hover_text(tip).clicked() {
+                        };
+                        ui.add_space(2.0);
+                        let r = ui.add(btn);
+                        if active {
+                            // Draw active highlight behind the button
+                            let rect = r.rect.expand(2.0);
+                            ui.painter().rect_filled(
+                                rect,
+                                egui::CornerRadius::same(4),
+                                frame_fill,
+                            );
+                        }
+                        r
+                    } else {
+                        // Fallback: text button (shouldn't happen after load)
+                        let icon_rt = RichText::new(tab_icon_char(tab))
+                            .size(15.0)
+                            .strong()
+                            .color(if active { Color32::from_rgb(210, 185, 100) } else { Color32::from_rgb(180, 180, 200) });
+                        let btn = egui::Button::new(icon_rt)
+                            .selected(active)
+                            .fill(if active {
+                                Color32::from_rgba_premultiplied(50, 42, 8, 200)
+                            } else {
+                                Color32::from_rgba_premultiplied(22, 22, 28, 180)
+                            })
+                            .min_size(egui::vec2(36.0, 32.0));
+                        ui.add(btn)
+                    };
+
+                    if resp.on_hover_text(tip).clicked() {
                         state.active_tab = tab;
                     }
                     ui.add_space(2.0);
@@ -100,18 +151,32 @@ pub fn render_dock(ctx: &Context, state: &mut GodToolState) {
         });
 }
 
-/// Map each ToolTab to (icon_str, tooltip).
-fn tab_icons() -> &'static [(ToolTab, &'static str, &'static str)] {
+/// Map each ToolTab to its tooltip. Order must match icon sheet row 0 col 0..7.
+fn tab_entries() -> &'static [(ToolTab, &'static str)] {
     &[
-        (ToolTab::Creation,    "+", "Creation — spawn beings, fauna, structures"),
-        (ToolTab::Terrain,     "^", "Terrain — reshape the landscape"),
-        (ToolTab::Weather,     "~", "Weather — rain, drought, storm"),
-        (ToolTab::Destruction, "X", "Destruction — lightning, meteor, plague"),
-        (ToolTab::Blessing,    "*", "Blessing — heal, feed, inspire"),
-        (ToolTab::Curse,       "!", "Curse — fear, rage, disease"),
-        (ToolTab::Kingdom,     "#", "Kingdom — alliances, war, laws"),
-        (ToolTab::World,       "o", "World — seasons, laws, reset"),
+        (ToolTab::Creation,    "Creation — spawn beings, fauna, structures"),
+        (ToolTab::Terrain,     "Terrain — reshape the landscape"),
+        (ToolTab::Weather,     "Weather — rain, drought, storm"),
+        (ToolTab::Destruction, "Destruction — lightning, meteor, plague"),
+        (ToolTab::Blessing,    "Blessing — heal, feed, inspire"),
+        (ToolTab::Curse,       "Curse — fear, rage, disease"),
+        (ToolTab::Kingdom,     "Kingdom — alliances, war, laws"),
+        (ToolTab::World,       "World — seasons, laws, reset"),
     ]
+}
+
+/// Fallback single-char icon when sprite not yet loaded.
+fn tab_icon_char(tab: ToolTab) -> &'static str {
+    match tab {
+        ToolTab::Creation    => "+",
+        ToolTab::Terrain     => "^",
+        ToolTab::Weather     => "~",
+        ToolTab::Destruction => "X",
+        ToolTab::Blessing    => "*",
+        ToolTab::Curse       => "!",
+        ToolTab::Kingdom     => "#",
+        ToolTab::World       => "o",
+    }
 }
 
 fn tab_label(tab: ToolTab) -> &'static str {

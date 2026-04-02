@@ -1,5 +1,7 @@
 /// God Tool Palette — horizontal bottom dock, 8 icon tabs, floating sub-trays.
 
+use crate::god_tools::icon_loader::load_icon_grid;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ToolTab {
     Creation,
@@ -72,6 +74,8 @@ pub struct ToolPalette {
     pub selected_power: Option<PowerId>,
     pub brush_size: u8, // 1, 3, 5, 10
     pub cooldowns: [u32; 78], // remaining cooldown ticks per power
+    /// Lazily-loaded tab icons from god_tools_icons.png (row 0, col 0..7)
+    god_icons: Option<Vec<egui::TextureHandle>>,
 }
 
 impl ToolPalette {
@@ -82,6 +86,13 @@ impl ToolPalette {
             selected_power: None,
             brush_size: 1,
             cooldowns: [0; 78],
+            god_icons: None,
+        }
+    }
+
+    fn ensure_icons(&mut self, ctx: &egui::Context) {
+        if self.god_icons.is_none() {
+            self.god_icons = Some(load_icon_grid(ctx, "assets/god_tools_icons.png", "tp_god_icon"));
         }
     }
 
@@ -105,6 +116,9 @@ impl ToolPalette {
     }
 
     pub fn ui(&mut self, egui_ctx: &egui::Context) {
+        // Lazy-load icon sheet on first frame.
+        self.ensure_icons(egui_ctx);
+
         // ── Bottom dock ribbon ─────────────────────────────────────────────
         egui::TopBottomPanel::bottom("god_tool_dock")
             .exact_height(48.0)
@@ -131,16 +145,38 @@ impl ToolPalette {
                     ui.add_space(4.0);
 
                     if self.visible {
-                        // 8 icon buttons — one per tab
-                        for &tab in ToolTab::all() {
+                        // 8 icon buttons — one per tab, row 0 col 0..7 of god_tools_icons.png
+                        for (tab_idx, &tab) in ToolTab::all().iter().enumerate() {
                             let active = self.active_tab == tab;
-                            let icon_text = egui::RichText::new(tab.icon())
-                                .size(16.0)
-                                .strong();
-                            let btn = egui::Button::new(icon_text)
-                                .selected(active)
-                                .min_size(egui::vec2(36.0, 32.0));
-                            let resp = ui.add(btn).on_hover_text(tab.label());
+
+                            let icon_tex = self.god_icons.as_ref()
+                                .and_then(|icons| icons.get(tab_idx));
+
+                            let resp = if let Some(tex) = icon_tex {
+                                let tint = if active {
+                                    egui::Color32::from_rgb(255, 220, 100)
+                                } else {
+                                    egui::Color32::from_rgb(180, 180, 200)
+                                };
+                                let btn = egui::ImageButton::new(
+                                    egui::load::SizedTexture::new(tex.id(), egui::vec2(28.0, 28.0)),
+                                )
+                                .tint(tint)
+                                .frame(true);
+                                ui.add_space(2.0);
+                                ui.add(btn)
+                            } else {
+                                // Fallback: text
+                                let icon_text = egui::RichText::new(tab.icon())
+                                    .size(16.0)
+                                    .strong();
+                                let btn = egui::Button::new(icon_text)
+                                    .selected(active)
+                                    .min_size(egui::vec2(36.0, 32.0));
+                                ui.add(btn)
+                            };
+
+                            let resp = resp.on_hover_text(tab.label());
                             if resp.clicked() {
                                 if self.active_tab == tab {
                                     // Second click on same tab closes the sub-tray

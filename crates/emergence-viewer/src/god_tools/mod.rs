@@ -1,4 +1,5 @@
 pub mod cooldowns;
+pub mod icon_loader;
 pub mod mod_types;
 pub mod palette;
 pub mod power_catalog;

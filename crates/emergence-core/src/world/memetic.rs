@@ -13,8 +13,13 @@ pub const TECH_CONSTRUCTION: usize = 1;
 pub const TECH_ENERGY: usize = 2;
 pub const TECH_ARCANE: usize = 3;
 
+/// Downsampling factor: memetic grid runs at world_size / MEMETIC_SCALE
+pub const MEMETIC_SCALE: u32 = 2;
+
 impl MemeticGrid {
-    pub fn new(width: u32, height: u32) -> Self {
+    pub fn new(world_width: u32, world_height: u32) -> Self {
+        let width = world_width / MEMETIC_SCALE;
+        let height = world_height / MEMETIC_SCALE;
         let len = (width * height) as usize;
         let channels = vec![vec![0.0f32; len]; MEMETIC_CHANNELS];
         MemeticGrid {
@@ -25,7 +30,10 @@ impl MemeticGrid {
         }
     }
 
-    pub fn deposit(&mut self, channel: usize, x: u32, y: u32, amount: f32) {
+    /// Deposit at world coordinates (auto-downscaled to memetic grid)
+    pub fn deposit(&mut self, channel: usize, world_x: u32, world_y: u32, amount: f32) {
+        let x = world_x / MEMETIC_SCALE;
+        let y = world_y / MEMETIC_SCALE;
         if channel >= MEMETIC_CHANNELS || x >= self.width || y >= self.height {
             return;
         }
@@ -33,7 +41,10 @@ impl MemeticGrid {
         self.channels[channel][idx] = (self.channels[channel][idx] + amount).min(10.0);
     }
 
-    pub fn read(&self, channel: usize, x: u32, y: u32) -> f32 {
+    /// Read at world coordinates (auto-downscaled to memetic grid)
+    pub fn read(&self, channel: usize, world_x: u32, world_y: u32) -> f32 {
+        let x = world_x / MEMETIC_SCALE;
+        let y = world_y / MEMETIC_SCALE;
         if channel >= MEMETIC_CHANNELS || x >= self.width || y >= self.height {
             return 0.0;
         }

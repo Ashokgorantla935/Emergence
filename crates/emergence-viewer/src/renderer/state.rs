@@ -879,10 +879,13 @@ impl RenderState {
         self.signal_compute = SignalComputePipeline::new(&self.device, width, height, channel_params);
         // Rebuild memetic compute pipeline alongside signal compute so it references
         // the new (correctly-sized) signal buffer.
+        // Memetic grid runs at downsampled resolution (world_size / MEMETIC_SCALE)
+        let mem_w = width / 2;
+        let mem_h = height / 2;
         self.memetic_compute = Some(MemeticComputePipeline::new(
             &self.device,
-            width,
-            height,
+            mem_w,
+            mem_h,
             self.signal_compute.current_read_buf(),
         ));
     }

@@ -557,8 +557,8 @@ impl SaveFile {
             memetic: {
                 let mut mg = crate::world::memetic::MemeticGrid::new(w, h);
                 if self.memetic_channels.len() == crate::world::memetic::MEMETIC_CHANNELS
-                    && self.memetic_width == w
-                    && self.memetic_height == h
+                    && self.memetic_width == mg.width
+                    && self.memetic_height == mg.height
                 {
                     mg.channels = self.memetic_channels.clone();
                 }

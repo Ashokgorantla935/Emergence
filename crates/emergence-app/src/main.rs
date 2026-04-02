@@ -2382,7 +2382,13 @@ impl ApplicationHandler for App {
 
                     if expected_cells != grid_cells {
                         let cp = world_w.signals.channel_params();
-                        rs.reinit_signal_compute(world_w.signals.width, world_w.signals.height, &cp);
+                        rs.reinit_signal_compute(
+                            world_w.signals.width,
+                            world_w.signals.height,
+                            &cp,
+                            world_w.memetic.width,
+                            world_w.memetic.height,
+                        );
                         // Init climate compute pipeline alongside signal compute.
                         rs.climate_compute = Some(
                             emergence_viewer::renderer::climate_compute::ClimateComputePipeline::new(

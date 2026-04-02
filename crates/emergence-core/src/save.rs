@@ -111,6 +111,8 @@ pub struct SaveFile {
     pub climate_day_phase: u8,
     pub climate_light_level: f32,
     pub climate_temperature_modifier: f32,
+    pub climate_global_temperature: f32,
+    pub climate_water_level_offset: f32,
 
     // Terrain
     pub terrain_biome: Vec<u8>,
@@ -128,8 +130,13 @@ pub struct SaveFile {
     pub food_type: Vec<u8>,
     pub regrowth_rate: Vec<f32>,
 
-    // Signals (7 channels x width*height)
+    // Signals (9 channels x width*height)
     pub signals: Vec<Vec<f32>>,
+
+    // MemeticGrid (4 channels x width*height — CPU mirror, GPU re-uploads on load)
+    pub memetic_channels: Vec<Vec<f32>>,
+    pub memetic_width: u32,
+    pub memetic_height: u32,
 
     // Beings (SoA — all parallel, indexed by being index)
     pub being_count: u32,
@@ -159,6 +166,16 @@ pub struct SaveFile {
     pub kill_count: Vec<u16>,
     pub last_birth_tick: Vec<u32>,
     pub names: Vec<String>,
+
+    // Genotype (evolution) — parallel to being index
+    pub genotype_generation: Vec<u32>,
+    pub genotype_q_baselines: Vec<[f32; 23]>,
+    pub genotype_speed_factor: Vec<f32>,
+    pub genotype_cold_resistance: Vec<f32>,
+    pub genotype_heat_tolerance: Vec<f32>,
+    pub genotype_calorie_efficiency: Vec<f32>,
+    pub genotype_skin_hue_shift: Vec<f32>,
+    pub genotype_body_scale: Vec<f32>,
 
     // Relationships (variable — only filled slots serialized)
     pub relationships: Vec<SerializedRelationships>,
@@ -262,6 +279,8 @@ impl SaveFile {
             climate_day_phase: world.climate.day_phase as u8,
             climate_light_level: world.climate.light_level,
             climate_temperature_modifier: world.climate.temperature_modifier,
+            climate_global_temperature: world.climate.global_temperature,
+            climate_water_level_offset: world.climate.water_level_offset,
 
             terrain_biome: world.terrain.biome.iter().map(|b| *b as u8).collect(),
             terrain_elevation: world.terrain.elevation.clone(),
@@ -278,6 +297,10 @@ impl SaveFile {
             regrowth_rate: world.resources.regrowth_rate.clone(),
 
             signals: world.signals.channels.clone(),
+
+            memetic_channels: world.memetic.channels.clone(),
+            memetic_width: world.memetic.width,
+            memetic_height: world.memetic.height,
 
             being_count: n as u32,
             positions: beings.hot.positions.clone(),
@@ -306,6 +329,15 @@ impl SaveFile {
             kill_count: beings.cold.kill_count.clone(),
             last_birth_tick: beings.cold.last_birth_tick.clone(),
             names: beings.cold.names.clone(),
+
+            genotype_generation: beings.cold.genotypes.iter().map(|g| g.generation).collect(),
+            genotype_q_baselines: beings.cold.genotypes.iter().map(|g| g.q_baselines).collect(),
+            genotype_speed_factor: beings.cold.genotypes.iter().map(|g| g.speed_factor).collect(),
+            genotype_cold_resistance: beings.cold.genotypes.iter().map(|g| g.cold_resistance).collect(),
+            genotype_heat_tolerance: beings.cold.genotypes.iter().map(|g| g.heat_tolerance).collect(),
+            genotype_calorie_efficiency: beings.cold.genotypes.iter().map(|g| g.calorie_efficiency).collect(),
+            genotype_skin_hue_shift: beings.cold.genotypes.iter().map(|g| g.skin_hue_shift).collect(),
+            genotype_body_scale: beings.cold.genotypes.iter().map(|g| g.body_scale).collect(),
 
             relationships,
             causal_memories,
@@ -393,6 +425,8 @@ impl SaveFile {
         climate.day_phase = day_phase_from_u8(self.climate_day_phase);
         climate.light_level = self.climate_light_level;
         climate.temperature_modifier = self.climate_temperature_modifier;
+        climate.global_temperature = self.climate_global_temperature;
+        climate.water_level_offset = self.climate_water_level_offset;
 
         // Reconstruct SignalGrid
         let mut signals = SignalGrid::new(w, h);
@@ -434,6 +468,24 @@ impl SaveFile {
             beings.cold.last_birth_tick.push(if i < self.last_birth_tick.len() { self.last_birth_tick[i] } else { 0 });
             beings.cold.names.push(if i < self.names.len() { self.names[i].clone() } else { String::new() });
             beings.cold.traces.push(None);
+            beings.cold.meme_slots.push([crate::being::memes::MemeSlotState::default(); 4]);
+
+            // Genotype
+            let genotype = if i < self.genotype_q_baselines.len() {
+                crate::being::data::Genotype {
+                    generation: if i < self.genotype_generation.len() { self.genotype_generation[i] } else { 0 },
+                    q_baselines: self.genotype_q_baselines[i],
+                    speed_factor: if i < self.genotype_speed_factor.len() { self.genotype_speed_factor[i] } else { 1.0 },
+                    cold_resistance: if i < self.genotype_cold_resistance.len() { self.genotype_cold_resistance[i] } else { 0.5 },
+                    heat_tolerance: if i < self.genotype_heat_tolerance.len() { self.genotype_heat_tolerance[i] } else { 0.5 },
+                    calorie_efficiency: if i < self.genotype_calorie_efficiency.len() { self.genotype_calorie_efficiency[i] } else { 1.0 },
+                    skin_hue_shift: if i < self.genotype_skin_hue_shift.len() { self.genotype_skin_hue_shift[i] } else { 0.0 },
+                    body_scale: if i < self.genotype_body_scale.len() { self.genotype_body_scale[i] } else { 1.0 },
+                }
+            } else {
+                crate::being::data::Genotype::default()
+            };
+            beings.cold.genotypes.push(genotype);
 
             // Relationships
             let mut slots = crate::being::memory::RelationshipSlots::new();
@@ -501,7 +553,16 @@ impl SaveFile {
             settlements: Vec::new(),   // rebuilt at next 600-tick cycle
             kingdoms: Vec::new(),
             wars: Vec::new(),
-            memetic: crate::world::memetic::MemeticGrid::new(w, h),
+            memetic: {
+                let mut mg = crate::world::memetic::MemeticGrid::new(w, h);
+                if self.memetic_channels.len() == crate::world::memetic::MEMETIC_CHANNELS
+                    && self.memetic_width == w
+                    && self.memetic_height == h
+                {
+                    mg.channels = self.memetic_channels.clone();
+                }
+                mg
+            },
         }
     }
 }

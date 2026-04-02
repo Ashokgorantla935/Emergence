@@ -84,6 +84,19 @@ impl Inspector {
         };
         ui.label(format!("{ct} — {age_label} (lives ~{lifespan_years}y)"));
 
+        // Generation display
+        if idx < beings.cold.genotypes.len() {
+            let generation = beings.cold.genotypes[idx].generation;
+            let gen_color = if generation >= 50 {
+                egui::Color32::GOLD
+            } else if generation >= 20 {
+                egui::Color32::LIGHT_GREEN
+            } else {
+                egui::Color32::WHITE
+            };
+            ui.colored_label(gen_color, format!("Generation: {}", generation));
+        }
+
         // Current action as plain English
         let action_str = action_readable(beings.hot.pending_action[idx]);
         ui.colored_label(egui::Color32::from_rgb(100, 200, 255), action_str);
@@ -130,6 +143,51 @@ impl Inspector {
                 return;
             }
         });
+
+        // Evolutionary drift and physical traits
+        if idx < beings.cold.genotypes.len() {
+            let geno = &beings.cold.genotypes[idx];
+
+            ui.separator();
+            ui.label("Evolutionary Drift:");
+
+            // q_baselines has 23 entries (indices 0..22)
+            // Action indices: SeekFood=1, PickUpFood=13, Hunt=14, Bond=5, ShareFood=6,
+            //   Teach=15, CreateMark=19, Memorialize=18, Build=16, Explore=8
+            let key_groups: &[(&str, &[usize])] = &[
+                ("Survival", &[1usize, 13, 14]),   // SeekFood, PickUpFood, Hunt
+                ("Social",   &[5, 6, 15]),           // Bond, ShareFood, Teach
+                ("Creative", &[19, 18]),             // CreateMark, Memorialize
+                ("Combat",   &[14]),                 // Hunt (closest to fight)
+                ("Building", &[16]),                 // Build
+                ("Explore",  &[8]),                  // Explore
+            ];
+
+            for &(label, indices) in key_groups {
+                let valid: Vec<f32> = indices.iter()
+                    .filter(|&&i| i < geno.q_baselines.len())
+                    .map(|&i| geno.q_baselines[i].abs())
+                    .collect();
+                if valid.is_empty() { continue; }
+                let avg_drift = valid.iter().sum::<f32>() / valid.len() as f32;
+                let normalized = (avg_drift / 2.0).clamp(0.0, 1.0);
+                let pct = (avg_drift * 100.0) as i32;
+                let sign = if indices.iter().filter(|&&i| i < geno.q_baselines.len())
+                    .map(|&i| geno.q_baselines[i])
+                    .sum::<f32>() >= 0.0 { "+" } else { "" };
+                ui.horizontal(|ui| {
+                    ui.label(format!("{}: {}{}%", label, sign, pct));
+                    ui.add(egui::ProgressBar::new(normalized).desired_width(80.0));
+                });
+            }
+
+            ui.separator();
+            ui.label("Physical Traits:");
+            ui.label(format!("  Speed: {:.0}%", geno.speed_factor * 100.0));
+            ui.label(format!("  Cold Resist: {:.0}%", geno.cold_resistance * 100.0));
+            ui.label(format!("  Heat Tolerance: {:.0}%", geno.heat_tolerance * 100.0));
+            ui.label(format!("  Calorie Efficiency: {:.0}%", geno.calorie_efficiency * 100.0));
+        }
 
         ui.separator();
 

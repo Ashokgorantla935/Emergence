@@ -105,7 +105,7 @@ fn render_creation_tab(ui: &mut Ui, state: &mut GodToolState) {
         );
 
         // Prominent "Spawn Human" button
-        let spawn_being = POWER_CATALOG.iter().find(|p| p.id == 0).unwrap();
+        let Some(spawn_being) = POWER_CATALOG.iter().find(|p| p.id == 0) else { return; };
         render_spawn_human_button(ui, state, spawn_being);
 
         // Presets (Wanderer, Elder, Bold, Pacifist, Social) — compact 2-column grid
@@ -165,7 +165,7 @@ fn render_creation_tab(ui: &mut Ui, state: &mut GodToolState) {
                 .small()
                 .strong(),
         );
-        let shelter = POWER_CATALOG.iter().find(|p| p.id == 11).unwrap();
+        let Some(shelter) = POWER_CATALOG.iter().find(|p| p.id == 11) else { return; };
         render_power_button(ui, state, shelter);
     });
 }

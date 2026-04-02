@@ -116,25 +116,32 @@ fn build_action(
     _shift_held: bool,
     world: &emergence_core::sim::world_state::World,
 ) -> Option<GodAction> {
-    let tx = cursor[0] as u32;
-    let ty = cursor[1] as u32;
+    let world_w = world.config.size.0 as f32;
+    let world_h = world.config.size.1 as f32;
+    // Clamp cursor to valid world bounds before converting to u32 to prevent wraparound panics
+    let cx = cursor[0].clamp(0.0, world_w - 1.0);
+    let cy = cursor[1].clamp(0.0, world_h - 1.0);
+    let tx = cx as u32;
+    let ty = cy as u32;
     let bs = state.brush_size as u32;
     let half = bs / 2;
     let region = Rect::new(tx.saturating_sub(half), ty.saturating_sub(half), bs.max(1), bs.max(1));
 
+    let safe_pos = [cx, cy];
+
     match pid {
         // ── Creation ──────────────────────────────────────────────────────────
         0 => Some(GodAction::SpawnBeing {
-            pos: cursor,
+            pos: safe_pos,
             personality: [0.0; 5],
             lifespan: 86000,
         }),
-        1..=5 => Some(GodAction::SpawnBeingPreset { pos: cursor, preset: pid - 1 }),
-        6 => Some(GodAction::SpawnFauna { kind: CreatureType::Hawk,   pos: cursor, count: 3 }),
-        7 => Some(GodAction::SpawnFauna { kind: CreatureType::Deer,   pos: cursor, count: 3 }),
-        8 => Some(GodAction::SpawnFauna { kind: CreatureType::Wolf,   pos: cursor, count: 2 }),
-        9 => Some(GodAction::SpawnFauna { kind: CreatureType::Rabbit, pos: cursor, count: 5 }),
-        10 => Some(GodAction::SpawnFauna { kind: CreatureType::Fish,  pos: cursor, count: 5 }),
+        1..=5 => Some(GodAction::SpawnBeingPreset { pos: safe_pos, preset: pid - 1 }),
+        6 => Some(GodAction::SpawnFauna { kind: CreatureType::Hawk,   pos: safe_pos, count: 3 }),
+        7 => Some(GodAction::SpawnFauna { kind: CreatureType::Deer,   pos: safe_pos, count: 3 }),
+        8 => Some(GodAction::SpawnFauna { kind: CreatureType::Wolf,   pos: safe_pos, count: 2 }),
+        9 => Some(GodAction::SpawnFauna { kind: CreatureType::Rabbit, pos: safe_pos, count: 5 }),
+        10 => Some(GodAction::SpawnFauna { kind: CreatureType::Fish,  pos: safe_pos, count: 5 }),
         11 => Some(GodAction::SpawnShelter { x: tx, y: ty }),
 
         // ── Terrain ───────────────────────────────────────────────────────────
@@ -148,8 +155,10 @@ fn build_action(
         19 => {
             // River: built on drag release
             if let Some(start) = state.drag_start {
+                let sx = start[0].clamp(0.0, world_w - 1.0) as u32;
+                let sy = start[1].clamp(0.0, world_h - 1.0) as u32;
                 Some(GodAction::CreateRiver {
-                    start: (start[0] as u32, start[1] as u32),
+                    start: (sx, sy),
                     end: (tx, ty),
                 })
             } else {
@@ -170,32 +179,32 @@ fn build_action(
         29 => Some(GodAction::SetSeason { season: Season::Summer }),
 
         // ── Destruction ───────────────────────────────────────────────────────
-        30 => Some(GodAction::Lightning { pos: cursor }),
-        31 => Some(GodAction::MeteorStrike { pos: cursor }),
+        30 => Some(GodAction::Lightning { pos: safe_pos }),
+        31 => Some(GodAction::MeteorStrike { pos: safe_pos }),
         32 => Some(GodAction::Earthquake { region, intensity: 0.6, duration: 120 }),
         33 => Some(GodAction::FloodArea { region, duration: 600 }),
         34 => Some(GodAction::Famine { region, duration: 1000 }),
         35 => Some(GodAction::PlagueCast { region, duration: 800 }),
         36 => Some(GodAction::WildfireIgnite { x: tx, y: ty }),
-        37 => Some(GodAction::Tornado { pos: cursor, duration: 200 }),
+        37 => Some(GodAction::Tornado { pos: safe_pos, duration: 200 }),
         38 => {
             // Kill Being: find nearest alive being to cursor
-            nearest_being(cursor, world).map(|idx| GodAction::KillBeing { index: idx })
+            nearest_being(safe_pos, world).map(|idx| GodAction::KillBeing { index: idx })
         }
         39 => Some(GodAction::KillRegion { region }),
-        40 => Some(GodAction::SpawnPredatorPack { pos: cursor, count: 4 }),
+        40 => Some(GodAction::SpawnPredatorPack { pos: safe_pos, count: 4 }),
         41 => Some(GodAction::RemoveAll { region }),
 
         // ── Blessing ──────────────────────────────────────────────────────────
-        42 => nearest_being(cursor, world).map(|idx| GodAction::Bless { index: idx, magnitude: 0.8 }),
-        43 => nearest_being(cursor, world).map(|idx| GodAction::HealBeing { index: idx }),
+        42 => nearest_being(safe_pos, world).map(|idx| GodAction::Bless { index: idx, magnitude: 0.8 }),
+        43 => nearest_being(safe_pos, world).map(|idx| GodAction::HealBeing { index: idx }),
         44 => Some(GodAction::HealRegion { region }),
         45 => Some(GodAction::InspireCourage { region }),
         46 => Some(GodAction::InspireCalm { region }),
         47 => Some(GodAction::InspireJoy { region }),
         48 => {
             // LoveSpark: two-click, first selects A, second selects B and fires
-            let nearest = nearest_being(cursor, world);
+            let nearest = nearest_being(safe_pos, world);
             if let Some(being_idx) = nearest {
                 match state.selection.a {
                     None => {
@@ -214,19 +223,19 @@ fn build_action(
         49 => Some(GodAction::FeedRegion { region, amount: 0.5 }),
         50 => {
             // Extend Life: nearest being
-            nearest_being(cursor, world).map(|idx| GodAction::ExtendLifespan { indices: vec![idx], multiplier: 2.0 })
+            nearest_being(safe_pos, world).map(|idx| GodAction::ExtendLifespan { indices: vec![idx], multiplier: 2.0 })
         }
-        51 => nearest_being(cursor, world).map(|idx| GodAction::Rejuvenate { index: idx }),
+        51 => nearest_being(safe_pos, world).map(|idx| GodAction::Rejuvenate { index: idx }),
 
         // ── Curse ─────────────────────────────────────────────────────────────
-        52 => nearest_being(cursor, world).map(|idx| GodAction::Curse { index: idx, magnitude: 0.8 }),
+        52 => nearest_being(safe_pos, world).map(|idx| GodAction::Curse { index: idx, magnitude: 0.8 }),
         53 => Some(GodAction::CurseMadness { region }),
-        54 => nearest_being(cursor, world).map(|idx| GodAction::CurseIsolation { index: idx }),
+        54 => nearest_being(safe_pos, world).map(|idx| GodAction::CurseIsolation { index: idx }),
         55 => Some(GodAction::CursePlague { region }),
-        56 => nearest_being(cursor, world).map(|idx| GodAction::CurseAging { index: idx, years: 3 }),
-        57 => nearest_being(cursor, world).map(|idx| GodAction::CurseHunger { index: idx }),
+        56 => nearest_being(safe_pos, world).map(|idx| GodAction::CurseAging { index: idx, years: 3 }),
+        57 => nearest_being(safe_pos, world).map(|idx| GodAction::CurseHunger { index: idx }),
         58 => Some(GodAction::InduceRage { region }),
-        59 => nearest_being(cursor, world).map(|idx| GodAction::MarkHostile {
+        59 => nearest_being(safe_pos, world).map(|idx| GodAction::MarkHostile {
             target: idx,
             radius: brush_radius(state.brush_size),
             anger: 0.7,
@@ -234,12 +243,12 @@ fn build_action(
         }),
         60 => {
             // Clear memory: all beings in region
-            let indices = beings_in_region(cursor, state.brush_size, world);
+            let indices = beings_in_region(safe_pos, state.brush_size, world);
             if !indices.is_empty() { Some(GodAction::ClearMemory { indices }) } else { None }
         }
         61 => {
             // Modify personality: shift bold trait for beings in region
-            let indices = beings_in_region(cursor, state.brush_size, world);
+            let indices = beings_in_region(safe_pos, state.brush_size, world);
             if !indices.is_empty() {
                 Some(GodAction::ModifyPersonality { indices, trait_idx: 0, delta: 0.3, duration: 0 })
             } else {
@@ -250,13 +259,13 @@ fn build_action(
         // ── Kingdom ───────────────────────────────────────────────────────────
         62 => {
             // ForceAlliance: two-region click. First click = group A, second = group B
-            build_two_group_action(state, cursor, world, true)
+            build_two_group_action(state, safe_pos, world, true)
         }
-        63 => build_two_group_action(state, cursor, world, false),
+        63 => build_two_group_action(state, safe_pos, world, false),
         64 => Some(GodAction::Revolution { region }),
         65 => {
             // Teleport: first click selects being, second click moves
-            let nearest = nearest_being(cursor, world);
+            let nearest = nearest_being(safe_pos, world);
             if let Some(being_idx) = nearest {
                 match state.teleport_src {
                     None => {
@@ -265,25 +274,24 @@ fn build_action(
                     }
                     Some(src) => {
                         state.teleport_src = None;
-                        Some(GodAction::TeleportBeing { index: src, target: cursor })
+                        Some(GodAction::TeleportBeing { index: src, target: safe_pos })
                     }
                 }
-            } else if state.teleport_src.is_some() {
+            } else if let Some(src) = state.teleport_src.take() {
                 // Second click on empty space = destination
-                let src = state.teleport_src.take().unwrap();
-                Some(GodAction::TeleportBeing { index: src, target: cursor })
+                Some(GodAction::TeleportBeing { index: src, target: safe_pos })
             } else {
                 None
             }
         }
-        66 => nearest_being(cursor, world).map(|idx| GodAction::Exile {
+        66 => nearest_being(safe_pos, world).map(|idx| GodAction::Exile {
             index: idx,
             dest: [world.config.size.0 as f32 * 0.9, world.config.size.1 as f32 * 0.1],
         }),
-        67 => nearest_being(cursor, world).map(|idx| GodAction::AppointLeader { index: idx }),
+        67 => nearest_being(safe_pos, world).map(|idx| GodAction::AppointLeader { index: idx }),
         68 => {
             // MergeSettlements: two-click
-            let nearest = nearest_being(cursor, world);
+            let nearest = nearest_being(safe_pos, world);
             if let Some(being_idx) = nearest {
                 match state.selection.a {
                     None => { state.selection.a = Some(being_idx); None }
@@ -295,14 +303,14 @@ fn build_action(
             } else { None }
         }
         69 => {
-            let a_group = beings_in_region(cursor, state.brush_size, world);
+            let a_group = beings_in_region(safe_pos, state.brush_size, world);
             if a_group.is_empty() { return None; }
             // Inspire trade within the region itself (single click variant)
             Some(GodAction::BoostLoyalty { region, amount: 0.3 })
         }
         70 => Some(GodAction::BoostLoyalty { region, amount: 0.4 }),
         71 => {
-            let a_group = beings_in_region(cursor, state.brush_size, world);
+            let a_group = beings_in_region(safe_pos, state.brush_size, world);
             if a_group.is_empty() { return None; }
             Some(GodAction::ModifyImpressions {
                 a_group: a_group.clone(),
@@ -416,14 +424,13 @@ fn build_two_group_action(
             state.selection.a = Some(group[0]); // store representative
             None
         }
-        Some(_) => {
-            let a_group = beings_in_region(
-                // cursor of first click — we don't store it, so use a single rep
-                [world.beings.hot.positions[state.selection.a.unwrap()][0],
-                 world.beings.hot.positions[state.selection.a.unwrap()][1]],
-                state.brush_size,
-                world,
-            );
+        Some(rep_idx) => {
+            let rep_pos = if rep_idx < world.beings.hot.count {
+                world.beings.hot.positions[rep_idx]
+            } else {
+                cursor
+            };
+            let a_group = beings_in_region(rep_pos, state.brush_size, world);
             state.selection.a = None;
             if alliance {
                 Some(GodAction::ForceAlliance { a_group, b_group: group })

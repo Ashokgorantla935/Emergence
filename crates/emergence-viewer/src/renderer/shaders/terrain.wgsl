@@ -386,31 +386,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 1.0,
             );
 
-            // --- Decoration overlay at LOD 1 (medium zoom, sparse dots) ---
-            let cell = floor(in.world_pos);
-            let h  = fract(sin(dot(cell, vec2<f32>(12.9898, 78.233))) * 43758.5453);
-            let h2 = fract(sin(dot(cell, vec2<f32>(63.7264, 10.873))) * 43758.5453);
-            let cell_frac = fract(in.world_pos) - vec2<f32>(0.5, 0.5);
-            let dist = length(cell_frac);
-
-            // Forest: tree dot (dark green)
-            if (biome_id == 2u && h < 0.33 && dist < 0.18) {
-                let green = 0.22 + h2 * 0.12;
-                color = mix(color, vec4<f32>(0.08, green, 0.04, 1.0), 0.75);
-            }
-            // Mountain: rock dot (grey)
-            if (biome_id == 4u && h < 0.18 && dist < 0.16) {
-                let grey = 0.38 + h2 * 0.18;
-                color = mix(color, vec4<f32>(grey, grey, grey * 0.94, 1.0), 0.55);
-            }
-            // Desert: cactus dot (muted green)
-            if (biome_id == 3u && h < 0.10 && dist < 0.10) {
-                color = mix(color, vec4<f32>(0.22, 0.46, 0.14, 1.0), 0.65);
-            }
-            // Snow: white sparkle dot
-            if (biome_id == 6u && h < 0.25 && dist < 0.12) {
-                color = mix(color, vec4<f32>(1.0, 1.0, 1.0, 1.0), 0.65);
-            }
+            // Atlas tile sampling for land decoration
+            let tex_color = textureSample(t_atlas, s_atlas, in.atlas_uv);
+            color = mix(color, tex_color, tex_color.a);
         }
         color = apply_structure(color, structure_id, in.world_pos, t, 1u);
         return apply_illumination(color, illumination, comfort);
@@ -438,8 +416,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             color = mix(color, vec4<f32>(0.92, 0.96, 1.0, 1.0), clamp(foam_mix, 0.0, 0.85));
         }
     } else {
-        // Land: solid biome color + signal tinting + decorations — NO atlas sampling
-
         // Signal tinting
         let d = clamp(water_time.signal_danger,  0.0, 1.0);
         let c = clamp(water_time.signal_comfort, 0.0, 1.0);
@@ -451,168 +427,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             1.0,
         );
 
-        // --- Decoration overlay at LOD 2 (close zoom, full detail) ---
-        // Deterministic hash per cell — no flicker
-        let cell = floor(in.world_pos);
-        let h  = fract(sin(dot(cell, vec2<f32>(12.9898, 78.233))) * 43758.5453);
-        let h2 = fract(sin(dot(cell, vec2<f32>(63.7264, 10.873))) * 43758.5453);
-
-        // Forest: multi-layer canopy (biome_id == 2)
-        if (biome_id == 2u && h < 0.40) {
-            let offset = vec2<f32>(0.3 + h2 * 0.4, 0.3 + h * 0.4);
-            let cell_frac = fract(in.world_pos) - offset;
-            let dist = length(cell_frac);
-            // Ground shadow
-            if (dist < 0.40) {
-                color = mix(color, vec4<f32>(0.06, 0.18, 0.03, 1.0), 0.15);
-            }
-            // Outer canopy
-            if (dist < 0.35) {
-                let green = 0.38 + h2 * 0.12;
-                color = mix(color, vec4<f32>(0.08, green, 0.05, 1.0), 0.80);
-            }
-            // Inner canopy highlight
-            if (dist < 0.18) {
-                let light_green = 0.55 + h2 * 0.15;
-                color = mix(color, vec4<f32>(0.18, light_green, 0.10, 1.0), 0.55);
-            }
-            // Trunk center
-            if (dist < 0.06) {
-                color = mix(color, vec4<f32>(0.36, 0.22, 0.08, 1.0), 0.90);
-            }
-        }
-
-        // Grassland: varied ground cover (biome_id == 0)
-        if (biome_id == 0u) {
-            // Tall grass tuft
-            if (h < 0.25) {
-                let gx = 0.5 + h2 * 0.3 - 0.15;
-                let cell_frac_g = fract(in.world_pos) - vec2<f32>(gx, 0.5);
-                if (abs(cell_frac_g.x) < 0.04 && cell_frac_g.y > -0.25 && cell_frac_g.y < 0.20) {
-                    color = mix(color, vec4<f32>(0.28, 0.52, 0.08, 1.0), 0.72);
-                }
-            }
-            // Small flower (h in 0.70-0.78)
-            if (h > 0.70 && h < 0.78) {
-                let cell_frac_f = fract(in.world_pos) - vec2<f32>(0.5 + h2 * 0.3 - 0.15, 0.5 + h * 0.2 - 0.1);
-                let dist_f = length(cell_frac_f);
-                if (dist_f < 0.10) {
-                    // Pink/yellow/white based on h2
-                    var flower_color: vec4<f32>;
-                    if (h2 < 0.33) {
-                        flower_color = vec4<f32>(0.98, 0.60, 0.70, 1.0); // pink
-                    } else if (h2 < 0.66) {
-                        flower_color = vec4<f32>(0.98, 0.90, 0.30, 1.0); // yellow
-                    } else {
-                        flower_color = vec4<f32>(0.95, 0.95, 0.95, 1.0); // white
-                    }
-                    color = mix(color, flower_color, 0.80);
-                }
-            }
-            // Berry bush (h > 0.90)
-            if (h > 0.90) {
-                let cell_frac_b = fract(in.world_pos) - vec2<f32>(0.5 + h2 * 0.2 - 0.1, 0.5);
-                let dist_b = length(cell_frac_b);
-                if (dist_b < 0.20) {
-                    color = mix(color, vec4<f32>(0.12, 0.30, 0.06, 1.0), 0.75); // dark green bush
-                }
-                // Red berries: small dots offset from center
-                let berry1 = fract(in.world_pos) - vec2<f32>(0.5 + h2 * 0.2 - 0.1 + 0.08, 0.5 + 0.06);
-                let berry2 = fract(in.world_pos) - vec2<f32>(0.5 + h2 * 0.2 - 0.1 - 0.07, 0.5 - 0.05);
-                if (length(berry1) < 0.05 || length(berry2) < 0.05) {
-                    color = mix(color, vec4<f32>(0.85, 0.10, 0.10, 1.0), 0.90);
-                }
-            }
-        }
-
-        // Wetland: reed tuft (dark yellow-green vertical smear)
-        if (biome_id == 5u && h < 0.20) {
-            let cell_frac = fract(in.world_pos) - vec2<f32>(0.5 + h2 * 0.2 - 0.1, 0.5);
-            if (abs(cell_frac.x) < 0.05 && cell_frac.y > -0.22 && cell_frac.y < 0.22) {
-                color = mix(color, vec4<f32>(0.30, 0.42, 0.08, 1.0), 0.75);
-            }
-        }
-
-        // Desert: dune shading + dead shrub + cactus (biome_id == 3)
-        if (biome_id == 3u) {
-            // Dune wave shading
-            let dune_wave = sin(in.world_pos.x * 0.8 + in.world_pos.y * 0.3) * 0.03;
-            color = vec4<f32>(
-                clamp(color.r + dune_wave, 0.0, 1.0),
-                clamp(color.g + dune_wave * 0.8, 0.0, 1.0),
-                clamp(color.b, 0.0, 1.0),
-                1.0,
-            );
-            // Dead shrub (h in 0.85-0.92)
-            if (h > 0.85 && h < 0.92) {
-                let sx = 0.5 + h2 * 0.2 - 0.1;
-                let shrub_frac = fract(in.world_pos) - vec2<f32>(sx, 0.5);
-                // Vertical stick
-                if (abs(shrub_frac.x) < 0.03 && shrub_frac.y > -0.18 && shrub_frac.y < 0.15) {
-                    color = mix(color, vec4<f32>(0.42, 0.28, 0.10, 1.0), 0.80);
-                }
-                // Branch dots
-                let b1 = fract(in.world_pos) - vec2<f32>(sx + 0.08, 0.5 + 0.05);
-                let b2 = fract(in.world_pos) - vec2<f32>(sx - 0.09, 0.5 + 0.02);
-                let b3 = fract(in.world_pos) - vec2<f32>(sx + 0.05, 0.5 - 0.06);
-                if (length(b1) < 0.03 || length(b2) < 0.03 || length(b3) < 0.03) {
-                    color = mix(color, vec4<f32>(0.42, 0.28, 0.10, 1.0), 0.80);
-                }
-            }
-            // Cactus — vertical green bar with arms
-            if (h < 0.08) {
-                let cx = 0.5 + h2 * 0.2 - 0.1;
-                let cell_frac = fract(in.world_pos) - vec2<f32>(cx, 0.4 + h2 * 0.2);
-                // Trunk
-                if (abs(cell_frac.x) < 0.06 && cell_frac.y > -0.20 && cell_frac.y < 0.20) {
-                    color = mix(color, vec4<f32>(0.2, 0.5, 0.15, 1.0), 0.80);
-                }
-                // Left arm
-                if (cell_frac.x > -0.18 && cell_frac.x < -0.06 && abs(cell_frac.y + 0.05) < 0.05) {
-                    color = mix(color, vec4<f32>(0.2, 0.5, 0.15, 1.0), 0.80);
-                }
-                // Right arm
-                if (cell_frac.x > 0.06 && cell_frac.x < 0.18 && abs(cell_frac.y - 0.05) < 0.05) {
-                    color = mix(color, vec4<f32>(0.2, 0.5, 0.15, 1.0), 0.80);
-                }
-            }
-        }
-
-        // Mountain: boulders + snow cap + small rubble (biome_id == 4)
-        if (biome_id == 4u) {
-            // Large boulder (h < 0.15)
-            if (h < 0.15) {
-                let cell_frac = fract(in.world_pos) - vec2<f32>(0.5, 0.5);
-                let dist = length(cell_frac);
-                if (dist < 0.25) {
-                    let grey = 0.42 + h2 * 0.18;
-                    color = mix(color, vec4<f32>(grey, grey, grey * 0.95, 1.0), 0.75);
-                    // Snow cap if elevation > 0.8
-                    if (in.elevation > 0.8 && cell_frac.y > 0.06) {
-                        color = mix(color, vec4<f32>(0.93, 0.95, 1.0, 1.0), 0.80);
-                    }
-                }
-            }
-            // Small rubble (h in 0.50-0.70)
-            if (h > 0.50 && h < 0.70) {
-                let rx = 0.5 + h2 * 0.5 - 0.25;
-                let ry = 0.5 + fract(h * 7.3) * 0.5 - 0.25;
-                let rubble_frac = fract(in.world_pos) - vec2<f32>(rx, ry);
-                if (length(rubble_frac) < 0.06) {
-                    let rg = 0.38 + h2 * 0.20;
-                    color = mix(color, vec4<f32>(rg, rg, rg * 0.92, 1.0), 0.65);
-                }
-            }
-        }
-
-        // Snow: snowflake dot (near-white sparkle)
-        if (biome_id == 6u && h < 0.18) {
-            let cell_frac = fract(in.world_pos) - vec2<f32>(0.5, 0.5);
-            let dist = length(cell_frac);
-            if (dist < 0.12) {
-                color = mix(color, vec4<f32>(1.0, 1.0, 1.0, 1.0), 0.70);
-            }
-        }
+        // Atlas tile sampling replaces all procedural decoration
+        let tex_color = textureSample(t_atlas, s_atlas, in.atlas_uv);
+        color = mix(color, tex_color, tex_color.a);
     }
 
     color = apply_structure(color, structure_id, in.world_pos, t, 2u);

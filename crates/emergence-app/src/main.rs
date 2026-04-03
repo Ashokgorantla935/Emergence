@@ -920,6 +920,15 @@ impl ApplicationHandler for App {
             self.last_fps_time = now;
         }
 
+        // --- Cinematic auto-pan during LaunchOverlay ---
+        if self.screen == ScreenState::LaunchOverlay {
+            let pan_speed = 25.0_f32; // world units per second
+            self.camera.position[0] += pan_speed * dt;
+            if self.camera.position[0] > self.camera.world_width {
+                self.camera.position[0] = 0.0;
+            }
+        }
+
         // --- Tick simulation (while Playing or LaunchOverlay background world) ---
         let sim_t = Instant::now();
         if self.screen == ScreenState::Playing || self.screen == ScreenState::LaunchOverlay {

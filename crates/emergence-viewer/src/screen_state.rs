@@ -209,47 +209,51 @@ impl MainMenuUi {
     pub fn show(&mut self, ctx: &egui::Context) {
         self.action = MainMenuAction::None;
 
-        // Transparent overlay (no CentralPanel — world is visible behind)
         egui::Area::new(egui::Id::new("main_menu_overlay"))
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(80.0);
+                egui::Frame::default()
+                    .fill(egui::Color32::from_black_alpha(140))
+                    .corner_radius(egui::CornerRadius::same(16))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(30)))
+                    .inner_margin(egui::Margin::symmetric(48, 48))
+                    .show(ui, |ui| {
+                        ui.set_width(360.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(
+                                egui::RichText::new("EMERGENCE")
+                                    .size(56.0)
+                                    .strong()
+                                    .color(egui::Color32::from_rgb(255, 200, 60)),
+                            );
+                            ui.add_space(8.0);
+                            ui.label(
+                                egui::RichText::new("A World of Emergent Intelligence")
+                                    .size(14.0)
+                                    .italics()
+                                    .color(egui::Color32::from_rgb(130, 160, 200)),
+                            );
+                            ui.add_space(48.0);
 
-                    ui.heading(
-                        egui::RichText::new("EMERGENCE")
-                            .size(48.0)
-                            .strong(),
-                    );
-                    ui.add_space(8.0);
-                    ui.label(
-                        egui::RichText::new("A world of emergent intelligence")
-                            .size(16.0)
-                            .italics()
-                            .color(egui::Color32::from_rgb(150, 180, 220)),
-                    );
-
-                    ui.add_space(60.0);
-
-                    let btn_size = egui::vec2(200.0, 40.0);
-
-                    if ui.add_sized(btn_size, egui::Button::new("New Game")).clicked() {
-                        self.action = MainMenuAction::NewGame;
-                    }
-                    ui.add_space(8.0);
-                    if ui.add_sized(btn_size, egui::Button::new("Load Game")).clicked() {
-                        self.action = MainMenuAction::LoadGame;
-                    }
-                    ui.add_space(8.0);
-                    if ui.add_sized(btn_size, egui::Button::new("Settings")).clicked() {
-                        self.action = MainMenuAction::Settings;
-                    }
-                    ui.add_space(8.0);
-                    if ui.add_sized(btn_size, egui::Button::new("Quit")).clicked() {
-                        self.action = MainMenuAction::Quit;
-                    }
-                });
+                            let btn_size = egui::vec2(280.0, 48.0);
+                            if ui.add_sized(btn_size, egui::Button::new(egui::RichText::new("New Game").size(16.0))).clicked() {
+                                self.action = MainMenuAction::NewGame;
+                            }
+                            ui.add_space(12.0);
+                            if ui.add_sized(btn_size, egui::Button::new(egui::RichText::new("Load Game").size(16.0))).clicked() {
+                                self.action = MainMenuAction::LoadGame;
+                            }
+                            ui.add_space(12.0);
+                            if ui.add_sized(btn_size, egui::Button::new(egui::RichText::new("Settings").size(16.0))).clicked() {
+                                self.action = MainMenuAction::Settings;
+                            }
+                            ui.add_space(12.0);
+                            if ui.add_sized(btn_size, egui::Button::new(egui::RichText::new("Quit").size(16.0))).clicked() {
+                                self.action = MainMenuAction::Quit;
+                            }
+                        });
+                    });
             });
     }
 }
@@ -328,154 +332,206 @@ impl ScenarioSelectUi {
     pub fn show(&mut self, ctx: &egui::Context) {
         self.action = ScenarioSelectAction::None;
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space(20.0);
-                ui.heading("Choose a Scenario");
-                ui.add_space(20.0);
-            });
+        egui::Area::new(egui::Id::new("scenario_select_overlay"))
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::default()
+                    .fill(egui::Color32::from_black_alpha(150))
+                    .corner_radius(egui::CornerRadius::same(16))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(30)))
+                    .inner_margin(egui::Margin::symmetric(32, 28))
+                    .show(ui, |ui| {
+                        ui.set_width(820.0);
 
-            // Split into left (scenario list) and right (config + map) panels.
-            ui.columns(2, |cols| {
-                let left = &mut cols[0];
-
-                // Left panel: scenario list
-                egui::ScrollArea::vertical()
-                    .id_salt("scenario_list")
-                    .max_height(500.0)
-                    .show(left, |ui| {
-                        for &id in &ScenarioId::ALL {
-                            let label = if id.is_default() {
-                                format!("{} [default]", id.name())
-                            } else {
-                                id.name().to_string()
-                            };
-                            if ui
-                                .selectable_label(self.selected == id, label)
-                                .clicked()
-                            {
-                                self.selected = id;
-                                // Reset map picker to scenario default.
-                                self.map_picker = MapPickerState::new_for_scenario(id);
-                            }
-                        }
-                    });
-
-                let right = &mut cols[1];
-
-                // Right panel: scenario description, stats, map picker, launch.
-                egui::ScrollArea::vertical()
-                    .id_salt("scenario_right")
-                    .show(right, |ui| {
-                        ui.add_space(8.0);
-                        ui.heading(self.selected.name());
-                        ui.add_space(4.0);
-                        ui.label(self.selected.description());
-
-                        ui.add_space(8.0);
-                        let cfg = ScenarioConfig::new(self.selected);
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "Seasons: {}  |  Day/Night: {}",
-                                if cfg.world.seasons { "on" } else { "off" },
-                                if cfg.world.day_night { "on" } else { "off" },
-                            ))
-                            .weak()
-                            .size(11.0),
-                        );
-
-                        ui.add_space(10.0);
-                        ui.separator();
-                        ui.add_space(6.0);
-
-                        // Population slider
-                        ui.horizontal(|ui| {
-                            ui.label("Population:");
-                            let mut pop = self.population as f32;
-                            if ui.add(
-                                egui::Slider::new(&mut pop, 1.0..=50.0)
-                                    .step_by(1.0)
-                                    .fixed_decimals(0),
-                            ).changed() {
-                                self.population = pop as u32;
-                            }
+                        // Header
+                        ui.vertical_centered(|ui| {
+                            ui.label(
+                                egui::RichText::new("Choose Your World")
+                                    .size(28.0)
+                                    .strong()
+                                    .color(egui::Color32::from_rgb(220, 200, 150)),
+                            );
+                            ui.add_space(4.0);
+                            ui.label(
+                                egui::RichText::new("Select a scenario to begin your emergence")
+                                    .size(13.0)
+                                    .italics()
+                                    .color(egui::Color32::from_rgb(130, 155, 190)),
+                            );
                         });
+                        ui.add_space(20.0);
 
-                        ui.add_space(4.0);
+                        // Two-column: scenario cards (left) | config panel (right)
+                        ui.columns(2, |cols| {
+                            let left = &mut cols[0];
 
-                        // Fauna density row
-                        ui.horizontal(|ui| {
-                            ui.label("Fauna density:");
-                            for density in [FaunaDensity::Low, FaunaDensity::Medium, FaunaDensity::High] {
-                                if ui.selectable_label(self.fauna_density == density, density.label()).clicked() {
-                                    self.fauna_density = density;
-                                }
-                            }
+                            // 3-column card grid
+                            egui::Grid::new("scenario_card_grid")
+                                .num_columns(3)
+                                .spacing(egui::vec2(10.0, 10.0))
+                                .show(left, |ui| {
+                                    for (i, &id) in ScenarioId::ALL.iter().enumerate() {
+                                        let is_selected = self.selected == id;
+
+                                        let bg = if is_selected {
+                                            egui::Color32::from_rgba_premultiplied(40, 70, 140, 210)
+                                        } else {
+                                            egui::Color32::from_rgba_premultiplied(30, 35, 52, 185)
+                                        };
+                                        let border = if is_selected {
+                                            egui::Stroke::new(2.0, egui::Color32::from_rgb(80, 140, 255))
+                                        } else {
+                                            egui::Stroke::new(1.0, egui::Color32::from_white_alpha(22))
+                                        };
+
+                                        let card_resp = egui::Frame::default()
+                                            .fill(bg)
+                                            .stroke(border)
+                                            .corner_radius(egui::CornerRadius::same(10))
+                                            .inner_margin(egui::Margin::symmetric(12, 10))
+                                            .show(ui, |ui| {
+                                                ui.set_width(165.0);
+                                                ui.set_min_height(84.0);
+                                                ui.label(
+                                                    egui::RichText::new(id.name())
+                                                        .size(14.0)
+                                                        .strong()
+                                                        .color(egui::Color32::from_rgb(220, 210, 180)),
+                                                );
+                                                ui.add_space(4.0);
+                                                ui.label(
+                                                    egui::RichText::new(id.description())
+                                                        .size(10.0)
+                                                        .color(egui::Color32::from_gray(160))
+                                                        .italics(),
+                                                );
+                                            });
+
+                                        if card_resp.response.interact(egui::Sense::click()).clicked() {
+                                            self.selected = id;
+                                            self.map_picker = MapPickerState::new_for_scenario(id);
+                                        }
+
+                                        if (i + 1) % 3 == 0 {
+                                            ui.end_row();
+                                        }
+                                    }
+                                });
+
+                            // Right panel: config + launch
+                            let right = &mut cols[1];
+                            egui::ScrollArea::vertical()
+                                .id_salt("scenario_right")
+                                .max_height(520.0)
+                                .show(right, |ui| {
+                                    ui.label(
+                                        egui::RichText::new(self.selected.name())
+                                            .size(20.0)
+                                            .strong()
+                                            .color(egui::Color32::from_rgb(220, 200, 150)),
+                                    );
+                                    ui.add_space(4.0);
+                                    ui.label(
+                                        egui::RichText::new(self.selected.description())
+                                            .size(12.0)
+                                            .color(egui::Color32::from_gray(185)),
+                                    );
+
+                                    ui.add_space(8.0);
+                                    let cfg = ScenarioConfig::new(self.selected);
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "Seasons: {}  |  Day/Night: {}",
+                                            if cfg.world.seasons { "on" } else { "off" },
+                                            if cfg.world.day_night { "on" } else { "off" },
+                                        ))
+                                        .size(11.0)
+                                        .color(egui::Color32::from_gray(140)),
+                                    );
+
+                                    ui.add_space(12.0);
+                                    ui.separator();
+                                    ui.add_space(8.0);
+
+                                    // Population slider
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new("Population:").size(12.0));
+                                        let mut pop = self.population as f32;
+                                        if ui.add(
+                                            egui::Slider::new(&mut pop, 1.0..=50.0)
+                                                .step_by(1.0)
+                                                .fixed_decimals(0),
+                                        ).changed() {
+                                            self.population = pop as u32;
+                                        }
+                                    });
+
+                                    ui.add_space(8.0);
+
+                                    // Fauna density — styled toggle buttons
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new("Fauna:").size(12.0));
+                                        for density in [FaunaDensity::Low, FaunaDensity::Medium, FaunaDensity::High] {
+                                            let selected = self.fauna_density == density;
+                                            let btn = egui::Button::new(
+                                                egui::RichText::new(density.label()).size(12.0)
+                                            );
+                                            let btn = if selected {
+                                                btn.fill(egui::Color32::from_rgba_premultiplied(50, 90, 180, 220))
+                                                   .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(80, 130, 240)))
+                                            } else {
+                                                btn
+                                            };
+                                            if ui.add(btn).clicked() {
+                                                self.fauna_density = density;
+                                            }
+                                        }
+                                    });
+
+                                    ui.add_space(10.0);
+                                    ui.separator();
+
+                                    // Map picker
+                                    let _changed = draw_map_picker(
+                                        ui,
+                                        ctx,
+                                        &mut self.map_picker,
+                                        &self.thumbnails,
+                                    );
+
+                                    ui.add_space(14.0);
+
+                                    // Launch button
+                                    if ui
+                                        .add_sized(
+                                            egui::vec2(220.0, 48.0),
+                                            egui::Button::new(
+                                                egui::RichText::new("Launch World")
+                                                    .strong()
+                                                    .size(18.0)
+                                                    .color(egui::Color32::BLACK),
+                                            )
+                                            .fill(egui::Color32::from_rgb(210, 185, 100))
+                                            .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(180, 150, 60))),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.action = ScenarioSelectAction::Start {
+                                            id: self.selected,
+                                            map: self.map_picker.selected.clone(),
+                                            population: self.population,
+                                            fauna_density: self.fauna_density,
+                                        };
+                                    }
+                                    ui.add_space(8.0);
+                                    if ui.add_sized(egui::vec2(220.0, 36.0), egui::Button::new("Back")).clicked() {
+                                        self.action = ScenarioSelectAction::Back;
+                                    }
+                                });
                         });
-
-                        ui.add_space(10.0);
-                        ui.separator();
-
-                        // Map picker — needs a clone of ctx for texture upload.
-                        // We pass the egui Context reference for load_texture calls.
-                        let _changed = draw_map_picker(
-                            ui,
-                            ctx,
-                            &mut self.map_picker,
-                            &self.thumbnails,
-                        );
-
-                        ui.add_space(12.0);
-                        ui.separator();
-                        ui.add_space(6.0);
-
-                        // Tips
-                        ui.label(
-                            egui::RichText::new("Tip: Use God Tools to guide your people.")
-                                .weak()
-                                .italics()
-                                .size(11.0),
-                        );
-                        ui.label(
-                            egui::RichText::new("Press ? in-game for controls.")
-                                .weak()
-                                .italics()
-                                .size(11.0),
-                        );
-
-                        ui.add_space(12.0);
-
-                        if ui
-                            .add_sized(
-                                egui::vec2(160.0, 42.0),
-                                egui::Button::new(
-                                    egui::RichText::new("Start World")
-                                        .strong()
-                                        .size(16.0)
-                                        .color(egui::Color32::BLACK),
-                                )
-                                .fill(egui::Color32::GOLD)
-                                .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(200, 160, 0))),
-                            )
-                            .clicked()
-                        {
-                            self.action = ScenarioSelectAction::Start {
-                                id: self.selected,
-                                map: self.map_picker.selected.clone(),
-                                population: self.population,
-                                fauna_density: self.fauna_density,
-                            };
-                        }
-                        ui.add_space(8.0);
-                        if ui
-                            .add_sized(egui::vec2(160.0, 36.0), egui::Button::new("Back"))
-                            .clicked()
-                        {
-                            self.action = ScenarioSelectAction::Back;
-                        }
                     });
             });
-        });
     }
 }
 

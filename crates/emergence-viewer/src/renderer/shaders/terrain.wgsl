@@ -95,10 +95,17 @@ fn biome_base_color(biome_id: u32) -> vec4<f32> {
 }
 
 // Per-cell brightness variation using cell coords (stable, not per-pixel).
+// Uses integer bitwise hashing (Wang-style) to avoid f32 sin() precision loss
+// at large world coordinates (>2048). sin-based hashes collapse at large inputs
+// because GPU f32 argument reduction loses precision, making all cells uniform.
 fn cell_brightness(world_pos: vec2<f32>) -> f32 {
-    let p = floor(world_pos);
-    let h = fract(sin(dot(p, vec2<f32>(12.9898, 78.233))) * 43758.5453);
-    return 0.97 + h * 0.06; // [0.97, 1.03] — +/- 3% per cell
+    let p = vec2<u32>(u32(i32(floor(world_pos.x))), u32(i32(floor(world_pos.y))));
+    var h: u32 = p.x * 2654435761u ^ p.y * 2246822519u;
+    h = (h >> 16u) ^ h;
+    h = h * 2654435761u;
+    h = (h >> 16u) ^ h;
+    let hf = f32(h & 0xFFFFu) / 65535.0;
+    return 0.97 + hf * 0.06; // [0.97, 1.03] — +/- 3% per cell
 }
 
 // Water depth color based on elevation (water threshold ~0.25-0.30 in terrain gen).

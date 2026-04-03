@@ -521,6 +521,7 @@ fn dominant_biome_for_map(id: MapId) -> emergence_core::world::terrain::Biome {
         MapId::FractalContinent => Biome::Forest,
         MapId::Crucible => Biome::Grassland,
         MapId::TwinPeaks => Biome::Mountain,
+        MapId::RealEarth => Biome::Grassland,
     }
 }
 

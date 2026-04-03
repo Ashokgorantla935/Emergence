@@ -399,6 +399,7 @@ fn map_size_label(sz: MapSize) -> &'static str {
         MapSize::Large => "512",
         MapSize::Epic  => "1024",
         MapSize::Huge  => "2048",
+        MapSize::Colossal => "4096",
     }
 }
 

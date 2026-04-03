@@ -681,72 +681,71 @@ pub struct PerfStats {
 pub struct TopBar;
 
 impl TopBar {
-    /// Draw the top bar. Returns true if ESC/pause was toggled via the UI.
+    /// Draw the top-right HUD overlay. Returns true if ESC/pause was toggled via the UI.
     pub fn show(ctx: &egui::Context, controls: &mut SpeedControls, tick: u32, population: u32, perf: &PerfStats) -> bool {
         let esc_pressed = false;
 
-        egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                // Speed buttons
-                for &speed in &[
-                    SimSpeed::Paused,
-                    SimSpeed::Speed1x,
-                    SimSpeed::Speed2x,
-                    SimSpeed::Speed5x,
-                    SimSpeed::Speed10x,
-                    SimSpeed::Speed50x,
-                    SimSpeed::Speed100x,
-                    SimSpeed::Speed200x,
-                    SimSpeed::Speed500x,
-                ] {
-                    let active = controls.speed == speed;
-                    let label = if active {
-                        egui::RichText::new(speed.label()).color(egui::Color32::GOLD).strong()
-                    } else {
-                        egui::RichText::new(speed.label())
-                    };
-                    let btn = egui::Button::new(label)
-                        .fill(if active { egui::Color32::from_rgb(60, 50, 0) } else { egui::Color32::from_rgb(30, 30, 30) });
-                    if ui.add(btn).clicked() {
-                        controls.set_speed(speed);
-                    }
-                }
+        egui::Area::new(egui::Id::new("top_bar_area"))
+            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 8.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::none()
+                    .fill(egui::Color32::from_rgba_premultiplied(10, 10, 14, 160))
+                    .corner_radius(egui::CornerRadius::same(6))
+                    .inner_margin(egui::Margin::symmetric(8, 4))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            // Speed buttons
+                            for &speed in &[
+                                SimSpeed::Paused,
+                                SimSpeed::Speed1x,
+                                SimSpeed::Speed2x,
+                                SimSpeed::Speed5x,
+                                SimSpeed::Speed10x,
+                                SimSpeed::Speed50x,
+                                SimSpeed::Speed100x,
+                                SimSpeed::Speed200x,
+                                SimSpeed::Speed500x,
+                            ] {
+                                let active = controls.speed == speed;
+                                let label = if active {
+                                    egui::RichText::new(speed.label()).color(egui::Color32::GOLD).strong()
+                                } else {
+                                    egui::RichText::new(speed.label())
+                                };
+                                let btn = egui::Button::new(label)
+                                    .fill(if active { egui::Color32::from_rgb(60, 50, 0) } else { egui::Color32::from_rgb(30, 30, 30) });
+                                if ui.add(btn).clicked() {
+                                    controls.set_speed(speed);
+                                }
+                            }
 
-                ui.separator();
-                ui.label(format!("Tick: {tick}"));
-                ui.separator();
-                ui.colored_label(
-                    egui::Color32::from_rgb(100, 220, 100),
-                    format!("Pop: {population}"),
-                );
-                ui.separator();
-                ui.label("WASD:pan  Scroll:zoom  Esc:menu  S:stats  N:news  L:laws  1-8:speed");
+                            ui.separator();
+                            ui.label(format!("T:{tick}"));
+                            ui.separator();
+                            ui.colored_label(egui::Color32::from_rgb(100, 220, 100), format!("P:{population}"));
+                            ui.separator();
 
-                // Right-side performance stats
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // Mem
-                    ui.label(format!("Mem: {:.0}MB", perf.mem_mb));
-                    ui.separator();
-                    // TPS
-                    ui.label(format!("TPS: {}", perf.tps));
-                    ui.separator();
-                    // FPS
-                    let fps_color = if perf.fps < 30.0 {
-                        egui::Color32::from_rgb(220, 180, 60)
-                    } else {
-                        egui::Color32::from_rgb(100, 220, 100)
-                    };
-                    ui.colored_label(fps_color, format!("FPS: {:.0}", perf.fps));
-                    ui.separator();
-                    // GPU/CPU indicator
-                    if perf.gpu_managed {
-                        ui.colored_label(egui::Color32::from_rgb(80, 220, 80), "GPU");
-                    } else {
-                        ui.colored_label(egui::Color32::from_rgb(220, 80, 80), "CPU");
-                    }
-                });
+                            // GPU/CPU indicator
+                            if perf.gpu_managed {
+                                ui.colored_label(egui::Color32::from_rgb(80, 220, 80), "GPU");
+                            } else {
+                                ui.colored_label(egui::Color32::from_rgb(220, 80, 80), "CPU");
+                            }
+                            ui.separator();
+
+                            // FPS
+                            let fps_color = if perf.fps < 30.0 {
+                                egui::Color32::from_rgb(220, 180, 60)
+                            } else {
+                                egui::Color32::from_rgb(100, 220, 100)
+                            };
+                            ui.colored_label(fps_color, format!("FPS:{:.0}", perf.fps));
+                            ui.separator();
+                            ui.label(format!("TPS:{}", perf.tps));
+                        });
+                    });
             });
-        });
 
         esc_pressed
     }

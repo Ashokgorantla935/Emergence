@@ -25,7 +25,7 @@ use emergence_viewer::renderer::terrain::TerrainRenderer;
 use emergence_viewer::screen_state::{
     FaunaDensity, LaunchAction, LaunchOverlayUi, MainMenuAction, MainMenuUi, OnboardingTooltip,
     PauseMenuAction, PauseMenuUi, PerfStats, SaveSlotInfo, ScenarioSelectAction, ScenarioSelectUi,
-    ScreenState, SpeedControls, TopBar,
+    ScreenState, SpeedControls,
 };
 use emergence_viewer::god_tools::{GodToolState, CursorPreview, palette as god_palette};
 use emergence_viewer::renderer::post_process::ScreenShake;

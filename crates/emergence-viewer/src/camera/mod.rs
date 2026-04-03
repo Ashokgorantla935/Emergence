@@ -80,7 +80,12 @@ impl Camera {
                 } else {
                     // Two-finger swipe up/down = ZOOM in/out
                     self.target_zoom *= 1.0 - dy * 0.01;
-                    let max_zoom = self.world_height.max(self.world_width).max(512.0);
+                    // Max zoom: fit the full world on screen (whichever dimension is larger).
+                    // For 4096×2048 at aspect 1.6: max = max(2048, 4096/1.6) = 2560,
+                    // ensuring the world fills the screen instead of shrinking to a tiny box.
+                    let max_zoom = self.world_height
+                        .max(self.world_width / self.aspect.max(0.01))
+                        .max(512.0);
                     self.target_zoom = self.target_zoom.clamp(10.0, max_zoom);
                 }
                 true
@@ -88,7 +93,9 @@ impl Camera {
             WindowEvent::PinchGesture { delta, .. } => {
                 // Native Mac pinch-to-zoom: delta is fractional scale change
                 self.target_zoom *= 1.0 - *delta as f32;
-                let max_zoom = self.world_height.max(self.world_width).max(512.0);
+                let max_zoom = self.world_height
+                    .max(self.world_width / self.aspect.max(0.01))
+                    .max(512.0);
                 self.target_zoom = self.target_zoom.clamp(10.0, max_zoom);
                 true
             }

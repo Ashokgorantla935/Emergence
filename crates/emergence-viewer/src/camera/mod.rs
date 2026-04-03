@@ -186,8 +186,12 @@ impl Camera {
 
     /// Clamp camera so the viewport never shows outside world bounds.
     /// The viewport half-extents in world units are half_w = zoom/2 * aspect, half_h = zoom/2.
+    /// Uses self.zoom (not target_zoom) so clamping is accurate during zoom animation.
     /// When fully zoomed out (viewport larger than world), center on the world midpoint.
+    /// A small EDGE_MARGIN allows the camera to pan to (and 0.5 cells past) the world boundary,
+    /// preventing premature right/bottom walls and avoiding edge-tile render flickering.
     fn clamp_to_world(&mut self) {
+        const EDGE_MARGIN: f32 = 0.5;
         let half_h = self.zoom / 2.0;
         let half_w = half_h * self.aspect;
         if self.world_width > 0.0 {
@@ -195,7 +199,8 @@ impl Camera {
                 // Viewport wider than world — center horizontally
                 self.position[0] = self.world_width / 2.0;
             } else {
-                self.position[0] = self.position[0].clamp(half_w, self.world_width - half_w);
+                self.position[0] = self.position[0]
+                    .clamp(half_w - EDGE_MARGIN, self.world_width - half_w + EDGE_MARGIN);
             }
         }
         if self.world_height > 0.0 {
@@ -203,7 +208,8 @@ impl Camera {
                 // Viewport taller than world — center vertically
                 self.position[1] = self.world_height / 2.0;
             } else {
-                self.position[1] = self.position[1].clamp(half_h, self.world_height - half_h);
+                self.position[1] = self.position[1]
+                    .clamp(half_h - EDGE_MARGIN, self.world_height - half_h + EDGE_MARGIN);
             }
         }
     }

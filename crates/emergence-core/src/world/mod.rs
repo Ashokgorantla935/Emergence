@@ -8,4 +8,5 @@ pub mod map;
 pub mod map_assets;
 pub mod map_registry;
 pub mod terrain_gen;
+pub mod earth_gen;
 pub mod map_thumbnail;

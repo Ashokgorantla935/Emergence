@@ -10,16 +10,18 @@ pub enum MapId {
     FractalContinent,
     Crucible,
     TwinPeaks,
+    RealEarth,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MapSize {
-    Tiny,   // 64x64
-    Small,  // 128x128
-    Medium, // 256x256
-    Large,  // 512x512
-    Epic,   // 1024x1024
-    Huge,   // 2048x2048
+    Tiny,      // 64x64
+    Small,     // 128x128
+    Medium,    // 256x256
+    Large,     // 512x512
+    Epic,      // 1024x1024
+    Huge,      // 2048x2048
+    Colossal,  // 4096x2048 (Earth aspect ratio)
 }
 
 impl MapSize {
@@ -31,6 +33,7 @@ impl MapSize {
             MapSize::Large => (512, 512),
             MapSize::Epic => (1024, 1024),
             MapSize::Huge => (2048, 2048),
+            MapSize::Colossal => (4096, 2048),
         }
     }
 }
@@ -51,6 +54,7 @@ pub struct MapDefinition {
 pub enum ElevationSource {
     Baked { data: &'static [u8], width: u32, height: u32 },
     Procedural { params: ProceduralParams },
+    GeneratedEarth { width: u32, height: u32 },
     Blank,
 }
 

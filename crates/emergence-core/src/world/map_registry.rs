@@ -14,6 +14,7 @@ pub fn get(id: MapId) -> MapDefinition {
         MapId::FractalContinent => fractal_continent(),
         MapId::Crucible => crucible(),
         MapId::TwinPeaks => twin_peaks(),
+        MapId::RealEarth => real_earth(),
     }
 }
 
@@ -21,6 +22,7 @@ pub fn all_ids() -> &'static [MapId] {
     &[
         MapId::Earth,
         MapId::Pangaea,
+        MapId::RealEarth,
     ]
 }
 
@@ -270,6 +272,30 @@ fn twin_peaks() -> MapDefinition {
             SpawnPoint { name: "Valley Floor", center: (0.5, 0.5), radius: 20.0, fertility: 0.85 },
             SpawnPoint { name: "West Slope", center: (0.25, 0.5), radius: 12.0, fertility: 0.6 },
             SpawnPoint { name: "East Slope", center: (0.75, 0.5), radius: 12.0, fertility: 0.5 },
+        ],
+        resource_modifiers: ResourceModifiers::default(),
+    }
+}
+
+fn real_earth() -> MapDefinition {
+    MapDefinition {
+        id: "real_earth",
+        name: "Real Earth 4K",
+        description: "Procedural 4096×2048 Earth. Continents, poles, latitude biomes. Civilizations begin at historical river valleys.",
+        size: MapSize::Colossal,
+        difficulty_rating: 4,
+        elevation_source: ElevationSource::GeneratedEarth { width: 4096, height: 2048 },
+        biome_rules: BiomeRules::LatitudeDriven { equator_y: 0.5 },
+        water_placement: WaterPlacement::ElevationThreshold(0.30),
+        spawn_points: vec![
+            SpawnPoint { name: "Fertile Crescent", center: (2624.0, 675.0),  radius: 160.0, fertility: 2.0 },
+            SpawnPoint { name: "Nile Valley",       center: (2480.0, 756.0),  radius: 140.0, fertility: 2.5 },
+            SpawnPoint { name: "Indus Basin",       center: (2928.0, 700.0),  radius: 140.0, fertility: 2.0 },
+            SpawnPoint { name: "Yellow River",      center: (3360.0, 622.0),  radius: 140.0, fertility: 1.8 },
+            SpawnPoint { name: "Great Plains",      center: ( 960.0, 622.0),  radius: 200.0, fertility: 1.5 },
+            SpawnPoint { name: "Amazon Basin",      center: (1200.0, 868.0),  radius: 160.0, fertility: 1.8 },
+            SpawnPoint { name: "West Africa",       center: (2320.0, 880.0),  radius: 160.0, fertility: 1.6 },
+            SpawnPoint { name: "Ganges Plain",      center: (3040.0, 730.0),  radius: 130.0, fertility: 1.9 },
         ],
         resource_modifiers: ResourceModifiers::default(),
     }

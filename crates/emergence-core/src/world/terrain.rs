@@ -444,6 +444,9 @@ fn dispatch_elevation_source(
                 upsample_baked_elevation(data, *bw, *bh, w, h, fallback_seed as u32)
             }
         }
+        ElevationSource::GeneratedEarth { width: ew, height: eh } => {
+            super::earth_gen::generate_earth(*ew, *eh, fallback_seed)
+        }
         ElevationSource::Blank => {
             let len = (w * h) as usize;
             (vec![0.3f32; len], vec![0.5f32; len], vec![0.7f32; len])

@@ -161,9 +161,9 @@ pub struct ObjectInstance {
 
 /// Chunk grid constants
 const CHUNK_CELL_SIZE: u32 = 64;
-/// Max instances per chunk (64×64 = 4096 cells, but most are empty)
-const MAX_INSTANCES_PER_CHUNK: usize = 2048;
-/// Bytes per chunk instance buffer: 2048 × 48
+/// Max instances per chunk (64×64 = 4096 cells, one per cell worst-case)
+const MAX_INSTANCES_PER_CHUNK: usize = 4096;
+/// Bytes per chunk instance buffer: 4096 × 48
 const CHUNK_BUFFER_SIZE: u64 = (MAX_INSTANCES_PER_CHUNK * std::mem::size_of::<ObjectInstance>()) as u64;
 
 /// A single render chunk — owns its GPU instance buffer.
@@ -391,7 +391,7 @@ fn rebuild_chunk_standalone(
 ) {
     let w = terrain.width as usize;
     let h = terrain.height as usize;
-    let mut instances: Vec<ObjectInstance> = Vec::with_capacity(2048);
+    let mut instances: Vec<ObjectInstance> = Vec::with_capacity(MAX_INSTANCES_PER_CHUNK);
 
     let cell_x0 = (chunk.chunk_x * CHUNK_CELL_SIZE) as usize;
     let cell_y0 = (chunk.chunk_y * CHUNK_CELL_SIZE) as usize;
@@ -406,7 +406,7 @@ fn rebuild_chunk_standalone(
 
     for y in cell_y0..cell_y1 {
         for x in cell_x0..cell_x1 {
-            if instances.len() >= 2048 {
+            if instances.len() >= MAX_INSTANCES_PER_CHUNK {
                 break;
             }
             let idx = y * w + x;
@@ -553,11 +553,11 @@ fn rebuild_chunk_standalone(
                 _pad:       0.0,
             });
 
-            if instances.len() >= 2048 {
+            if instances.len() >= MAX_INSTANCES_PER_CHUNK {
                 break;
             }
         }
-        if instances.len() >= 2048 {
+        if instances.len() >= MAX_INSTANCES_PER_CHUNK {
             break;
         }
     }
@@ -590,7 +590,7 @@ fn rebuild_chunk_standalone(
             };
 
             for seed in 0..max_slots {
-                if decor_count >= MAX_DECORATIONS_PER_CHUNK || instances.len() >= 2048 {
+                if decor_count >= MAX_DECORATIONS_PER_CHUNK || instances.len() >= MAX_INSTANCES_PER_CHUNK {
                     break 'outer;
                 }
 

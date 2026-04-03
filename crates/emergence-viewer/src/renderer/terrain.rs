@@ -204,11 +204,18 @@ impl TerrainRenderer {
 
                 if chunk_needs_rebuild {
                     let mut instances = Vec::with_capacity(CHUNK_INSTANCES);
+                    // Chunk coords are always non-negative (computed from clamped x_min/y_min),
+                    // but guard against stale HashMap entries with out-of-range keys.
+                    if cx < 0 || cy < 0 { continue; }
                     let base_x = (cx as usize) * CHUNK_SIZE;
                     let base_y = (cy as usize) * CHUNK_SIZE;
+                    // Skip entirely OOB chunks (e.g. cx/cy beyond last valid chunk)
+                    if base_x >= w || base_y >= h { continue; }
 
                     for y in base_y..(base_y + CHUNK_SIZE).min(h) {
                         for x in base_x..(base_x + CHUNK_SIZE).min(w) {
+                            // Hard per-cell guard — prevents any stray vertex outside world bounds
+                            if x >= w || y >= h { continue; }
                             let idx = y * w + x;
                             let biome = terrain.biome[idx];
                             let hash = cell_hash(x, y);
@@ -248,14 +255,36 @@ impl TerrainRenderer {
                         }
                     }
 
+                    if instances.is_empty() {
+                        // Fully OOB chunk — mark clean with 0 count so it is skipped at draw time
+                        if let Some(chunk) = self.chunks.get_mut(&chunk_key) {
+                            chunk.instance_count = 0;
+                            chunk.is_dirty = false;
+                        }
+                        // Don't insert a zero-byte buffer for new chunks; leave absent so draw skips it
+                        continue;
+                    }
+
                     if let Some(chunk) = self.chunks.get_mut(&chunk_key) {
-                        queue.write_buffer(&chunk.instance_buffer, 0, bytemuck::cast_slice(&instances));
+                        // Only write if the new data fits in the existing buffer.
+                        // Edge chunks can shrink on resize; rebuild the buffer in that case.
+                        let new_bytes = std::mem::size_of::<TerrainInstance>() * instances.len();
+                        if new_bytes <= chunk.instance_buffer.size() as usize {
+                            queue.write_buffer(&chunk.instance_buffer, 0, bytemuck::cast_slice(&instances));
+                        } else {
+                            // Buffer too small (shouldn't happen for static world, but be safe)
+                            chunk.instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some(&format!("Terrain Chunk {},{}", cx, cy)),
+                                contents: bytemuck::cast_slice(&instances),
+                                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                            });
+                        }
                         chunk.instance_count = instances.len() as u32;
                         chunk.is_dirty = false;
                     } else {
                         // Create entirely new buffer
                         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some(&format!("Terrain Chunk _,_")),
+                            label: Some(&format!("Terrain Chunk {},{}", cx, cy)),
                             contents: bytemuck::cast_slice(&instances),
                             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                         });

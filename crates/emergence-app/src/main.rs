@@ -2472,24 +2472,10 @@ impl ApplicationHandler for App {
                     let expected_cells = (rs.signal_compute.width * rs.signal_compute.height) as usize;
                     let grid_cells = (world_w.signals.width * world_w.signals.height) as usize;
 
-                    if expected_cells != grid_cells {
-                        let cp = world_w.signals.channel_params();
-                        rs.reinit_signal_compute(
-                            world_w.signals.width,
-                            world_w.signals.height,
-                            &cp,
-                            world_w.memetic.width,
-                            world_w.memetic.height,
-                        );
-                        // Init climate compute pipeline alongside signal compute.
-                        rs.climate_compute = Some(
-                            emergence_viewer::renderer::climate_compute::ClimateComputePipeline::new(
-                                &rs.device,
-                                world_w.climate_grid.width,
-                                world_w.climate_grid.height,
-                            )
-                        );
-                    }
+                    // GPU compute disabled — CPU handles signal diffusion (1ms staggered).
+                    // Skip reinit to avoid Metal 256MB buffer limit crash on large maps.
+                    let _ = expected_cells;
+                    let _ = grid_cells;
                     // GPU signal compute disabled — CPU staggered diffusion (1 channel/tick, ~1ms)
                     // outperforms GPU path (22ms due to PCI-e sync stall + readback latency).
                     // world_w.signals.gpu_managed = true;

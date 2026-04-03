@@ -36,10 +36,29 @@ pub struct Atlas {
 impl Atlas {
     /// Load the 1024x1024 atlas from the embedded PNG, falling back to the procedural generator.
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
-        let pixels = Self::load_png_pixels().unwrap_or_else(|| {
-            eprintln!("[atlas] PNG decode failed — falling back to procedural generator");
-            generator::generate()
-        });
+        let pixels = match Self::load_png_pixels() {
+            Some(p) => {
+                eprintln!("[atlas] Loaded atlas.png successfully (1024x1024 RGBA)");
+                p
+            }
+            None => {
+                eprintln!("[atlas] PNG missing or wrong size — upscaling procedural 512x512 to 1024x1024");
+                let p512 = generator::generate();
+                let mut p1024 = vec![0u8; 1024 * 1024 * 4];
+                for y in 0..512usize {
+                    for x in 0..512usize {
+                        let src = (y * 512 + x) * 4;
+                        for dy in 0..2usize {
+                            for dx in 0..2usize {
+                                let dst = ((y * 2 + dy) * 1024 + (x * 2 + dx)) * 4;
+                                p1024[dst..dst + 4].copy_from_slice(&p512[src..src + 4]);
+                            }
+                        }
+                    }
+                }
+                p1024
+            }
+        };
 
         let texture = device.create_texture_with_data(
             queue,

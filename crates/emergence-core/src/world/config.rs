@@ -28,11 +28,11 @@ impl WorldConfig {
     /// Validate world size. 1024x1024 is the standard target. Up to 2048x2048 is supported.
     pub fn validate(&self) -> Result<(), &'static str> {
         let (w, h) = self.resolved_size();
-        if w > 2048 || h > 2048 {
-            return Err("World size capped at 2048x2048.");
+        if w > 4096 || h > 4096 {
+            return Err("World size capped at 4096x4096.");
         }
-        if w > 1024 || h > 1024 {
-            eprintln!("WARNING: World size >1024x1024. Expect high memory usage.");
+        if w > 2048 || h > 2048 {
+            eprintln!("WARNING: World size >2048x2048. Expect high memory usage.");
         }
         Ok(())
     }

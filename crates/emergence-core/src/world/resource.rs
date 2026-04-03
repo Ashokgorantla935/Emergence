@@ -9,6 +9,8 @@ pub enum FoodType {
     Fish,
     Grain,
     Stone,
+    Iron,
+    Oil,
 }
 
 pub struct ResourceLayer {

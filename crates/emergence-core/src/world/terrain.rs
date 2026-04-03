@@ -28,6 +28,10 @@ pub enum StructureType {
     DirtPath = 6,      // naturally forms from being traffic
     StoneRoad = 7,     // constructed by beings with stone
     SignalBeacon = 8,  // comfort signal amplifier
+    Mine = 9,          // extracts iron from mountains
+    Forge = 10,        // refines iron into steel
+    Factory = 11,      // produces advanced goods like automobiles
+    Automobile = 12,   // built vehicle for fast transport
 }
 
 impl StructureType {
@@ -42,6 +46,10 @@ impl StructureType {
             StructureType::DirtPath => 0,
             StructureType::StoneRoad => 80,
             StructureType::SignalBeacon => 40,
+            StructureType::Mine => 150,
+            StructureType::Forge => 200,
+            StructureType::Factory => 300,
+            StructureType::Automobile => 400,
         }
     }
 
@@ -55,6 +63,10 @@ impl StructureType {
             6 => StructureType::DirtPath,
             7 => StructureType::StoneRoad,
             8 => StructureType::SignalBeacon,
+            9 => StructureType::Mine,
+            10 => StructureType::Forge,
+            11 => StructureType::Factory,
+            12 => StructureType::Automobile,
             _ => StructureType::None,
         }
     }
@@ -654,9 +666,18 @@ fn assign_latitude_biomes(
                 water_cells.push(false);
                 continue;
             }
-            let lat_temp = 1.0 - ((y as f32 - equator) / equator).abs();
+
+            // Introduce OpenSimplex noise to disrupt perfect lateral bands
+            let nx = x as f64 * 0.02;
+            let ny = y as f64 * 0.02;
+            use noise::{NoiseFn, OpenSimplex};
+            let simplex = OpenSimplex::new(42);
+            let noise_val = simplex.get([nx, ny]) as f32 * 0.15;
+
+            // Perturb the virtual equator distance for smooth winding borders
+            let lat_temp = (1.0 - ((y as f32 - equator) / equator).abs() + noise_val).clamp(0.0, 1.0);
             let temp = (lat_temp * 0.6 + temperature[i] * 0.4 - elev * 0.4).clamp(0.0, 1.0);
-            let m = moisture[i];
+            let m = (moisture[i] + noise_val * 0.5).clamp(0.0, 1.0);
 
             let b = if temp > 0.7 && m > 0.6 {
                 Biome::Forest

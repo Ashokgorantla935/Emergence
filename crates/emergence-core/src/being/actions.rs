@@ -280,6 +280,19 @@ pub fn score_actions(
             q_values[Action::Bond as usize] = 0.0;
         }
 
+        // ── Shelter & Construction Override ───────────────────────────────────
+        // If cold or scared, humans actively build or seek shelter.
+        let warmth = beings.hot.needs[being_index][crate::being::data::NEED_WARMTH];
+        let has_stone = beings.hot.carry[being_index][1] >= 0.1;
+        
+        if warmth < 0.6 || safety < 0.6 {
+            if has_stone {
+                q_values[Action::Build as usize] += 50.0;
+            } else {
+                q_values[Action::PickUpStone as usize] += 50.0;
+            }
+        }
+
         // ── Global famine pressure: exponential aggression when food signal is very low ──────
         let food_signal = local.values[CH_FOOD];
         let global_food_scarcity = if food_signal < 0.05 {
@@ -434,7 +447,10 @@ pub fn score_actions(
             Action::PickUpStone => {
                 target_pos = find_nearest_stone(pos, radius, terrain);
             }
-            Action::Build | Action::Craft | Action::Memorialize | Action::CreateMark | Action::ShareResource => {
+            Action::Build => {
+                target_pos = Some(pos);
+            }
+            Action::Craft | Action::Memorialize | Action::CreateMark | Action::ShareResource => {
                 target_pos = Some(pos);
             }
             Action::Teach => {
@@ -2005,4 +2021,37 @@ mod tests {
             result.action
         );
     }
+}
+
+/// Finds a dry, flat area near the agent to build.
+pub fn find_build_site(pos: [f32; 2], radius: f32, terrain: &Terrain) -> Option<[f32; 2]> {
+    let mut best_score = -1000.0;
+    let mut best_pos = None;
+
+    let bx = (pos[0] as i32).clamp(0, terrain.width as i32 - 1) as u32;
+    let by = (pos[1] as i32).clamp(0, terrain.height as i32 - 1) as u32;
+    let iradius = radius as i32;
+
+    for dy in -iradius..=iradius {
+        for dx in -iradius..=iradius {
+            let x = bx.saturating_add_signed(dx);
+            let y = by.saturating_add_signed(dy);
+            if x >= terrain.width || y >= terrain.height { continue; }
+
+            let d_sq = (dx*dx + dy*dy) as f32;
+            if d_sq > radius * radius { continue; }
+
+            let idx = (y * terrain.width + x) as usize;
+            if terrain.biome[idx] == crate::world::terrain::Biome::Water || terrain.structure[idx] > 0 { continue; }
+
+            let mut score = -d_sq;
+            if terrain.biome[idx] == crate::world::terrain::Biome::Grassland { score += 50.0; }
+            
+            if score > best_score {
+                best_score = score;
+                best_pos = Some([x as f32 + 0.5, y as f32 + 0.5]);
+            }
+        }
+    }
+    best_pos
 }

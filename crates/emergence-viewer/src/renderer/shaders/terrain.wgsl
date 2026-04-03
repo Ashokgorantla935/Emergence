@@ -96,7 +96,8 @@ fn biome_base_color(biome_id: u32) -> vec4<f32> {
 
 // Per-cell brightness variation using cell coords (stable, not per-pixel).
 fn cell_brightness(world_pos: vec2<f32>) -> f32 {
-    let h = fract(sin(dot(world_pos, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+    let p = floor(world_pos);
+    let h = fract(sin(dot(p, vec2<f32>(12.9898, 78.233))) * 43758.5453);
     return 0.97 + h * 0.06; // [0.97, 1.03] — +/- 3% per cell
 }
 

@@ -2585,6 +2585,7 @@ impl ApplicationHandler for App {
                         if let Some(ref world) = self.world {
                             let world = world.read().unwrap();
                             terrain_r.rebuild_instances_viewport(
+                                &rs.device,
                                 &rs.queue,
                                 &world.terrain,
                                 self.camera.position[0],
@@ -2603,12 +2604,20 @@ impl ApplicationHandler for App {
                         render_pass.set_bind_group(1, &rs.atlas.bind_group, &[]);
                         render_pass.set_bind_group(2, &rs.water_time_bind_group, &[]);
                         render_pass.set_vertex_buffer(0, terrain_r.vertex_buffer.slice(..));
-                        render_pass.set_vertex_buffer(1, terrain_r.instance_buffer.slice(..));
                         render_pass.set_index_buffer(
                             terrain_r.index_buffer.slice(..),
                             wgpu::IndexFormat::Uint16,
                         );
-                        render_pass.draw_indexed(0..6, 0, 0..terrain_r.instance_count);
+                        
+                        // Draw all visible chunks
+                        for chunk_key in &terrain_r.visible_chunks {
+                            if let Some(chunk) = terrain_r.chunks.get(chunk_key) {
+                                if chunk.instance_count > 0 {
+                                    render_pass.set_vertex_buffer(1, chunk.instance_buffer.slice(..));
+                                    render_pass.draw_indexed(0..6, 0, 0..chunk.instance_count);
+                                }
+                            }
+                        }
                     }
 
                     // Heatmap

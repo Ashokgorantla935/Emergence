@@ -10,12 +10,12 @@ const ATLAS_CELL: f32 = 1.0 / 32.0;
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct TerrainInstance {
-    pub world_pos:      [f32; 2], // world x, y of this cell
-    pub tile_uv:        [f32; 2], // UV origin in the atlas for this tile
-    pub flags:          f32,      // biome id: 0=grass, 1=water, 2=forest, ...
-    pub elevation:      f32,      // terrain elevation [0.0, 1.0] — used for water depth coloring
-    pub structure_type: f32,      // StructureType as f32: 0=None, 1=Campfire, 2=LeanTo, 3=Hut, 4=Wall, 5=ResourceCache
-    pub _pad:           f32,      // padding to 32 bytes
+    pub world_pos:          [f32; 2], // world x, y of this cell
+    pub tile_uv:            [f32; 2], // UV origin in the atlas for this tile
+    pub flags:              f32,      // biome id: 0=grass, 1=water, 2=forest, ...
+    pub elevation:          f32,      // terrain elevation [0.0, 1.0] — used for water depth coloring
+    pub structure_type:     f32,      // StructureType as f32: 0=None, 1=Campfire, etc.
+    pub build_progress:     f32,      // Ticks accumulated for construction, 0 = none.
 }
 
 /// Unit quad vertex.
@@ -82,14 +82,24 @@ const SNOW_TILES: &[[f32; 2]] = &[
     tile_uv(28, 28), tile_uv(29, 28),
 ];
 
-/// Max instances — 2048*2048 = 4.19M cells.
-const MAX_INSTANCES: usize = 500_000; // capped for GPU performance
+use std::collections::HashMap;
+
+const CHUNK_SIZE: usize = 64;
+const CHUNK_INSTANCES: usize = CHUNK_SIZE * CHUNK_SIZE;
+
+pub struct RenderChunk {
+    pub instance_buffer: wgpu::Buffer,
+    pub instance_count:  u32,
+    pub is_dirty:        bool,
+}
 
 pub struct TerrainRenderer {
     pub vertex_buffer:   wgpu::Buffer,
     pub index_buffer:    wgpu::Buffer,
-    pub instance_buffer: wgpu::Buffer,
-    pub instance_count:  u32,
+    
+    pub chunks:          HashMap<(i32, i32), RenderChunk>,
+    pub visible_chunks:  Vec<(i32, i32)>,
+
     pub last_cam_x:      f32,
     pub last_cam_y:      f32,
     pub last_cam_zoom:   f32,
@@ -102,16 +112,12 @@ impl TerrainRenderer {
         queue:   &wgpu::Queue,
         terrain: &Terrain,
     ) -> Self {
-        // Unit quad: 4 vertices, 6 indices
-        // Mathematically perfect 1.0x1.0 world-unit quad. No oversizing hack.
-        // Each terrain cell = 1 world unit. Instance world_pos = integer grid coord.
         let vertices = [
             TerrainVertex { position: [0.0, 0.0], uv: [0.0, 0.0] }, // 0 = BL
             TerrainVertex { position: [1.0, 0.0], uv: [1.0, 0.0] }, // 1 = BR
             TerrainVertex { position: [1.0, 1.0], uv: [1.0, 1.0] }, // 2 = TR
             TerrainVertex { position: [0.0, 1.0], uv: [0.0, 1.0] }, // 3 = TL
         ];
-        // Two triangles: (BL,BR,TR) + (TR,TL,BL)
         let indices: [u16; 6] = [0, 1, 2, 2, 3, 0];
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -126,18 +132,11 @@ impl TerrainRenderer {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Terrain Instances"),
-            size: (MAX_INSTANCES as u64) * std::mem::size_of::<TerrainInstance>() as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
         let mut renderer = TerrainRenderer {
             vertex_buffer,
             index_buffer,
-            instance_buffer,
-            instance_count: 0,
+            chunks:          HashMap::new(),
+            visible_chunks:  Vec::new(),
             last_cam_x:      f32::NAN,
             last_cam_y:      f32::NAN,
             last_cam_zoom:   f32::NAN,
@@ -148,23 +147,26 @@ impl TerrainRenderer {
         // Initial build with a default viewport covering the map center
         let cx = terrain.width as f32 * 0.5;
         let cy = terrain.height as f32 * 0.5;
-        renderer.rebuild_instances_viewport(queue, terrain, cx, cy, 100.0, 1.5);
+        renderer.rebuild_instances_viewport(device, queue, terrain, cx, cy, 100.0, 1.5);
 
         renderer
     }
 
-    /// Invalidate the viewport cache — forces a full rebuild on the next call to rebuild_instances_viewport.
-    /// Call this when terrain data changes (structures placed, biomes edited) without recreating the renderer.
+    /// Invalidate the viewport cache and all chunks.
     pub fn invalidate_cache(&mut self) {
         self.last_cam_x     = f32::NAN;
         self.last_cam_y     = f32::NAN;
         self.last_cam_zoom  = f32::NAN;
         self.last_cam_aspect = f32::NAN;
+        for chunk in self.chunks.values_mut() {
+            chunk.is_dirty = true;
+        }
     }
 
     /// Rebuild instance buffer for visible terrain cells within camera viewport.
     pub fn rebuild_instances_viewport(
         &mut self,
+        device: &wgpu::Device,
         queue: &wgpu::Queue,
         terrain: &Terrain,
         cam_x: f32, cam_y: f32, cam_zoom: f32, cam_aspect: f32,
@@ -172,9 +174,13 @@ impl TerrainRenderer {
         if (self.last_cam_x - cam_x).abs() < 1.0 && 
            (self.last_cam_y - cam_y).abs() < 1.0 &&
            (self.last_cam_zoom - cam_zoom).abs() < 1.0 && 
-           (self.last_cam_aspect - cam_aspect).abs() < 0.01 {
+           (self.last_cam_aspect - cam_aspect).abs() < 0.01 &&
+           !self.visible_chunks.is_empty() && 
+           self.chunks.get(&self.visible_chunks[0]).map_or(false, |c| !c.is_dirty) {
+            // Nothing to do if viewport didn't change and visible chunks aren't dirty
             return;
         }
+        
         self.last_cam_x = cam_x;
         self.last_cam_y = cam_y;
         self.last_cam_zoom = cam_zoom;
@@ -191,63 +197,102 @@ impl TerrainRenderer {
         let y_min = ((cam_y - half_h).floor() as isize).max(0) as usize;
         let y_max = ((cam_y + half_h).ceil() as usize + 1).min(h);
 
-        let visible_cells = (x_max - x_min) * (y_max - y_min);
-        let stride: usize = if visible_cells > 1_000_000 { 4 }
-                            else if visible_cells > 250_000 { 2 }
-                            else { 1 };
+        self.visible_chunks.clear();
 
-        let capacity = (visible_cells / (stride * stride)).min(MAX_INSTANCES);
-        let mut instances = Vec::with_capacity(capacity);
+        // Calculate overlapping chunks
+        let cx_min = x_min / CHUNK_SIZE;
+        let cx_max = x_max / CHUNK_SIZE;
+        let cy_min = y_min / CHUNK_SIZE;
+        let cy_max = y_max / CHUNK_SIZE;
 
-        'outer: for y in (y_min..y_max).step_by(stride) {
-            for x in (x_min..x_max).step_by(stride) {
-                if instances.len() >= MAX_INSTANCES { break 'outer; }
-                let idx = y * w + x;
-                let biome = terrain.biome[idx];
-                let hash = cell_hash(x, y);
+        for cy in cy_min..=cy_max {
+            for cx in cx_min..=cx_max {
+                let chunk_key = (cx as i32, cy as i32);
+                self.visible_chunks.push(chunk_key);
 
-                // Pick tile variant based on biome + cell hash
-                let tiles = match biome {
-                    Biome::Grassland => GRASS_TILES,
-                    Biome::Forest    => FOREST_TILES,
-                    Biome::Desert    => DESERT_TILES,
-                    Biome::Mountain  => MOUNTAIN_TILES,
-                    Biome::Water     => WATER_TILES,
-                    Biome::Wetland   => WETLAND_TILES,
-                    Biome::Snow      => SNOW_TILES,
+                // If chunk is missing or dirty, we generate it.
+                let chunk_needs_rebuild = if let Some(chunk) = self.chunks.get(&chunk_key) {
+                    chunk.is_dirty
+                } else {
+                    true
                 };
 
-                let variant = hash % tiles.len();
-                let tile_uv = tiles[variant];
-                // Encode biome type in flags: 0=grass, 1=water, 2=forest, 3=desert, 4=mountain, 5=wetland, 6=snow
-                let biome_flag = match biome {
-                    Biome::Grassland => 0.0f32,
-                    Biome::Water     => 1.0,
-                    Biome::Forest    => 2.0,
-                    Biome::Desert    => 3.0,
-                    Biome::Mountain  => 4.0,
-                    Biome::Wetland   => 5.0,
-                    Biome::Snow      => 6.0,
-                };
-                let elevation = terrain.elevation[idx];
+                if chunk_needs_rebuild {
+                    let mut instances = Vec::with_capacity(CHUNK_INSTANCES);
+                    let base_x = cx * CHUNK_SIZE;
+                    let base_y = cy * CHUNK_SIZE;
 
-                let structure_type = terrain.structure[idx] as f32;
+                    for y in base_y..(base_y + CHUNK_SIZE).min(h) {
+                        for x in base_x..(base_x + CHUNK_SIZE).min(w) {
+                            let idx = y * w + x;
+                            let biome = terrain.biome[idx];
+                            let hash = cell_hash(x, y);
 
-                instances.push(TerrainInstance {
-                    world_pos: [x as f32, y as f32],
-                    tile_uv,
-                    flags: biome_flag,
-                    elevation,
-                    structure_type,
-                    _pad: stride as f32,
-                });
+                            let tiles = match biome {
+                                Biome::Grassland => GRASS_TILES,
+                                Biome::Forest    => FOREST_TILES,
+                                Biome::Desert    => DESERT_TILES,
+                                Biome::Mountain  => MOUNTAIN_TILES,
+                                Biome::Water     => WATER_TILES,
+                                Biome::Wetland   => WETLAND_TILES,
+                                Biome::Snow      => SNOW_TILES,
+                            };
+
+                            let variant = hash % tiles.len();
+                            let tile_uv = tiles[variant];
+                            let biome_flag = match biome {
+                                Biome::Grassland => 0.0f32,
+                                Biome::Water     => 1.0,
+                                Biome::Forest    => 2.0,
+                                Biome::Desert    => 3.0,
+                                Biome::Mountain  => 4.0,
+                                Biome::Wetland   => 5.0,
+                                Biome::Snow      => 6.0,
+                            };
+                            let elevation = terrain.elevation[idx];
+                            let structure_type = terrain.structure[idx] as f32;
+
+                            instances.push(TerrainInstance {
+                                world_pos: [x as f32, y as f32],
+                                tile_uv,
+                                flags: biome_flag,
+                                elevation,
+                                structure_type,
+                                build_progress: terrain.build_progress[idx] as f32,
+                            });
+                        }
+                    }
+
+                    if let Some(chunk) = self.chunks.get_mut(&chunk_key) {
+                        queue.write_buffer(&chunk.instance_buffer, 0, bytemuck::cast_slice(&instances));
+                        chunk.instance_count = instances.len() as u32;
+                        chunk.is_dirty = false;
+                    } else {
+                        // Create entirely new buffer
+                        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!("Terrain Chunk _,_")),
+                            contents: bytemuck::cast_slice(&instances),
+                            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        });
+                        self.chunks.insert(chunk_key, RenderChunk {
+                            instance_buffer,
+                            instance_count: instances.len() as u32,
+                            is_dirty: false,
+                        });
+                    }
+                }
             }
         }
 
-        self.instance_count = instances.len() as u32;
-
-        if !instances.is_empty() {
-            queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
-        }
+        // Evict off-screen chunks to prevent memory leaks when panning
+        self.chunks.retain(|&key, _| {
+            // Keep chunk if it is visible or within a small margin (e.g., 2 chunks)
+            let dx = (key.0 - (cx_min as i32 + cx_max as i32) / 2).abs();
+            let dy = (key.1 - (cy_min as i32 + cy_max as i32) / 2).abs();
+            let margin = 2;
+            let bounds_x = (cx_max as i32 - cx_min as i32) / 2 + margin;
+            let bounds_y = (cy_max as i32 - cy_min as i32) / 2 + margin;
+            dx <= bounds_x && dy <= bounds_y
+        });
     }
 }

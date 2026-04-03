@@ -205,7 +205,8 @@ pub fn tick(world: &mut World) {
             world.beings.hot.carry[dead_idx][0] = 0.0;
         }
 
-        // Bonded beings enter grief
+        // Handout grief to bonded beings.
+        // We do a single pass over active beings to check relationships.
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] == BeingState::Dead || i == dead_idx {
                 continue;

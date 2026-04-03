@@ -38,7 +38,7 @@ struct InstanceInput {
     @location(4) flags:          f32,       // biome id: 0=grass, 1=water, 2=forest, 3=desert, 4=mountain, 5=wetland
     @location(5) elevation:      f32,       // terrain elevation [0.0, 1.0]
     @location(6) structure_type: f32,       // 0=None, 1=Campfire, 2=LeanTo, 3=Hut, 4=Wall, 5=ResourceCache
-    @location(7) cell_scale:     f32,       // LOD stride — quad covers stride×stride cells (1.0 at full res)
+    @location(7) build_progress: f32,       // Construction ticks
 };
 
 struct VertexOutput {
@@ -48,20 +48,24 @@ struct VertexOutput {
     @location(2) world_pos:      vec2<f32>, // integer cell coords
     @location(3) structure_type: f32,
     @location(4) elevation:      f32,       // terrain elevation [0.0, 1.0]
+    @location(5) build_progress: f32,
+    @location(6) tile_uv:        vec2<f32>,
 };
 
 @vertex
 fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
 
-    // Scale quad to cover stride×stride cells at LOD — eliminates gaps in sparse grid.
-    let scale = max(inst.cell_scale, 1.0);
+    // Direct 1-to-1 cell mapping
     let world = vec2<f32>(
-        inst.world_pos.x + vertex.position.x * scale,
-        inst.world_pos.y + vertex.position.y * scale,
+        inst.world_pos.x + vertex.position.x,
+        inst.world_pos.y + vertex.position.y,
     );
 
     out.clip_position = camera.view_proj * vec4<f32>(world, 0.0, 1.0);
+
+    // Provide base tile UV to bound the fragment samples when generating the canopy layers
+    out.tile_uv = inst.tile_uv;
 
     // Map the quad's 0-1 UV to the specific tile region in the atlas
     // Apply 0.5px inset (0.0005 in UV space for 32px tile in 1024px atlas) to prevent bleeding
@@ -69,12 +73,15 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     let inset = 0.0005; // ~0.5px inset at 1024px atlas
     let uv_min = inst.tile_uv + vec2<f32>(inset, inset);
     let uv_range = tile_size - 2.0 * inset;
-    out.atlas_uv = uv_min + vertex.uv * uv_range;
+    
+    let cell_frac = vertex.position + vec2<f32>(0.5, 0.5);
+    out.atlas_uv = uv_min + cell_frac * uv_range;
+
     out.flags = inst.flags;
-    out.world_pos = inst.world_pos; // pass cell origin (integer coords)
+    out.world_pos = world;
     out.structure_type = inst.structure_type;
     out.elevation = inst.elevation;
-
+    out.build_progress = inst.build_progress;
     return out;
 }
 
@@ -141,15 +148,28 @@ fn apply_illumination(color: vec4<f32>, illumination: f32, comfort: f32) -> vec4
     return vec4<f32>(color.rgb * dim, color.a);
 }
 
-// Overlay a structure visual on top of the terrain color.
-// Returns the modified color. Works at all LOD levels.
-fn apply_structure(base: vec4<f32>, structure_type: u32, world_pos: vec2<f32>, time: f32, lod: u32) -> vec4<f32> {
-    if (structure_type == 0u) {
-        return base;
-    }
-
+// Structure overlays. Mixes building color onto the base biome color based on cell distance and LOD
+fn apply_structure(base: vec4<f32>, structure_type: u32, build_progress: f32, world_pos: vec2<f32>, time: f32, lod: u32) -> vec4<f32> {
     let cell_frac = fract(world_pos) - vec2<f32>(0.5, 0.5); // [-0.5, 0.5]
     let dist = length(cell_frac);
+
+    // Scaffolding when under construction
+    if (structure_type == 0u && build_progress > 0.0) {
+        if (lod > 0u) {
+            let scaffold_color = vec4<f32>(0.7, 0.6, 0.4, 1.0); // wood color
+            
+            // X shape 
+            let d1 = abs(cell_frac.x - cell_frac.y);
+            let d2 = abs(cell_frac.x + cell_frac.y);
+            
+            // Limit construction scaffold size based on progress
+            let max_dist = 0.15 + (build_progress * 0.005); // Grows slowly
+            if ((d1 < 0.05 || d2 < 0.05) && dist < max_dist) {
+                return mix(base, scaffold_color, 0.85);
+            }
+        }
+        return base;
+    }
 
     // Campfire (1) — orange/red warm dot with animated flicker
     if (structure_type == 1u) {
@@ -355,7 +375,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         if (is_water) {
             color0 = water_depth_color(in.elevation);
         }
-        color0 = apply_structure(color0, structure_id, in.world_pos, t, 0u);
+        color0 = apply_structure(color0, structure_id, in.build_progress, in.world_pos, t, 0u);
         return apply_illumination(color0, illumination, comfort);
     }
 
@@ -390,7 +410,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let tex_color = textureSample(t_atlas, s_atlas, in.atlas_uv);
             color = mix(color, tex_color, tex_color.a);
         }
-        color = apply_structure(color, structure_id, in.world_pos, t, 1u);
+        color = apply_structure(color, structure_id, in.build_progress, in.world_pos, t, 1u);
         return apply_illumination(color, illumination, comfort);
     }
 
@@ -408,12 +428,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             clamp(depth_color.b + pulse * 1.5, 0.0, 1.0),
             1.0,
         );
-        // Shore foam: animated frothy white at shallow edge (elevation > 0.22)
-        if (in.elevation > 0.22) {
-            let foam_t = clamp((in.elevation - 0.22) / 0.06, 0.0, 1.0);
-            let foam_anim = sin(t * 3.0 + in.world_pos.x * 2.5 + in.world_pos.y * 1.8) * 0.5 + 0.5;
-            let foam_mix = foam_t * (0.5 + foam_anim * 0.5);
-            color = mix(color, vec4<f32>(0.92, 0.96, 1.0, 1.0), clamp(foam_mix, 0.0, 0.85));
+        // Shore foam: layered crashing waves
+        if (in.elevation > 0.20 && in.elevation < 0.28) {
+            let shore_dist = clamp((0.28 - in.elevation) / 0.08, 0.0, 1.0); // 0 at land edge, 1 at deep
+            let wave_time = t * 2.0 - shore_dist * 8.0;
+            let wave_form = fract(wave_time); // 0 to 1 moving inward
+            
+            // Thin foam line
+            let foam_line = step(0.90, wave_form) * (1.0 - wave_form) * 10.0; 
+            
+            // Base static foam near shore
+            let static_foam = clamp((in.elevation - 0.25) / 0.03, 0.0, 1.0) * 0.4;
+            
+            let foam_mix = clamp((foam_line * (1.0 - shore_dist)) + static_foam, 0.0, 1.0);
+            color = mix(color, vec4<f32>(0.92, 0.98, 1.0, 1.0), foam_mix * 0.9);
         }
     } else {
         // Signal tinting
@@ -430,8 +458,29 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         // Atlas tile sampling replaces all procedural decoration
         let tex_color = textureSample(t_atlas, s_atlas, in.atlas_uv);
         color = mix(color, tex_color, tex_color.a);
+        
+        // Multi-layer canopy foliage for forests
+        if (biome_id == 2u) {
+            let sway = sin(t * 1.5 + in.world_pos.x * 0.5) * 0.002;
+            let uv_min = in.tile_uv + vec2<f32>(0.0005, 0.0005);
+            let uv_max = in.tile_uv + vec2<f32>(1.0 / 32.0 - 0.0005, 1.0 / 32.0 - 0.0005);
+            
+            // Layer 1 Canopy
+            let c1_uv = clamp(in.atlas_uv + vec2<f32>(sin(t*0.5+in.world_pos.y)*0.001, sway * 0.5), uv_min, uv_max);
+            let l1 = textureSample(t_atlas, s_atlas, c1_uv);
+            if (l1.a > 0.1) {
+                color = mix(color, vec4<f32>(l1.rgb * 1.15, l1.a), l1.a * 0.5);
+            }
+
+            // Layer 2 Canopy
+            let c2_uv = clamp(in.atlas_uv + vec2<f32>(cos(t*0.8-in.world_pos.x)*0.0015, sway), uv_min, uv_max);
+            let l2 = textureSample(t_atlas, s_atlas, c2_uv);
+            if (l2.a > 0.1) {
+                color = mix(color, vec4<f32>(l2.rgb * 1.3, l2.a), l2.a * 0.35);
+            }
+        }
     }
 
-    color = apply_structure(color, structure_id, in.world_pos, t, 2u);
+    color = apply_structure(color, structure_id, in.build_progress, in.world_pos, t, 2u);
     return apply_illumination(color, illumination, comfort);
 }

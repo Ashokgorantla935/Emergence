@@ -6,8 +6,10 @@ use emergence_core::being::data::{BeingState, Beings, CreatureType};
 
 /// Cell size in the shared terrain atlas (32x32 grid).
 const ATLAS_CELL: f32 = 1.0 / 32.0;
-/// Cell size in the entity spritesheet (4x4 grid of 48x48 on 192x192).
-const ENTITY_CELL: f32 = 1.0 / 4.0;
+/// Cell size in the entity spritesheet (1 / 4)
+const ENTITY_CELL_U: f32 = 1.0 / 4.0;
+/// Cell size in the entity spritesheet vertical (1 / 96)
+const ENTITY_CELL_V: f32 = 1.0 / 96.0;
 
 /// 10 animation states (matches atlas row layout).
 #[repr(u8)]
@@ -224,7 +226,7 @@ impl AnimationManager {
 
     /// Compute atlas UV for being `i`.
     /// Fauna use the shared terrain atlas: rows 12-13, column base per species (4 frames each).
-    /// Humans use the entity spritesheet (4x4 grid of 48x48 on 192x192):
+    /// Humans use the entity spritesheet (4x4 grid of 48x48 on 256x6144):
     ///   Row 0: walk down (4 frames)
     ///   Row 1: walk up   (4 frames)
     ///   Row 2: walk right (4 frames)
@@ -266,7 +268,20 @@ impl AnimationManager {
             _ => (0u32, 0u32),
         };
 
-        [col as f32 * ENTITY_CELL, sheet_row as f32 * ENTITY_CELL]
+        // There are 12 NPCs, hashed by their being index `i` or personality to remain stable.
+        // Let's mix their bits so it isn't just grouped in chunks.
+        let mut x = i as u32;
+        x ^= x >> 16;
+        x *= 0x7feb352d;
+        x ^= x >> 15;
+        x *= 0x846ca68b;
+        x ^= x >> 16;
+        
+        let npc_idx = x % 12;
+        let base_row = npc_idx * 8;
+        let final_row = base_row + sheet_row;
+
+        [col as f32 * ENTITY_CELL_U, final_row as f32 * ENTITY_CELL_V]
     }
 }
 

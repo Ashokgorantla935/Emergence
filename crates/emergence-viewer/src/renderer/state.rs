@@ -149,7 +149,7 @@ impl RenderState {
         let entity_bind_group = {
             let spritesheet_path = concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../assets/sprites/packs/Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/Characters/Basic Charakter Spritesheet.png"
+                "/../../assets/sprites/packs/premade-npc-spritesheets/combined_npcs.png"
             );
             let loaded = (|| -> Option<wgpu::BindGroup> {
                 let img = image::open(spritesheet_path).ok()?.to_rgba8();
@@ -461,7 +461,7 @@ impl RenderState {
                 wgpu::VertexAttribute { offset: 16, shader_location: 4, format: wgpu::VertexFormat::Float32   }, // flags
                 wgpu::VertexAttribute { offset: 20, shader_location: 5, format: wgpu::VertexFormat::Float32   }, // elevation
                 wgpu::VertexAttribute { offset: 24, shader_location: 6, format: wgpu::VertexFormat::Float32   }, // structure_type
-                wgpu::VertexAttribute { offset: 28, shader_location: 7, format: wgpu::VertexFormat::Float32   }, // _pad (stride scale)
+                wgpu::VertexAttribute { offset: 28, shader_location: 7, format: wgpu::VertexFormat::Float32   }, // build_progress
             ],
         };
 

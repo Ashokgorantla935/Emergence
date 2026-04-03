@@ -134,6 +134,37 @@ impl StatisticsPanel {
         self.visible = !self.visible;
     }
 
+    /// Render a one-line stats summary inline — for embedding in a bottom strip.
+    pub fn render_summary_into(&self, ui: &mut egui::Ui, history: &StatsHistory) {
+        let samples = history.ordered();
+        let latest = samples.iter().filter(|s| s.tick > 0).last();
+        if let Some(s) = latest {
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("STATS").strong().size(10.0)
+                    .color(egui::Color32::from_rgb(160, 160, 180)));
+                ui.label(egui::RichText::new(format!("Pop: {}", s.population))
+                    .size(11.0).strong());
+                ui.label(egui::RichText::new(format!("Settlements: {}", s.settlement_count))
+                    .size(10.0));
+                let dominant_emo = {
+                    let mut best_idx = 0usize;
+                    let mut best_count = 0u32;
+                    for e in 0..6 {
+                        if s.emotion_counts[e] > best_count {
+                            best_count = s.emotion_counts[e];
+                            best_idx = e;
+                        }
+                    }
+                    ["Fear", "Joy", "Curiosity", "Anger", "Grief", "Content"][best_idx]
+                };
+                ui.label(egui::RichText::new(format!("Mood: {}", dominant_emo)).size(10.0));
+            });
+        } else {
+            ui.label(egui::RichText::new("Gathering data...").size(10.0)
+                .color(egui::Color32::GRAY));
+        }
+    }
+
     pub fn ui(&mut self, egui_ctx: &egui::Context, history: &StatsHistory) {
         if !self.visible {
             return;

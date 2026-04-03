@@ -27,3 +27,14 @@ bitcode = "0.6"
 serde = { version = "1", features = ["derive"] }
 rodio = { version = "0.19", default-features = false, features = ["symphonia-wav"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+# Optimize the simulation engine even in debug builds so `cargo run` is playable.
+# The viewer/app crates stay at opt-level 0 for fast compile iteration.
+[profile.dev.package.emergence-core]
+opt-level = 2
+
+[profile.dev.package.noise]
+opt-level = 2
+
+[profile.dev.package.rayon]
+opt-level = 2

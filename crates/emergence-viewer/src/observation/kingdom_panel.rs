@@ -112,6 +112,64 @@ impl KingdomPanel {
             });
     }
 
+    /// Render kingdom list as a collapsible section — for embedding in a SidePanel.
+    pub fn render_collapsible(
+        &mut self,
+        ui: &mut egui::Ui,
+        detector: &KingdomDetector,
+        settlement_detector: &SettlementDetector,
+        beings: &Beings,
+    ) {
+        egui::CollapsingHeader::new(egui::RichText::new("Kingdoms").strong())
+            .id_salt("kingdoms_collapsible")
+            .default_open(false)
+            .show(ui, |ui| {
+                let overlay_label = if self.overlay_enabled { "Overlay ON" } else { "Overlay OFF" };
+                if ui.small_button(overlay_label).clicked() {
+                    self.overlay_enabled = !self.overlay_enabled;
+                }
+                ui.separator();
+
+                if detector.kingdoms.is_empty() {
+                    ui.colored_label(Color32::GRAY, "No kingdoms yet. Need 15+ beings.");
+                    return;
+                }
+
+                egui::ScrollArea::vertical()
+                    .id_salt("kingdoms_scroll")
+                    .max_height(200.0)
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        for kingdom in &detector.kingdoms {
+                            let is_selected = self.selected_kingdom_id == Some(kingdom.id);
+                            let header_color = if is_selected {
+                                Color32::from_rgb(kingdom.color[0], kingdom.color[1], kingdom.color[2])
+                            } else {
+                                Color32::LIGHT_GRAY
+                            };
+                            ui.horizontal(|ui| {
+                                let (rect, _) = ui.allocate_exact_size(
+                                    egui::vec2(10.0, 10.0), egui::Sense::hover()
+                                );
+                                ui.painter().rect_filled(
+                                    rect, 2.0,
+                                    Color32::from_rgb(kingdom.color[0], kingdom.color[1], kingdom.color[2]),
+                                );
+                                let name_resp = ui.colored_label(header_color, &kingdom.name);
+                                if name_resp.clicked() {
+                                    self.selected_kingdom_id = Some(kingdom.id);
+                                    self.camera_jump = Some(kingdom.centroid);
+                                }
+                            });
+                            if is_selected {
+                                self.render_kingdom_detail(ui, kingdom, settlement_detector, beings);
+                                ui.separator();
+                            }
+                        }
+                    });
+            });
+    }
+
     fn render_kingdom_detail(
         &self,
         ui: &mut Ui,

@@ -5,7 +5,7 @@ use super::power_catalog::POWER_CATALOG;
 use emergence_core::god_action::{GodAction, ResetKind};
 
 /// Lazy-initialise god_icons and ui_icons on first call.
-fn ensure_icons(ctx: &Context, state: &mut GodToolState) {
+pub fn ensure_icons(ctx: &Context, state: &mut GodToolState) {
     if state.god_icons.is_none() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/god_tools_icons.png");
         state.god_icons = Some(load_icon_grid(ctx, path, "god_icon"));
@@ -141,6 +141,31 @@ pub fn render_dock(ctx: &Context, state: &mut GodToolState) {
         .title_bar(true)
         .frame(
             egui::Frame::window(&ctx.style())
+                .fill(Color32::from_rgba_premultiplied(14, 14, 18, 222))
+                .stroke(egui::Stroke::new(1.0, Color32::from_rgba_premultiplied(50, 50, 70, 160)))
+                .corner_radius(egui::CornerRadius::same(6))
+                .inner_margin(egui::Margin::symmetric(8, 6)),
+        )
+        .show(ctx, |ui| {
+            render_active_tab_powers(ui, state);
+            ui.separator();
+            render_brush_size(ui, state);
+        });
+}
+
+/// Separate sub-tray window from the dock. Call after the SidePanel is created.
+pub fn render_sub_tray(ctx: &Context, state: &mut GodToolState) {
+    let tray_title = tab_label(state.active_tab);
+    egui::Window::new(tray_title)
+        .id(egui::Id::new("god_sub_tray"))
+        .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(208.0, -8.0))
+        .default_width(220.0)
+        .max_height(360.0)
+        .resizable(false)
+        .collapsible(true)
+        .title_bar(true)
+        .frame(
+            egui::Frame::window(ctx.style().as_ref())
                 .fill(Color32::from_rgba_premultiplied(14, 14, 18, 222))
                 .stroke(egui::Stroke::new(1.0, Color32::from_rgba_premultiplied(50, 50, 70, 160)))
                 .corner_radius(egui::CornerRadius::same(6))

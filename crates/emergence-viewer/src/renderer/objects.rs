@@ -279,11 +279,6 @@ impl ChunkedObjectRenderer {
         let ppu_changed = (self.pixels_per_unit - pixels_per_unit).abs() > 1.0;
         self.pixels_per_unit = pixels_per_unit;
 
-        // Mark all chunks dirty periodically for resource regrowth / campfire animation
-        if self.frame_tick % 120 == 0 || ppu_changed {
-            self.mark_all_dirty();
-        }
-
         self.last_cam_x = cam_x;
         self.last_cam_y = cam_y;
         self.last_cam_zoom = cam_zoom;
@@ -309,6 +304,21 @@ impl ChunkedObjectRenderer {
         let cx_max = (cx_max + OVERDRAW_MARGIN).min(self.chunk_grid_w);
         let cy_min = cy_min.saturating_sub(OVERDRAW_MARGIN);
         let cy_max = (cy_max + OVERDRAW_MARGIN).min(self.chunk_grid_h);
+
+        // Mark only VISIBLE chunks dirty periodically for resource regrowth / campfire animation.
+        // Previously mark_all_dirty() touched every chunk on the map — on 2048² maps that's
+        // 1024 chunks, most off-screen, causing massive GPU buffer rebuild overhead.
+        if self.frame_tick % 120 == 0 || ppu_changed {
+            let grid_w = self.chunk_grid_w;
+            for cy in cy_min..cy_max {
+                for cx in cx_min..cx_max {
+                    let idx = (cy * grid_w + cx) as usize;
+                    if idx < self.chunks.len() {
+                        self.chunks[idx].dirty = true;
+                    }
+                }
+            }
+        }
 
         self.visible_cx_min = cx_min;
         self.visible_cx_max = cx_max;

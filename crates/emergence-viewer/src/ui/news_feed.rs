@@ -144,6 +144,25 @@ impl NewsFeed {
         self.toasts.retain(|t| t.alpha > 0.0);
     }
 
+    /// Render recent toast messages inline — for embedding in a bottom strip.
+    pub fn render_toasts_into(&mut self, ui: &mut egui::Ui) {
+        let toast_count = self.toasts.len();
+        if toast_count == 0 {
+            ui.label(egui::RichText::new("No recent events").size(10.0)
+                .color(egui::Color32::from_rgb(100, 100, 120)));
+            return;
+        }
+        let start = toast_count.saturating_sub(4);
+        for toast in self.toasts[start..].iter().rev().take(3) {
+            let alpha_byte = (toast.alpha.max(0.4) * 255.0) as u8;
+            let base_color = toast.color;
+            let faded_color = egui::Color32::from_rgba_unmultiplied(
+                base_color.r(), base_color.g(), base_color.b(), alpha_byte,
+            );
+            ui.label(egui::RichText::new(&toast.text).size(10.0).color(faded_color));
+        }
+    }
+
     pub fn ui(&mut self, egui_ctx: &egui::Context) {
         if !self.visible {
             return;
@@ -177,7 +196,14 @@ impl NewsFeed {
                             base_color.b(),
                             alpha_byte,
                         );
-                        ui.colored_label(faded_color, &toast.text);
+                        let bg_alpha = (toast.alpha * 180.0) as u8;
+                        egui::Frame::new()
+                            .fill(egui::Color32::from_rgba_unmultiplied(0, 0, 0, bg_alpha))
+                            .inner_margin(egui::Margin::same(4))
+                            .corner_radius(egui::CornerRadius::same(4))
+                            .show(ui, |ui| {
+                                ui.colored_label(faded_color, &toast.text);
+                            });
                     }
                 });
             });

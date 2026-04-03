@@ -53,6 +53,20 @@ impl Inspector {
             });
     }
 
+    /// Render inspector content into a provided Ui — for embedding in a larger panel.
+    pub fn render_content(&mut self, ui: &mut egui::Ui, beings: &Beings, events: &EventLog, tick: u32) {
+        if let Some(idx) = self.selected_being {
+            if idx >= beings.hot.count {
+                self.selected_being = None;
+                ui.label("Click a being to inspect");
+                return;
+            }
+            self.render_being_details(ui, beings, events, idx, tick);
+        } else {
+            ui.label("Click a being to inspect");
+        }
+    }
+
     fn render_being_details(
         &mut self,
         ui: &mut egui::Ui,

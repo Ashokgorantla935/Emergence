@@ -87,7 +87,7 @@ impl WorldLaws {
         *self == WorldLaws::default()
     }
 
-    fn any_active(&self) -> bool {
+    pub fn any_active(&self) -> bool {
         !self.is_default()
     }
 }
@@ -139,6 +139,79 @@ impl WorldLawsPanel {
             } else {
                 self.effect_pulse = None;
             }
+        }
+    }
+
+    /// Render world laws as a collapsible section — for embedding in a SidePanel.
+    pub fn render_collapsible(&mut self, ui: &mut egui::Ui, laws: &mut WorldLaws) {
+        let before = laws.clone();
+
+        let header_text = if laws.any_active() {
+            egui::RichText::new("World Laws *").color(Color32::YELLOW).strong()
+        } else {
+            egui::RichText::new("World Laws").strong()
+        };
+        egui::CollapsingHeader::new(header_text)
+            .id_salt("world_laws_collapsible")
+            .default_open(false)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("world_laws_scroll")
+                    .max_height(300.0)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            if laws.any_active() {
+                                ui.colored_label(Color32::YELLOW, "* Active");
+                            }
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.small_button("Reset All").clicked() {
+                                    *laws = WorldLaws::default();
+                                }
+                            });
+                        });
+                        ui.separator();
+                        // Survival
+                        law_row(ui, &mut laws.no_food_regrowth, "No Food Regrowth", "food stops regrowing");
+                        law_row(ui, &mut laws.immortal, "Immortal", "beings don't age-die");
+                        law_row(ui, &mut laws.fast_aging, "Fast Aging", "lifespan halved");
+                        law_row(ui, &mut laws.no_starvation, "No Starvation", "hunger doesn't kill");
+                        law_row(ui, &mut laws.invulnerable, "Invulnerable", "beings can't be killed");
+                        law_row(ui, &mut laws.no_sleep, "No Sleep", "rest need pinned to 1.0");
+                        law_row(ui, &mut laws.double_metabolism, "Double Metabolism", "all need decay 2x");
+                        ui.separator();
+                        // Social
+                        law_row(ui, &mut laws.no_bonding, "No Bonding", "warmth never exceeds 0.3");
+                        law_row(ui, &mut laws.perfect_memory, "Perfect Memory", "causal memory never decays");
+                        law_row(ui, &mut laws.no_memory, "No Memory", "memories clear every 600 ticks");
+                        law_row(ui, &mut laws.universal_trust, "Universal Trust", "all trust set to 0.5");
+                        law_row(ui, &mut laws.no_trust, "No Trust", "trust pinned to 0.0");
+                        law_row(ui, &mut laws.forced_generosity, "Forced Generosity", "generous trait pinned to 0.8");
+                        law_row(ui, &mut laws.forced_selfishness, "Forced Selfishness", "generous trait pinned to -0.8");
+                        ui.separator();
+                        // Environment
+                        law_row(ui, &mut laws.eternal_spring, "Eternal Spring", "season locked to Spring");
+                        law_row(ui, &mut laws.eternal_winter, "Eternal Winter", "season locked to Winter");
+                        law_row(ui, &mut laws.no_weather, "No Weather", "no weather events");
+                        law_row(ui, &mut laws.permanent_night, "Permanent Night", "day locked to night");
+                        law_row(ui, &mut laws.permanent_day, "Permanent Day", "day locked to noon");
+                        law_row(ui, &mut laws.infinite_food, "Infinite Food", "food cells always full");
+                        law_row(ui, &mut laws.no_predators, "No Predators", "wolves/bears passive");
+                        ui.separator();
+                        // Civilization
+                        law_row(ui, &mut laws.no_construction, "No Construction", "Build action disabled");
+                        law_row(ui, &mut laws.fast_construction, "Fast Construction", "build time halved");
+                        law_row(ui, &mut laws.no_reproduction, "No Reproduction", "no births");
+                        law_row(ui, &mut laws.fast_reproduction, "Fast Reproduction", "bond threshold halved");
+                        law_row(ui, &mut laws.no_kingdoms, "No Kingdoms", "kingdom detector disabled");
+                        law_row(ui, &mut laws.forced_peace, "Forced Peace", "anger pinned to 0.0 between settlements");
+                        law_row(ui, &mut laws.total_war, "Total War", "anger toward outsiders +0.3");
+                    });
+            });
+
+        // Apply mutual exclusivity after all edits
+        let changed_cat = resolve_exclusives(laws, &before);
+        if let Some(cat) = changed_cat {
+            self.effect_pulse = Some((cat.color(), 18));
         }
     }
 

@@ -29,6 +29,7 @@ use emergence_viewer::screen_state::{
 };
 use emergence_viewer::god_tools::{GodToolState, CursorPreview, palette as god_palette};
 use emergence_viewer::renderer::post_process::ScreenShake;
+use emergence_viewer::ui::filters::PopulationFilters;
 use emergence_viewer::ui::news_feed::NewsFeed;
 use emergence_viewer::ui::minimap::Minimap;
 use emergence_viewer::ui::statistics::{StatsHistory, StatisticsPanel};
@@ -160,6 +161,7 @@ struct App {
     news_feed_system: NewsFeedSystem,
 
     // UI panels
+    filters: PopulationFilters,
     news_feed_ui: NewsFeed,
     stats_history: StatsHistory,
     stats_panel: StatisticsPanel,
@@ -181,6 +183,13 @@ struct App {
     cursor_preview: CursorPreview,
     flash_alpha: f32,
     shake: ScreenShake,
+
+    // Cached signal averages (recomputed every 30 frames to avoid full-grid scan)
+    cached_sig_danger: f32,
+    cached_sig_comfort: f32,
+    cached_sig_grief: f32,
+    cached_sig_water_level: f32,
+    sig_sample_counter: u32,
 
     // Social emergence overlay toggles
     show_bond_lines: bool,
@@ -337,6 +346,7 @@ impl App {
             cached_kingdom_frame: None,
             kingdom_panel: KingdomPanel::new(),
             news_feed_system: NewsFeedSystem::new(),
+            filters: PopulationFilters::default(),
             news_feed_ui: NewsFeed::new(),
             stats_history: StatsHistory::new(),
             stats_panel: StatisticsPanel::new(),
@@ -350,6 +360,11 @@ impl App {
             cursor_preview: CursorPreview::new(),
             flash_alpha: 0.0,
             shake: ScreenShake::new(),
+            cached_sig_danger: 0.0,
+            cached_sig_comfort: 0.0,
+            cached_sig_grief: 0.0,
+            cached_sig_water_level: 0.0,
+            sig_sample_counter: 0,
             show_bond_lines: true,
             show_kingdom_colors: true,
             ui_visible: true,
@@ -1194,26 +1209,28 @@ impl ApplicationHandler for App {
         // Accumulate wall-clock time for water animation, tree sway, and being bob
         self.elapsed_time += dt;
         if let Some(ref rs) = self.render_state {
-            // Compute global signal averages for terrain tinting (sampled each frame)
-            let (sig_danger, sig_comfort, sig_grief, water_level) = self.world.as_ref()
-                .and_then(|w| w.read().ok())
-                .map(|w| {
-                    let signals = &w.signals;
-                    let n = (signals.width * signals.height) as usize;
-                    let scale = 1.0 / n.max(1) as f32;
-                    let danger  = signals.channels[0].iter().sum::<f32>() * scale * 4.0;
-                    let comfort = signals.channels[2].iter().sum::<f32>() * scale * 4.0;
-                    let grief   = signals.channels[3].iter().sum::<f32>() * scale * 4.0;
-                    // Dynamic water level: base threshold + climate offset for GPU flood rendering
-                    let wl = if w.climate.water_level_offset > 0.0 {
-                        0.28 + w.climate.water_level_offset
-                    } else {
-                        0.0
-                    };
-                    (danger.min(1.0), comfort.min(1.0), grief.min(1.0), wl)
-                })
-                .unwrap_or((0.0, 0.0, 0.0, 0.0));
-            rs.update_water_time_signals(self.elapsed_time, sig_danger, sig_comfort, sig_grief, 1.0, water_level);
+            // Recompute global signal averages every 30 frames (~0.5s at 60fps).
+            // Full-grid scan on 2048² maps costs ~4ms — too expensive for every frame.
+            self.sig_sample_counter += 1;
+            if self.sig_sample_counter >= 30 {
+                self.sig_sample_counter = 0;
+                if let Some(ref world) = self.world {
+                    if let Ok(w) = world.read() {
+                        let signals = &w.signals;
+                        let n = (signals.width * signals.height) as usize;
+                        let scale = 1.0 / n.max(1) as f32;
+                        self.cached_sig_danger  = (signals.channels[0].iter().sum::<f32>() * scale * 4.0).min(1.0);
+                        self.cached_sig_comfort = (signals.channels[2].iter().sum::<f32>() * scale * 4.0).min(1.0);
+                        self.cached_sig_grief   = (signals.channels[3].iter().sum::<f32>() * scale * 4.0).min(1.0);
+                        self.cached_sig_water_level = if w.climate.water_level_offset > 0.0 {
+                            0.28 + w.climate.water_level_offset
+                        } else {
+                            0.0
+                        };
+                    }
+                }
+            }
+            rs.update_water_time_signals(self.elapsed_time, self.cached_sig_danger, self.cached_sig_comfort, self.cached_sig_grief, 1.0, self.cached_sig_water_level);
             rs.update_object_time(self.elapsed_time);
             rs.update_being_time(self.elapsed_time);
         }
@@ -1619,9 +1636,31 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                // God tool palette — bottom dock ribbon + floating sub-tray
+                // God tool palette — left SidePanel + floating sub-tray
                 let power_before = self.god_tool_state.active_power;
-                god_palette::render_dock(&self.egui_ctx, &mut self.god_tool_state);
+                god_palette::ensure_icons(&self.egui_ctx, &mut self.god_tool_state);
+                {
+                    let god_state = &mut self.god_tool_state;
+                    let filters = &mut self.filters;
+                    egui::SidePanel::left("left_dock")
+                        .default_width(200.0)
+                        .resizable(false)
+                        .frame(
+                            egui::Frame::none()
+                                .fill(egui::Color32::from_rgba_premultiplied(14, 14, 18, 235))
+                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(50, 50, 70, 160))),
+                        )
+                        .show(&self.egui_ctx, |ui| {
+                            egui::ScrollArea::vertical()
+                                .id_salt("left_dock_scroll")
+                                .show(ui, |ui| {
+                                    god_palette::render_palette(ui, god_state);
+                                    ui.separator();
+                                    filters.render_into(ui);
+                                });
+                        });
+                }
+                god_palette::render_sub_tray(&self.egui_ctx, &mut self.god_tool_state);
                 // Notify onboarding on first god power selection.
                 if power_before.is_none() && self.god_tool_state.active_power.is_some() {
                     self.onboarding.notify_god_power_selected();
@@ -1635,39 +1674,65 @@ impl ApplicationHandler for App {
                         &world.climate,
                         self.dashboard.tick_rate,
                     );
-                    self.dashboard.ui(&self.egui_ctx, &world.climate, world.tick);
-                    self.inspector.ui(&self.egui_ctx, &world.beings, &world.events, world.tick);
 
-                    // Statistics panel
-                    self.stats_panel.ui(&self.egui_ctx, &self.stats_history);
-
-                    // World laws panel (syncs to engine laws)
+                    // Right SidePanel: Inspector + World Laws + Kingdoms
+                    let mut viewer_laws = engine_laws_to_viewer(&world.laws);
                     {
-                        // Build a viewer-side WorldLaws mirror from the engine laws
-                        let mut viewer_laws = engine_laws_to_viewer(&world.laws);
-                        drop(world);
-                        self.world_laws_panel.ui(&self.egui_ctx, &mut viewer_laws);
-                        // Write back any changes made in the UI
-                        if let Some(ref world) = self.world {
-                            let mut w = world.write().unwrap();
-                            apply_viewer_laws_to_engine(&viewer_laws, &mut w.laws);
-                        }
+                        let inspector = &mut self.inspector;
+                        let wl_panel = &mut self.world_laws_panel;
+                        let k_panel = &mut self.kingdom_panel;
+                        let kd = &self.kingdom_detector;
+                        let sd = &self.settlement_detector;
+
+                        egui::SidePanel::right("right_dock")
+                            .default_width(300.0)
+                            .resizable(true)
+                            .show(&self.egui_ctx, |ui| {
+                                egui::ScrollArea::vertical()
+                                    .id_salt("right_dock_scroll")
+                                    .show(ui, |ui| {
+                                        inspector.render_content(ui, &world.beings, &world.events, world.tick);
+                                        ui.separator();
+                                        wl_panel.render_collapsible(ui, &mut viewer_laws);
+                                        ui.separator();
+                                        k_panel.render_collapsible(ui, kd, sd, &world.beings);
+                                    });
+                            });
                     }
 
-                    // News feed UI
-                    self.news_feed_ui.ui(&self.egui_ctx);
+                    // Bottom Strip: Dashboard | Stats (news stays as floating overlay)
+                    {
+                        let dashboard = &self.dashboard;
+                        let stats_history = &self.stats_history;
+                        let stats_panel = &self.stats_panel;
 
-                    // Kingdom panel
+                        egui::TopBottomPanel::bottom("bottom_strip")
+                            .exact_height(68.0)
+                            .frame(
+                                egui::Frame::none()
+                                    .fill(egui::Color32::from_rgba_premultiplied(12, 12, 18, 240))
+                                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(50, 50, 70, 160)))
+                            )
+                            .show(&self.egui_ctx, |ui| {
+                                ui.horizontal_centered(|ui| {
+                                    dashboard.render_into(ui, &world.climate, world.tick);
+                                    ui.separator();
+                                    stats_panel.render_summary_into(ui, stats_history);
+                                });
+                            });
+                    }
+
+                    // Drop world before write-back
+                    drop(world);
+
+                    // Write back world laws
                     if let Some(ref world) = self.world {
-                        let world = world.read().unwrap();
-                        self.kingdom_panel.ui(
-                            &self.egui_ctx,
-                            &self.kingdom_detector,
-                            &self.settlement_detector,
-                            &world.beings,
-                        );
+                        let mut w = world.write().unwrap();
+                        apply_viewer_laws_to_engine(&viewer_laws, &mut w.laws);
                     }
 
+                    // News feed overlay (floating Area)
+                    self.news_feed_ui.ui(&self.egui_ctx);
                 }
 
                 // Minimap — always rendered while Playing, independent of world lock
@@ -1833,7 +1898,19 @@ impl ApplicationHandler for App {
                                 // Name + population label
                                 let label = format!("{} ({})", s.name, s.population);
                                 let label_pos = center + egui::Vec2::new(0.0, -d - 12.0);
-                                // Dark shadow for readability
+                                // Dark background box for readability
+                                let galley = painter.layout_no_wrap(
+                                    label.clone(),
+                                    egui::FontId::proportional(12.0),
+                                    egui::Color32::WHITE,
+                                );
+                                let text_size = galley.size();
+                                let bg_center = egui::pos2(label_pos.x, label_pos.y - text_size.y / 2.0);
+                                painter.rect_filled(
+                                    egui::Rect::from_center_size(bg_center, text_size + egui::vec2(8.0, 4.0)),
+                                    egui::CornerRadius::same(4),
+                                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180),
+                                );
                                 painter.text(
                                     label_pos + egui::Vec2::new(1.0, 1.0),
                                     egui::Align2::CENTER_BOTTOM,
@@ -1919,6 +1996,19 @@ impl ApplicationHandler for App {
                                     .interactable(false)
                                     .show(&self.egui_ctx, |ui| {
                                         let painter = ui.painter();
+                                        // Dark background box
+                                        let galley = painter.layout_no_wrap(
+                                            label_text.clone(),
+                                            egui::FontId::proportional(13.0),
+                                            egui::Color32::WHITE,
+                                        );
+                                        let text_size = galley.size();
+                                        let bg_center = egui::pos2(label_pos.x, label_pos.y - text_size.y / 2.0);
+                                        painter.rect_filled(
+                                            egui::Rect::from_center_size(bg_center, text_size + egui::vec2(8.0, 4.0)),
+                                            egui::CornerRadius::same(4),
+                                            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180),
+                                        );
                                         // Shadow
                                         painter.text(
                                             label_pos + egui::Vec2::new(1.0, 1.0),
@@ -2028,7 +2118,7 @@ impl ApplicationHandler for App {
                                         let a = (entry.alpha * 255.0) as u8;
                                         let [r, g, b, _] = entry.color.to_array();
                                         let text_color = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
-                                        let bg_alpha = (entry.alpha * 140.0) as u8;
+                                        let bg_alpha = (entry.alpha * 180.0) as u8;
                                         let shadow_alpha = (entry.alpha * 180.0) as u8;
                                         let label_pos = egui::pos2(entry.sx, entry.sy - 22.0);
                                         let font = egui::FontId::proportional(10.0);
@@ -2382,6 +2472,18 @@ impl ApplicationHandler for App {
 
                                     let pos = egui::pos2(sx, sy - 20.0);
                                     let font = egui::FontId::proportional(20.0);
+                                    // Dark background box
+                                    let galley = painter.layout_no_wrap(
+                                        ann.text.clone(),
+                                        font.clone(),
+                                        egui::Color32::WHITE,
+                                    );
+                                    let text_size = galley.size();
+                                    painter.rect_filled(
+                                        egui::Rect::from_center_size(pos, text_size + egui::vec2(8.0, 4.0)),
+                                        egui::CornerRadius::same(4),
+                                        egui::Color32::from_rgba_unmultiplied(0, 0, 0, (alpha * 180.0) as u8),
+                                    );
                                     // Shadow
                                     painter.text(
                                         pos + egui::vec2(2.0, 2.0),

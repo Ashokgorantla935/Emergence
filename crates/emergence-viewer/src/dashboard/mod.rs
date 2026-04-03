@@ -190,6 +190,38 @@ impl Dashboard {
             });
     }
 
+    /// Render dashboard metrics inline — for embedding in a bottom strip.
+    pub fn render_into(&self, ui: &mut egui::Ui, climate: &Climate, current_tick: u32) {
+        ui.horizontal_centered(|ui| {
+            ui.label(egui::RichText::new(format!("Tick {}", current_tick))
+                .size(11.0).color(egui::Color32::from_rgb(130, 120, 100)));
+            ui.separator();
+            ui.label(egui::RichText::new(format!("Pop: {}", self.displayed_pop as u32))
+                .strong().size(14.0));
+            ui.separator();
+            let happiness = (self.avg_needs[1] + self.avg_needs[3] + self.avg_needs[4]) / 3.0;
+            let happiness_color = if happiness > 0.65 {
+                egui::Color32::from_rgb(80, 200, 80)
+            } else if happiness > 0.35 {
+                egui::Color32::from_rgb(220, 180, 40)
+            } else {
+                egui::Color32::from_rgb(200, 60, 60)
+            };
+            ui.add(egui::ProgressBar::new(happiness).desired_width(60.0).fill(happiness_color));
+            ui.separator();
+            ui.label(egui::RichText::new(format!("{:?}", climate.season()))
+                .size(12.0).color(season_color(climate)));
+            ui.separator();
+            ui.label(egui::RichText::new(format!("{:?}", climate.day_phase()))
+                .size(11.0).color(egui::Color32::from_rgb(180, 170, 140)));
+            if let Some(ref w) = climate.active_weather {
+                ui.separator();
+                ui.label(egui::RichText::new(format!("{:?}", w.kind))
+                    .size(11.0).color(egui::Color32::from_rgb(120, 160, 220)));
+            }
+        });
+    }
+
     #[allow(dead_code)]
     fn render_sparkline(
         &self,

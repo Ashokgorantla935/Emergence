@@ -78,6 +78,43 @@ impl PopulationFilters {
         1.0
     }
 
+    /// Render filter controls inline (no Window wrapper) — for SidePanel embedding.
+    pub fn render_into(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new("FILTERS").strong().size(11.0)
+            .color(egui::Color32::from_rgb(140, 180, 200)));
+        ui.separator();
+        ui.label("Creature Type");
+        ui.checkbox(&mut self.show_humans, "Humans");
+        ui.checkbox(&mut self.show_fauna, "Fauna");
+        ui.separator();
+        ui.label("Life Phase");
+        ui.checkbox(&mut self.show_youth, "Youth");
+        ui.checkbox(&mut self.show_adult, "Adult");
+        ui.checkbox(&mut self.show_elder, "Elder");
+        ui.separator();
+        ui.checkbox(&mut self.show_sleeping, "Sleeping");
+        ui.separator();
+        ui.label("Min Hunger:");
+        ui.add(egui::Slider::new(&mut self.min_need_hunger, 0.0..=1.0));
+        ui.separator();
+        ui.label("Emotion Filter:");
+        let emo_names = ["Any", "Fear", "Joy", "Curiosity", "Anger", "Grief", "Content"];
+        let cur = self.emotion_filter.map(|e| e + 1).unwrap_or(0);
+        let mut sel = cur;
+        egui::ComboBox::from_id_source("emo_filter_inline")
+            .selected_text(emo_names[cur])
+            .show_ui(ui, |ui| {
+                for (i, name) in emo_names.iter().enumerate() {
+                    ui.selectable_value(&mut sel, i, *name);
+                }
+            });
+        self.emotion_filter = if sel == 0 { None } else { Some(sel - 1) };
+        ui.separator();
+        if ui.button("Reset All").clicked() {
+            *self = PopulationFilters::default();
+        }
+    }
+
     pub fn ui(&mut self, egui_ctx: &egui::Context, visible: &mut bool) {
         if !*visible {
             return;

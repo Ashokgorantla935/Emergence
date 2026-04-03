@@ -6,7 +6,7 @@ struct CameraUniform {
     pixels_per_unit: f32,
     _pad0:           f32,
     _pad1:           f32,
-    zoom_level:      u32,  // 0=macro(>150 cells), 1=medium(50-150), 2=close(<50)
+    zoom_blend:      f32,  // 0.0=LOD0(macro), 1.0=LOD1(medium), 2.0=LOD2(close); fractional=blend
 };
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
 @group(1) @binding(0) var t_atlas: texture_2d<f32>;
@@ -361,63 +361,57 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let comfort = clamp(water_time.signal_comfort, 0.0, 1.0);
 
     let base_color = biome_base_color(biome_id);
-
     let structure_id = u32(in.structure_type + 0.5);
 
-    // ── LOD 0: Macro zoom — flat solid biome color only ───────────────────
-    if (camera.zoom_level == 0u) {
-        var color0 = base_color;
-        if (is_water) {
-            color0 = water_depth_color(in.elevation);
-        }
-        color0 = apply_structure(color0, structure_id, in.build_progress, in.world_pos, t, 0u);
-        return apply_illumination(color0, illumination, comfort);
-    }
+    // zoom_blend: 0.0=LOD0, 1.0=LOD1, 2.0=LOD2; fractional = smooth blend between adjacent LODs
+    let zoom = clamp(camera.zoom_blend, 0.0, 2.0);
 
-    // ── LOD 1: Medium zoom — base + subtle per-cell variation ─────────────
-    if (camera.zoom_level == 1u) {
-        let variation = cell_brightness(in.world_pos);
-        var color = vec4<f32>(base_color.rgb * variation, 1.0);
-
-        if (is_water) {
-            // Depth-based color modulated by animated pulse
-            let depth_color = water_depth_color(in.elevation);
-            let pulse = sin(t * 2.0 + in.world_pos.x * 0.5) * 0.03;
-            color = vec4<f32>(
-                clamp(depth_color.r + pulse,        0.0, 1.0),
-                clamp(depth_color.g + pulse,        0.0, 1.0),
-                clamp(depth_color.b + pulse * 1.5,  0.0, 1.0),
-                1.0,
-            );
-        } else {
-            // Signal tinting for land
-            let d = clamp(water_time.signal_danger,  0.0, 1.0);
-            let c = clamp(water_time.signal_comfort, 0.0, 1.0);
-            let g = clamp(water_time.signal_grief,   0.0, 1.0);
-            color = vec4<f32>(
-                clamp(color.r * (1.0 + d * 0.10 - g * 0.10), 0.0, 1.0),
-                clamp(color.g * (1.0 - d * 0.10 - g * 0.10), 0.0, 1.0),
-                clamp(color.b * (1.0 - d * 0.10 + c * (-0.05) + g * 0.10), 0.0, 1.0),
-                1.0,
-            );
-
-            // WorldBox aesthetic: Procedural solid color for the base terrain cell.
-            // Biome sprites (trees, rocks) are rendered separately by ObjectRenderer.
-            // We just use the smooth colored variation without overriding it.
-        }
-        color = apply_structure(color, structure_id, in.build_progress, in.world_pos, t, 1u);
-        return apply_illumination(color, illumination, comfort);
-    }
-
-    // ── LOD 2: Close zoom — full detail with atlas overlay ────────────────
-    let variation = cell_brightness(in.world_pos);
-    var color = vec4<f32>(base_color.rgb * variation, 1.0);
-
+    // ── LOD 0: Macro zoom — flat solid biome color ────────────────────────
+    var color_lod0 = base_color;
     if (is_water) {
-        // Depth-based color + wave animation — NO atlas sampling
+        color_lod0 = water_depth_color(in.elevation);
+    }
+
+    // ── LOD 1: Medium zoom — base + per-cell brightness + signal tinting ──
+    let variation = cell_brightness(in.world_pos);
+    let d = clamp(water_time.signal_danger,  0.0, 1.0);
+    let c = clamp(water_time.signal_comfort, 0.0, 1.0);
+    let g = clamp(water_time.signal_grief,   0.0, 1.0);
+    var color_lod1: vec4<f32>;
+    if (is_water) {
+        let depth_color = water_depth_color(in.elevation);
+        let pulse = sin(t * 2.0 + in.world_pos.x * 0.5) * 0.03;
+        color_lod1 = vec4<f32>(
+            clamp(depth_color.r + pulse,        0.0, 1.0),
+            clamp(depth_color.g + pulse,        0.0, 1.0),
+            clamp(depth_color.b + pulse * 1.5,  0.0, 1.0),
+            1.0,
+        );
+    } else {
+        let lod1_base = vec4<f32>(base_color.rgb * variation, 1.0);
+        color_lod1 = vec4<f32>(
+            clamp(lod1_base.r * (1.0 + d * 0.10 - g * 0.10), 0.0, 1.0),
+            clamp(lod1_base.g * (1.0 - d * 0.10 - g * 0.10), 0.0, 1.0),
+            clamp(lod1_base.b * (1.0 - d * 0.10 + c * (-0.05) + g * 0.10), 0.0, 1.0),
+            1.0,
+        );
+    }
+
+    // Blend LOD 0 → LOD 1 when zoom in [0, 1)
+    if (zoom < 1.0) {
+        let blended = mix(color_lod0, color_lod1, zoom);
+        // Use LOD 0 structure detail in first half, LOD 1 in second half
+        let struct_lod = select(1u, 0u, zoom < 0.5);
+        let with_struct = apply_structure(blended, structure_id, in.build_progress, in.world_pos, t, struct_lod);
+        return apply_illumination(with_struct, illumination, comfort);
+    }
+
+    // ── LOD 2: Close zoom — LOD 1 + shore foam + forest canopy ───────────
+    var color_lod2: vec4<f32>;
+    if (is_water) {
         let depth_color = water_depth_color(in.elevation);
         let pulse = sin(t * 2.0) * 0.05;
-        color = vec4<f32>(
+        color_lod2 = vec4<f32>(
             clamp(depth_color.r + pulse,       0.0, 1.0),
             clamp(depth_color.g + pulse,       0.0, 1.0),
             clamp(depth_color.b + pulse * 1.5, 0.0, 1.0),
@@ -425,44 +419,34 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         );
         // Shore foam: layered crashing waves
         if (in.elevation > 0.20 && in.elevation < 0.28) {
-            let shore_dist = clamp((0.28 - in.elevation) / 0.08, 0.0, 1.0); // 0 at land edge, 1 at deep
+            let shore_dist = clamp((0.28 - in.elevation) / 0.08, 0.0, 1.0);
             let wave_time = t * 2.0 - shore_dist * 8.0;
-            let wave_form = fract(wave_time); // 0 to 1 moving inward
-            
-            // Thin foam line
-            let foam_line = step(0.90, wave_form) * (1.0 - wave_form) * 10.0; 
-            
-            // Base static foam near shore
+            let wave_form = fract(wave_time);
+            let foam_line = step(0.90, wave_form) * (1.0 - wave_form) * 10.0;
             let static_foam = clamp((in.elevation - 0.25) / 0.03, 0.0, 1.0) * 0.4;
-            
             let foam_mix = clamp((foam_line * (1.0 - shore_dist)) + static_foam, 0.0, 1.0);
-            color = mix(color, vec4<f32>(0.92, 0.98, 1.0, 1.0), foam_mix * 0.9);
+            color_lod2 = mix(color_lod2, vec4<f32>(0.92, 0.98, 1.0, 1.0), foam_mix * 0.9);
         }
     } else {
-        // Signal tinting
-        let d = clamp(water_time.signal_danger,  0.0, 1.0);
-        let c = clamp(water_time.signal_comfort, 0.0, 1.0);
-        let g = clamp(water_time.signal_grief,   0.0, 1.0);
-        color = vec4<f32>(
-            clamp(color.r * (1.0 + d * 0.10 - g * 0.10), 0.0, 1.0),
-            clamp(color.g * (1.0 - d * 0.10 - g * 0.10), 0.0, 1.0),
-            clamp(color.b * (1.0 - d * 0.10 + c * (-0.05) + g * 0.10), 0.0, 1.0),
+        let lod2_base = vec4<f32>(base_color.rgb * variation, 1.0);
+        color_lod2 = vec4<f32>(
+            clamp(lod2_base.r * (1.0 + d * 0.10 - g * 0.10), 0.0, 1.0),
+            clamp(lod2_base.g * (1.0 - d * 0.10 - g * 0.10), 0.0, 1.0),
+            clamp(lod2_base.b * (1.0 - d * 0.10 + c * (-0.05) + g * 0.10), 0.0, 1.0),
             1.0,
         );
-
-        // WorldBox aesthetic: No tile atlas mixing for the base grass/sand cell. 
-        // We let the fragment run its lighting, and ObjectRenderer will draw trees on top.
-        
-        // Multi-layer canopy foliage for forests (Procedural only)
+        // Multi-layer canopy foliage for forests (procedural only)
         if (biome_id == 2u) {
             let sway = sin(t * 1.5 + in.world_pos.x * 0.5) * 0.05;
-            
-            // Procedural canopy shadow effect (no atlas sampling!)
             let canopy_darkness = 0.15 + (sin(in.world_pos.x * 3.0 + t + sway) * cos(in.world_pos.y * 3.0)) * 0.05;
-            color = mix(color, vec4<f32>(0.1, 0.3, 0.1, 1.0), canopy_darkness);
+            color_lod2 = mix(color_lod2, vec4<f32>(0.1, 0.3, 0.1, 1.0), canopy_darkness);
         }
     }
 
-    color = apply_structure(color, structure_id, in.build_progress, in.world_pos, t, 2u);
-    return apply_illumination(color, illumination, comfort);
+    // Blend LOD 1 → LOD 2 when zoom in [1, 2]
+    let blend_12 = zoom - 1.0;
+    let blended = mix(color_lod1, color_lod2, blend_12);
+    let struct_lod = select(1u, 2u, blend_12 >= 0.5);
+    let with_struct = apply_structure(blended, structure_id, in.build_progress, in.world_pos, t, struct_lod);
+    return apply_illumination(with_struct, illumination, comfort);
 }

@@ -111,7 +111,7 @@ impl Minimap {
 
         egui::Window::new("Map")
             .id(egui::Id::new("minimap"))
-            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-4.0, 4.0))
+            .anchor(egui::Align2::LEFT_TOP, egui::vec2(208.0, 34.0))
             .auto_sized()
             .title_bar(false)
             .collapsible(false)

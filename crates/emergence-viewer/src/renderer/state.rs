@@ -16,21 +16,33 @@ pub struct ExtCameraUniform {
     pub pixels_per_unit: f32,
     pub _pad0:           f32,
     pub _pad1:           f32,
-    pub zoom_level:      u32,  // 0=macro(>150 cells), 1=medium(50-150), 2=close(<50)
+    pub zoom_blend:      f32,  // 0.0=LOD0(macro), 1.0=LOD1(medium), 2.0=LOD2(close); fractional=blend
 }
 
 impl ExtCameraUniform {
     pub fn from_basic(basic: &CameraUniform, pixels_per_unit: f32, cam_zoom: f32) -> Self {
-        // cam_zoom is the visible height in world cells
-        let zoom_level = if cam_zoom > 150.0 { 0u32 }
-                         else if cam_zoom > 50.0 { 1u32 }
-                         else { 2u32 };
+        // cam_zoom is the visible height in world cells.
+        // Smooth blend between LODs with 20-cell transition bands:
+        //   >=160 → 0.0 (pure LOD 0), 140-160 → 0.0-1.0 blend
+        //   60-140 → 1.0 (pure LOD 1), 40-60 → 1.0-2.0 blend
+        //   <=40  → 2.0 (pure LOD 2)
+        let zoom_blend = if cam_zoom >= 160.0 {
+            0.0f32
+        } else if cam_zoom >= 140.0 {
+            (160.0 - cam_zoom) / 20.0
+        } else if cam_zoom >= 60.0 {
+            1.0f32
+        } else if cam_zoom >= 40.0 {
+            1.0 + (60.0 - cam_zoom) / 20.0
+        } else {
+            2.0f32
+        };
         ExtCameraUniform {
             view_proj: basic.view_proj,
             pixels_per_unit,
             _pad0: 0.0,
             _pad1: 0.0,
-            zoom_level,
+            zoom_blend,
         }
     }
 }
@@ -274,7 +286,7 @@ impl RenderState {
             pixels_per_unit: 32.0,
             _pad0: 0.0,
             _pad1: 0.0,
-            zoom_level: 1u32,
+            zoom_blend: 1.0f32,
         };
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

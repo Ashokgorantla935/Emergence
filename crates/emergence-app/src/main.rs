@@ -388,11 +388,9 @@ impl App {
         scenario.world.predator_fraction = fauna_density.predator_density();
         scenario.world.has_predators = fauna_density != FaunaDensity::Low;
 
-        // Position camera per scenario
-        self.camera = Camera::new(
-            scenario.world.size.0 as f32,
-            scenario.world.size.1 as f32,
-        );
+        // Position camera per scenario — use resolved_size() so 4096-wide maps get correct bounds.
+        let (resolved_w, resolved_h) = scenario.world.resolved_size();
+        self.camera = Camera::new(resolved_w as f32, resolved_h as f32);
         if let Some((w, h)) = self.render_state.as_ref().map(|rs| {
             (rs.surface_config.width, rs.surface_config.height)
         }) {
@@ -402,7 +400,7 @@ impl App {
         self.camera.position = scenario.initial_camera;
         // Zoom in so beings are clearly visible. Default world-height zoom
         // makes beings appear as sub-pixel dots. Use 1/4 of world height.
-        let tight_zoom = scenario.world.size.1 as f32 / 4.0;
+        let tight_zoom = resolved_h as f32 / 4.0;
         self.camera.zoom = tight_zoom;
         self.camera.target_zoom = tight_zoom;
         // For two-tribe scenarios, center between the two spawn clusters.
@@ -414,10 +412,9 @@ impl App {
         }
 
         let world = emergence_core::scenario::create_world_from_scenario(&scenario);
-        let world_size = world.config.size;
 
         // Compute being centroid for camera positioning.
-        // Fall back to world center if no beings spawned yet.
+        // Fall back to world center (resolved dims) if no beings spawned yet.
         let centroid = {
             let count = world.beings.hot.count;
             if count > 0 {
@@ -426,7 +423,7 @@ impl App {
                     .fold([0.0f32, 0.0f32], |acc, p| [acc[0] + p[0], acc[1] + p[1]]);
                 [sum[0] / count as f32, sum[1] / count as f32]
             } else {
-                [world_size.0 as f32 / 2.0, world_size.1 as f32 / 2.0]
+                [resolved_w as f32 / 2.0, resolved_h as f32 / 2.0]
             }
         };
 
@@ -483,8 +480,6 @@ impl App {
 
         // Refresh save slot info
         self.save_slots = SaveSlotInfo::probe_all();
-
-        let _ = world_size;
     }
 
     fn load_from_slot(&mut self, slot: u8) {

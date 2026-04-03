@@ -1,5 +1,4 @@
-/// World News Feed — fading toast notifications in the bottom-left corner.
-/// Events spawn as text lines that drift upward and fade to transparent over 6 seconds.
+/// World News Feed — bottom-left panel, scrolling event messages with importance borders.
 
 use emergence_core::sim::world_state::EventLog;
 
@@ -17,7 +16,7 @@ impl Importance {
             Importance::Gold   => egui::Color32::from_rgb(255, 215, 0),
             Importance::Silver => egui::Color32::from_rgb(192, 192, 192),
             Importance::Bronze => egui::Color32::from_rgb(205, 127, 50),
-            Importance::Normal => egui::Color32::from_rgb(180, 180, 180),
+            Importance::Normal => egui::Color32::GRAY,
         }
     }
 }
@@ -185,86 +184,93 @@ impl NewsFeed {
     }
 }
 
+fn being_name(id: u32) -> String {
+    use crate::observation::kingdom::leader_being_name;
+    leader_being_name(id)
+}
+
 fn event_to_news(evt: &emergence_core::sim::world_state::Event) -> Option<NewsItem> {
     use emergence_core::sim::world_state::EventType;
+    let actor = being_name(evt.actor_id);
+    let target = being_name(evt.target_id);
     let (text, importance) = match evt.event_type {
         EventType::Born => (
-            format!("T{}: Being #{} was born", evt.tick, evt.actor_id),
+            format!("{} was born.", actor),
             Importance::Bronze,
         ),
         EventType::Died => (
-            format!("T{}: Being #{} died", evt.tick, evt.actor_id),
+            format!("{} has died.", actor),
             Importance::Silver,
         ),
         EventType::Bonded => (
-            format!("T{}: Being #{} bonded with #{}", evt.tick, evt.actor_id, evt.target_id),
+            format!("{} and {} formed a bond.", actor, target),
             Importance::Silver,
         ),
         EventType::SharedFood => (
-            format!("T{}: #{} shared food with #{}", evt.tick, evt.actor_id, evt.target_id),
+            format!("{} shared food with {}.", actor, target),
             Importance::Normal,
         ),
         EventType::StoleFood => (
-            format!("T{}: #{} stole from #{}", evt.tick, evt.actor_id, evt.target_id),
+            format!("{} stole from {}.", actor, target),
             Importance::Bronze,
         ),
         EventType::Reproduced => (
-            format!("T{}: #{} and #{} had a child", evt.tick, evt.actor_id, evt.target_id),
+            format!("{} and {} had a child.", actor, target),
             Importance::Silver,
         ),
         EventType::WitnessedHarm => return None,
         EventType::Fled => return None,
         EventType::Killed => (
-            format!("T{}: #{} killed #{}", evt.tick, evt.actor_id, evt.target_id),
+            format!("{} was slain by {}.", target, actor),
             Importance::Bronze,
         ),
         EventType::SettlementFormed => (
-            format!("T{}: Settlement #{} formed", evt.tick, evt.actor_id),
+            "A new settlement has formed.".to_string(),
             Importance::Gold,
         ),
         EventType::SettlementDissolved => (
-            format!("T{}: Settlement #{} dissolved", evt.tick, evt.actor_id),
+            "A settlement has dissolved.".to_string(),
             Importance::Silver,
         ),
         EventType::KingdomFormed => (
-            format!("T{}: Kingdom #{} formed", evt.tick, evt.actor_id),
+            "A new kingdom has risen.".to_string(),
             Importance::Gold,
         ),
         EventType::KingdomFell => (
-            format!("T{}: Kingdom #{} fell", evt.tick, evt.actor_id),
+            "A kingdom has collapsed.".to_string(),
             Importance::Gold,
         ),
         EventType::LeaderElected => (
-            format!("T{}: Being #{} elected leader of #{}", evt.tick, evt.actor_id, evt.target_id),
+            format!("{} has become the new leader.", actor),
             Importance::Silver,
         ),
         EventType::LeaderDied => (
-            format!("T{}: Leader #{} died", evt.tick, evt.actor_id),
+            format!("{}, a leader, has died.", actor),
             Importance::Silver,
         ),
         EventType::WarStarted => (
-            format!("T{}: War between #{} and #{}", evt.tick, evt.actor_id, evt.target_id),
+            "War has broken out.".to_string(),
             Importance::Gold,
         ),
         EventType::WarEnded => (
-            format!("T{}: War between #{} and #{} ended", evt.tick, evt.actor_id, evt.target_id),
+            "An uneasy peace has been reached.".to_string(),
             Importance::Silver,
         ),
         EventType::AllianceFormed => (
-            format!("T{}: Alliance between #{} and #{}", evt.tick, evt.actor_id, evt.target_id),
+            "Two kingdoms have formed an alliance.".to_string(),
             Importance::Silver,
         ),
         EventType::BuildingComplete => (
-            format!("T{}: Being #{} completed a building", evt.tick, evt.actor_id),
+            format!("{} completed a new structure.", actor),
             Importance::Normal,
         ),
         EventType::MassDeath => (
-            format!("T{}: {} beings died", evt.tick, evt.actor_id),
+            format!("A catastrophe claimed {} lives.", evt.actor_id),
             Importance::Gold,
         ),
         EventType::GodAction => return None,
         EventType::Flood => (
-            format!("T{}: {} cells flooded by rising sea levels", evt.tick, evt.actor_id),
+            format!("{} coastal cells swallowed by rising seas.", evt.actor_id),
             Importance::Gold,
         ),
     };

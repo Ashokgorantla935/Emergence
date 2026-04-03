@@ -148,13 +148,7 @@ impl NewsFeedSystem {
                     None => continue,
                 }
             } else {
-                match event.event_type {
-                    EventType::Born => format!("{} beings were born.", count),
-                    EventType::BuildingComplete => format!("{} shelters built.", count),
-                    EventType::SharedFood => format!("{} food shared.", count),
-                    EventType::Fled => format!("{} beings fled.", count),
-                    _ => format!("{} events.", count),
-                }
+                self.format_grouped(event.event_type, *count, *first_tick, settlement_detector)
             };
             let item = RichNewsItem {
                 tick: *first_tick, text, tier,
@@ -447,6 +441,25 @@ impl NewsFeedSystem {
             is_commentary: false,
             jump_being,
         })
+    }
+
+    /// Format a grouped summary for multiple same-type events within the dedup window.
+    fn format_grouped(
+        &self,
+        event_type: EventType,
+        count: u32,
+        first_tick: u32,
+        settlement_detector: &SettlementDetector,
+    ) -> String {
+        let _ = first_tick;
+        let _ = settlement_detector;
+        match event_type {
+            EventType::Born => format!("{} beings were born.", count),
+            EventType::BuildingComplete => format!("{} new structures completed.", count),
+            EventType::SharedFood => format!("{} food-sharing acts this moment.", count),
+            EventType::Fled => format!("{} beings fled from danger.", count),
+            _ => format!("{} events of one kind.", count),
+        }
     }
 
     fn being_name(&self, being_idx: usize, beings: &Beings) -> String {

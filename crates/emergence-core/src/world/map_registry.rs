@@ -20,13 +20,7 @@ pub fn get(id: MapId) -> MapDefinition {
 pub fn all_ids() -> &'static [MapId] {
     &[
         MapId::Earth,
-        MapId::Mars,
         MapId::Pangaea,
-        MapId::Archipelago,
-        MapId::RingWorld,
-        MapId::FractalContinent,
-        MapId::Crucible,
-        MapId::TwinPeaks,
     ]
 }
 
@@ -42,7 +36,7 @@ fn earth() -> MapDefinition {
             width: 256,
             height: 256,
         },
-        biome_rules: BiomeRules::LatitudeDriven { equator_y: 128.0 },
+        biome_rules: BiomeRules::LatitudeDriven { equator_y: 0.5 },
         water_placement: WaterPlacement::BakedMask {
             data: map_assets::earth::WATER_256,
         },

@@ -67,15 +67,9 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     // Provide base tile UV to bound the fragment samples when generating the canopy layers
     out.tile_uv = inst.tile_uv;
 
-    // Map the quad's 0-1 UV to the specific tile region in the atlas
-    // Apply 0.5px inset (0.0005 in UV space for 32px tile in 1024px atlas) to prevent bleeding
-    let tile_size = 1.0 / 32.0; // 32px / 1024px atlas
-    let inset = 0.0005; // ~0.5px inset at 1024px atlas
-    let uv_min = inst.tile_uv + vec2<f32>(inset, inset);
-    let uv_range = tile_size - 2.0 * inset;
-    
-    let cell_frac = vertex.position + vec2<f32>(0.5, 0.5);
-    out.atlas_uv = uv_min + cell_frac * uv_range;
+    // Disable atlas binding for base terrain to emulate WorldBox solid colors.
+    // Trees, mountains and rocks are rendered via ObjectRenderer.
+    out.atlas_uv = vec2<f32>(0.0, 0.0);
 
     out.flags = inst.flags;
     out.world_pos = world;
@@ -406,9 +400,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 1.0,
             );
 
-            // Atlas tile sampling for land decoration
-            let tex_color = textureSample(t_atlas, s_atlas, in.atlas_uv);
-            color = mix(color, tex_color, tex_color.a);
+            // WorldBox aesthetic: Procedural solid color for the base terrain cell.
+            // Biome sprites (trees, rocks) are rendered separately by ObjectRenderer.
+            // We just use the smooth colored variation without overriding it.
         }
         color = apply_structure(color, structure_id, in.build_progress, in.world_pos, t, 1u);
         return apply_illumination(color, illumination, comfort);
@@ -455,29 +449,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             1.0,
         );
 
-        // Atlas tile sampling replaces all procedural decoration
-        let tex_color = textureSample(t_atlas, s_atlas, in.atlas_uv);
-        color = mix(color, tex_color, tex_color.a);
+        // WorldBox aesthetic: No tile atlas mixing for the base grass/sand cell. 
+        // We let the fragment run its lighting, and ObjectRenderer will draw trees on top.
         
-        // Multi-layer canopy foliage for forests
+        // Multi-layer canopy foliage for forests (Procedural only)
         if (biome_id == 2u) {
-            let sway = sin(t * 1.5 + in.world_pos.x * 0.5) * 0.002;
-            let uv_min = in.tile_uv + vec2<f32>(0.0005, 0.0005);
-            let uv_max = in.tile_uv + vec2<f32>(1.0 / 32.0 - 0.0005, 1.0 / 32.0 - 0.0005);
+            let sway = sin(t * 1.5 + in.world_pos.x * 0.5) * 0.05;
             
-            // Layer 1 Canopy
-            let c1_uv = clamp(in.atlas_uv + vec2<f32>(sin(t*0.5+in.world_pos.y)*0.001, sway * 0.5), uv_min, uv_max);
-            let l1 = textureSample(t_atlas, s_atlas, c1_uv);
-            if (l1.a > 0.1) {
-                color = mix(color, vec4<f32>(l1.rgb * 1.15, l1.a), l1.a * 0.5);
-            }
-
-            // Layer 2 Canopy
-            let c2_uv = clamp(in.atlas_uv + vec2<f32>(cos(t*0.8-in.world_pos.x)*0.0015, sway), uv_min, uv_max);
-            let l2 = textureSample(t_atlas, s_atlas, c2_uv);
-            if (l2.a > 0.1) {
-                color = mix(color, vec4<f32>(l2.rgb * 1.3, l2.a), l2.a * 0.35);
-            }
+            // Procedural canopy shadow effect (no atlas sampling!)
+            let canopy_darkness = 0.15 + (sin(in.world_pos.x * 3.0 + t + sway) * cos(in.world_pos.y * 3.0)) * 0.05;
+            color = mix(color, vec4<f32>(0.1, 0.3, 0.1, 1.0), canopy_darkness);
         }
     }
 

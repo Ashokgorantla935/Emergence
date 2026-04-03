@@ -71,7 +71,7 @@ impl TimeControls {
     pub fn new() -> Self {
         TimeControls {
             paused: false,
-            speed: SimSpeed::X5,
+            speed: SimSpeed::X1,
             single_step: false,
             actual_fps: 60.0,
         }

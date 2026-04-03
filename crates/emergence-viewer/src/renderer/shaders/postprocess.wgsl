@@ -34,7 +34,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    var color = textureSample(scene_texture, scene_sampler, in.uv);
+    var color = textureSampleLevel(scene_texture, scene_sampler, in.uv, 0.0);
 
     // Time-of-day color grade
     color = vec4<f32>(color.rgb * pp.tint_color * pp.brightness, color.a);

@@ -103,11 +103,14 @@ impl ResourceLayer {
         }
     }
 
-    pub fn tick(&mut self, terrain: &Terrain, season: Season) {
-        self.tick_with_laws(terrain, season, false, false);
+    pub fn tick(&mut self, terrain: &Terrain, season: Season, tick: u32) {
+        self.tick_with_laws(terrain, season, false, false, tick);
     }
 
-    pub fn tick_with_laws(&mut self, terrain: &Terrain, season: Season, no_food_regrowth: bool, infinite_food: bool) {
+    pub fn tick_with_laws(&mut self, terrain: &Terrain, season: Season, no_food_regrowth: bool, infinite_food: bool, tick: u32) {
+        if tick % 20 != 0 {
+            return;
+        }
         let season_multiplier = match season {
             Season::Spring => 2.0,
             Season::Summer => 1.0,
@@ -122,7 +125,7 @@ impl ResourceLayer {
             if infinite_food {
                 self.food[i] = self.food_capacity[i];
             } else if !no_food_regrowth && self.regrowth_rate[i] > 0.0 {
-                self.food[i] += self.regrowth_rate[i] * season_multiplier;
+                self.food[i] += self.regrowth_rate[i] * season_multiplier * 20.0;
                 if self.food[i] > self.food_capacity[i] {
                     self.food[i] = self.food_capacity[i];
                 }
@@ -240,8 +243,8 @@ mod tests {
         assert!(after_consume < initial);
 
         // Regrowth in spring
-        for _ in 0..100 {
-            resources.tick(&terrain, Season::Spring);
+        for i in 0..100u32 {
+            resources.tick(&terrain, Season::Spring, i * 20);
         }
         let after_regrowth = resources.food[(forest_y * w + forest_x) as usize];
         assert!(

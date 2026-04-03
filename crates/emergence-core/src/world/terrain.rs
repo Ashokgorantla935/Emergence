@@ -124,7 +124,7 @@ impl Terrain {
                         super::terrain_gen::generate_custom_procedural(w, h, params)
                     }
                     CustomMapSource::Heightmap(data) => {
-                        decode_baked_elevation(data, w, h)
+                        decode_baked_elevation(data, w, h, config.terrain_seed as u32)
                     }
                 }
             }
@@ -427,9 +427,9 @@ fn dispatch_elevation_source(
         }
         ElevationSource::Baked { data, width: bw, height: bh } => {
             if *bw == w && *bh == h {
-                decode_baked_elevation(data, *bw, *bh)
+                decode_baked_elevation(data, *bw, *bh, fallback_seed as u32)
             } else {
-                upsample_baked_elevation(data, *bw, *bh, w, h)
+                upsample_baked_elevation(data, *bw, *bh, w, h, fallback_seed as u32)
             }
         }
         ElevationSource::Blank => {
@@ -440,14 +440,29 @@ fn dispatch_elevation_source(
 }
 
 /// Decode a baked u8 elevation array (1 byte per cell, 0-255 = 0.0-1.0).
-fn decode_baked_elevation(data: &[u8], w: u32, h: u32) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+fn decode_baked_elevation(data: &[u8], w: u32, h: u32, seed: u32) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let len = (w * h) as usize;
     let elevation: Vec<f32> = data.iter().take(len).map(|&b| b as f32 / 255.0).collect();
     // Pad if data is short
     let mut elevation = elevation;
     elevation.resize(len, 0.3);
-    let moisture: Vec<f32> = elevation.iter().map(|&e| (0.5 + (1.0 - e) * 0.3).clamp(0.0, 1.0)).collect();
-    let temperature_base: Vec<f32> = elevation.iter().map(|&e| (0.8 - e * 0.6).clamp(0.0, 1.0)).collect();
+
+    let simplex_noise = OpenSimplex::new(seed);
+    let mut moisture = vec![0.0f32; len];
+    let mut temperature_base = vec![0.0f32; len];
+
+    for dy in 0..h {
+        for dx in 0..w {
+            let i = (dy * w + dx) as usize;
+            let e = elevation[i];
+            let nx = dx as f64 * 0.015;
+            let ny = dy as f64 * 0.015;
+            let n = simplex_noise.get([nx, ny]) as f32 * 0.2;
+            moisture[i] = (0.5 + (1.0 - e) * 0.3 + n).clamp(0.0, 1.0);
+            temperature_base[i] = (0.8 - e * 0.6 + n).clamp(0.0, 1.0);
+        }
+    }
+
     (elevation, moisture, temperature_base)
 }
 
@@ -456,9 +471,14 @@ fn upsample_baked_elevation(
     data: &[u8],
     src_w: u32, src_h: u32,
     dst_w: u32, dst_h: u32,
+    seed: u32,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let dst_len = (dst_w * dst_h) as usize;
     let mut elevation = vec![0.0f32; dst_len];
+    let mut moisture = vec![0.0f32; dst_len];
+    let mut temperature_base = vec![0.0f32; dst_len];
+
+    let simplex_noise = OpenSimplex::new(seed);
 
     for dy in 0..dst_h {
         for dx in 0..dst_w {
@@ -484,11 +504,16 @@ fn upsample_baked_elevation(
                   + s11 * tx * ty;
 
             elevation[(dy * dst_w + dx) as usize] = e;
+
+            let nx = dx as f64 * 0.015;
+            let ny = dy as f64 * 0.015;
+            let n = simplex_noise.get([nx, ny]) as f32 * 0.2;
+
+            moisture[(dy * dst_w + dx) as usize] = (0.5 + (1.0 - e) * 0.3 + n).clamp(0.0, 1.0);
+            temperature_base[(dy * dst_w + dx) as usize] = (0.8 - e * 0.6 + n).clamp(0.0, 1.0);
         }
     }
 
-    let moisture: Vec<f32> = elevation.iter().map(|&e| (0.5 + (1.0 - e) * 0.3).clamp(0.0, 1.0)).collect();
-    let temperature_base: Vec<f32> = elevation.iter().map(|&e| (0.8 - e * 0.6).clamp(0.0, 1.0)).collect();
     (elevation, moisture, temperature_base)
 }
 
@@ -513,7 +538,7 @@ fn assign_biomes(
     match rules {
         BiomeRules::Standard => assign_standard_biomes(elevation, moisture, temperature, &water_mask, has_water),
         BiomeRules::LatitudeDriven { equator_y } => {
-            assign_latitude_biomes(elevation, moisture, &water_mask, w, h, *equator_y)
+            assign_latitude_biomes(elevation, moisture, temperature, &water_mask, w, h, *equator_y)
         }
         BiomeRules::Banded { bands } => {
             assign_banded_biomes(elevation, &water_mask, w, h, bands)
@@ -605,6 +630,7 @@ fn assign_standard_biomes(
 fn assign_latitude_biomes(
     elevation: &[f32],
     moisture: &[f32],
+    temperature: &[f32],
     water_mask: &[bool],
     w: u32, h: u32,
     equator_y: f32,
@@ -629,7 +655,7 @@ fn assign_latitude_biomes(
                 continue;
             }
             let lat_temp = 1.0 - ((y as f32 - equator) / equator).abs();
-            let temp = (lat_temp - elev * 0.4).clamp(0.0, 1.0);
+            let temp = (lat_temp * 0.6 + temperature[i] * 0.4 - elev * 0.4).clamp(0.0, 1.0);
             let m = moisture[i];
 
             let b = if temp > 0.7 && m > 0.6 {

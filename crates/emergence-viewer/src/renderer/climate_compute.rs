@@ -28,6 +28,7 @@ pub struct ClimateComputePipeline {
     flip: std::cell::Cell<bool>,
     staging_buf: wgpu::Buffer,
     pub readback_flag: Arc<AtomicBool>,
+    readback_in_flight: AtomicBool,
 }
 
 impl ClimateComputePipeline {
@@ -145,6 +146,7 @@ impl ClimateComputePipeline {
             flip: std::cell::Cell::new(false),
             staging_buf,
             readback_flag: Arc::new(AtomicBool::new(false)),
+            readback_in_flight: AtomicBool::new(false),
         }
     }
 
@@ -195,7 +197,10 @@ impl ClimateComputePipeline {
 
     /// Start async GPU→CPU readback of the current write buffer.
     pub fn start_download(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        if self.readback_flag.load(Ordering::SeqCst) { return; }
+        if self.readback_in_flight.load(Ordering::SeqCst) || self.readback_flag.load(Ordering::SeqCst) {
+            return;
+        }
+        self.readback_in_flight.store(true, Ordering::SeqCst);
 
         let cell_count = (self.width * self.height) as usize;
         let byte_len = (cell_count * std::mem::size_of::<f32>()) as u64;
@@ -228,6 +233,7 @@ impl ClimateComputePipeline {
         }
         self.staging_buf.unmap();
         self.readback_flag.store(false, Ordering::SeqCst);
+        self.readback_in_flight.store(false, Ordering::SeqCst);
         true
     }
 }

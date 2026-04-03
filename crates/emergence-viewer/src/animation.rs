@@ -272,9 +272,9 @@ impl AnimationManager {
         // Let's mix their bits so it isn't just grouped in chunks.
         let mut x = i as u32;
         x ^= x >> 16;
-        x *= 0x7feb352d;
+        x = x.wrapping_mul(0x7feb352d);
         x ^= x >> 15;
-        x *= 0x846ca68b;
+        x = x.wrapping_mul(0x846ca68b);
         x ^= x >> 16;
         
         let npc_idx = x % 12;

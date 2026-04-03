@@ -1474,5 +1474,92 @@ pub fn compose_from_assets(packs_root: &str) -> (Vec<u8>, Vec<String>) {
         }
     }
 
+    // --- BEGIN ROW 20 CROPS ---
+    let wheat_path = format!("{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Crops/wheat_04.png", packs_root);
+    if let Some(sheet) = load_png(&wheat_path) {
+        let tile = crop_and_scale_to_32(&sheet, 0, 0, sheet.width(), sheet.height());
+        blit_cell_1024(&mut pixels, 20, 2, &tile); // UV_WHEAT_FULL
+        blit_cell_1024(&mut pixels, 20, 3, &tile); // UV_WHEAT_DEPLETED
+    }
+
+    let berry_path = format!("{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Crops/radish_04.png", packs_root);
+    if let Some(sheet) = load_png(&berry_path) {
+        let tile = crop_and_scale_to_32(&sheet, 0, 0, sheet.width(), sheet.height());
+        blit_cell_1024(&mut pixels, 20, 0, &tile); // UV_BERRY_FULL
+        blit_cell_1024(&mut pixels, 20, 1, &tile); // UV_BERRY_DEPLETED
+    }
+
+    let fish_path = format!("{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Crops/fish.png", packs_root);
+    if let Some(sheet) = load_png(&fish_path) {
+        let tile = crop_and_scale_to_32(&sheet, 0, 0, sheet.width(), sheet.height());
+        blit_cell_1024(&mut pixels, 20, 4, &tile); // UV_FISH_FULL
+        blit_cell_1024(&mut pixels, 20, 5, &tile); // UV_FISH_DEPLETED
+    }
+
+    let stone_path = format!("{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Crops/rock.png", packs_root);
+    if let Some(sheet) = load_png(&stone_path) {
+        let tile = crop_and_scale_to_32(&sheet, 0, 0, sheet.width(), sheet.height());
+        blit_cell_1024(&mut pixels, 20, 6, &tile); // UV_STONE
+    }
+    
+    let wood_path = format!("{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Crops/wood.png", packs_root);
+    if let Some(sheet) = load_png(&wood_path) {
+        let tile = crop_and_scale_to_32(&sheet, 0, 0, sheet.width(), sheet.height());
+        blit_cell_1024(&mut pixels, 20, 10, &tile); // UV_WOOD
+    }
+
+    let crate_path = format!("{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Crops/crate_base.png", packs_root);
+    if let Some(sheet) = load_png(&crate_path) {
+        let tile = crop_and_scale_to_32(&sheet, 0, 0, sheet.width(), sheet.height());
+        blit_cell_1024(&mut pixels, 20, 12, &tile); // UV_CRATE
+    }
+
+    // Clear Row 20, Col 8 to be completely transparent for sparse grass decor mapping
+    for py in 0..32 {
+        for px in 0..32 {
+            let idx = ((20 * 32 + py) * 1024 + (8 * 32 + px)) * 4;
+            pixels[idx] = 0;
+            pixels[idx+1] = 0;
+            pixels[idx+2] = 0;
+            pixels[idx+3] = 0;
+        }
+    }
+    // --- END ROW 20 CROPS ---
+
+    // TREES: Map beautiful Sunnyside Animated Trees into row 21 (for ObjectRenderer to use)
+    let tree_path = format!("{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Plants/spr_deco_tree_01_strip4.png", packs_root);
+    if let Some(sheet) = load_png(&tree_path) {
+        let frame_w = sheet.width() / 4;
+        for frame in 0..4 {
+            let tile = crop_and_scale_to_32(&sheet, frame * frame_w, 0, frame_w, sheet.height());
+            // UV_TREE_A to UV_TREE_D use row 21, columns 0-3
+            blit_cell_1024(&mut pixels, 21, frame as usize, &tile);
+        }
+        report.push(format!("Mapped beautiful Sunnyside Trees to row 21!"));
+    }
+
+    // ROCKS/BUSHES (Tree 2)
+    let tree2_path = format!("{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Plants/spr_deco_tree_02_strip4.png", packs_root);
+    if let Some(sheet) = load_png(&tree2_path) {
+        let frame_w = sheet.width() / 4;
+        for frame in 0..4 {
+            let tile = crop_and_scale_to_32(&sheet, frame * frame_w, 0, frame_w, sheet.height());
+            // UV_ROCK_A / REED use row 21, columns 6-9
+            blit_cell_1024(&mut pixels, 21, 6 + frame as usize, &tile);
+        }
+    }
+
+    // FLOWERS/MUSHROOMS
+    let mush_path = format!("{}/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Plants/spr_deco_mushroom_red_01_strip4.png", packs_root);
+    if let Some(sheet) = load_png(&mush_path) {
+        let frame_w = sheet.width() / 4;
+        for frame in 0..4 {
+            let tile = crop_and_scale_to_32(&sheet, frame * frame_w, 0, frame_w, sheet.height());
+            // UV_FLOWER_A to MUSHROOM use row 21, columns 10-15
+            blit_cell_1024(&mut pixels, 21, 10 + frame as usize, &tile);
+        }
+    }
+
+
     (pixels, report)
 }

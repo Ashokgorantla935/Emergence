@@ -150,7 +150,7 @@ impl Default for VolumeSettings {
     fn default() -> Self {
         VolumeSettings {
             levels: [0.8, 0.7, 0.8, 0.7],
-            muted:  false,
+            muted:  true,
         }
     }
 }

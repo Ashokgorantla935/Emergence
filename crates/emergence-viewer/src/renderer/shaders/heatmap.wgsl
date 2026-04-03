@@ -25,6 +25,6 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let val = textureSample(heatmap_texture, heatmap_sampler, in.uv);
+    let val = textureSampleLevel(heatmap_texture, heatmap_sampler, in.uv, 0.0);
     return val;
 }

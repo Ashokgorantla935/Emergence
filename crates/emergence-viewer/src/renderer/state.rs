@@ -73,6 +73,10 @@ pub struct RenderState {
     /// Dedicated entity texture + bind group for being sprites (decoupled from terrain atlas).
     /// Uses the same bind_group_layout as atlas (texture + sampler at bindings 0 and 1).
     pub entity_bind_group: wgpu::BindGroup,
+    /// Dedicated Sunnyside terrain tileset bind group (1024x1024, 16px tiles, 64x64 grid).
+    /// Bound to slot 1 of the terrain pipeline instead of the procedural atlas.
+    /// Falls back to atlas bind group if the PNG is missing.
+    pub terrain_bind_group: wgpu::BindGroup,
     /// V1: World objects (resources + structures) — single instanced draw call.
     pub object_pipeline: wgpu::RenderPipeline,
     /// V2: Unified particle system — single instanced draw call for ALL particles.
@@ -147,87 +151,116 @@ impl RenderState {
         // Row 0: walk down, Row 1: walk up, Row 2: walk right, Row 3: walk left.
         // Falls back to atlas bind group if the file is missing or malformed.
         let entity_bind_group = {
-            let spritesheet_path = concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../assets/sprites/packs/premade-npc-spritesheets/combined_npcs.png"
-            );
-            let loaded = (|| -> Option<wgpu::BindGroup> {
-                let img = image::open(spritesheet_path).ok()?.to_rgba8();
-                let (w, h) = img.dimensions();
-                let pixels = img.into_raw();
+            let img = image::load_from_memory(include_bytes!(
+                "../../../../assets/sprites/packs/premade-npc-spritesheets/combined_npcs.png"
+            )).expect("Failed to load NPC spritesheet").to_rgba8();
+            let (w, h) = img.dimensions();
+            eprintln!("[entity] Loaded {}x{} character spritesheet", w, h);
+            let pixels = img.into_raw();
 
-                let texture = device.create_texture_with_data(
-                    &queue,
-                    &wgpu::TextureDescriptor {
-                        label: Some("Entity Texture"),
-                        size: wgpu::Extent3d {
-                            width: w,
-                            height: h,
-                            depth_or_array_layers: 1,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                        view_formats: &[],
+            let texture = device.create_texture_with_data(
+                &queue,
+                &wgpu::TextureDescriptor {
+                    label: Some("Entity Texture"),
+                    size: wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
                     },
-                    wgpu::util::TextureDataOrder::LayerMajor,
-                    bytemuck::cast_slice(&pixels),
-                );
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                },
+                wgpu::util::TextureDataOrder::LayerMajor,
+                bytemuck::cast_slice(&pixels),
+            );
 
-                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-                let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                    label: Some("Entity Sampler"),
-                    address_mode_u: wgpu::AddressMode::ClampToEdge,
-                    address_mode_v: wgpu::AddressMode::ClampToEdge,
-                    address_mode_w: wgpu::AddressMode::ClampToEdge,
-                    mag_filter: wgpu::FilterMode::Nearest,
-                    min_filter: wgpu::FilterMode::Nearest,
-                    mipmap_filter: wgpu::FilterMode::Nearest,
-                    ..Default::default()
-                });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("Entity Sampler"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Nearest,
+                min_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            });
 
-                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("Entity BG"),
-                    layout: &atlas.bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&sampler),
-                        },
-                    ],
-                });
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Entity BG"),
+                layout: &atlas.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                ],
+            })
+        };
 
-                eprintln!("[entity] Loaded {}x{} character spritesheet", w, h);
-                Some(bg)
-            })();
+        // ── Terrain texture (Sunnyside 16px tileset, 1024x1024) ──────────
+        let terrain_bind_group = {
+            let img = image::load_from_memory(include_bytes!(
+                "../../../../assets/sprites/packs/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Tileset/spr_tileset_sunnysideworld_16px.png"
+            )).expect("Failed to load Sunnyside terrain tileset").to_rgba8();
+            let (w, h) = img.dimensions();
+            eprintln!("[terrain] Loaded Sunnyside tileset {}x{}", w, h);
+            let pixels = img.into_raw();
 
-            match loaded {
-                Some(bg) => bg,
-                None => {
-                    eprintln!("[entity] Spritesheet not found — falling back to atlas bind group");
-                    // Re-create a bind group from atlas view+sampler since we can't clone bind groups
-                    device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("Entity BG (atlas fallback)"),
-                        layout: &atlas.bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&atlas.view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(&atlas.sampler),
-                            },
-                        ],
-                    })
-                }
-            }
+            let texture = device.create_texture_with_data(
+                &queue,
+                &wgpu::TextureDescriptor {
+                    label: Some("Sunnyside Terrain Texture"),
+                    size: wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                },
+                wgpu::util::TextureDataOrder::LayerMajor,
+                bytemuck::cast_slice(&pixels),
+            );
+
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("Sunnyside Terrain Sampler"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Nearest,
+                min_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            });
+
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Sunnyside Terrain BG"),
+                layout: &atlas.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                ],
+            })
         };
 
         // ── Camera uniform buffer (extended) ──────────────────────────────
@@ -864,6 +897,7 @@ impl RenderState {
             heatmap_pipeline,
             atlas,
             entity_bind_group,
+            terrain_bind_group,
             object_pipeline,
             particle_pipeline,
             postprocess,

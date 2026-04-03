@@ -46,7 +46,7 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let c = textureSample(sprite_atlas, atlas_sampler, in.uv);
+    let c = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
     if c.a < 0.05 { discard; }
     return vec4<f32>(c.rgb * in.color.rgb, c.a * in.color.a);
 }

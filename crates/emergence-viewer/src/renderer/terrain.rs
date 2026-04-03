@@ -4,7 +4,8 @@ use wgpu::util::DeviceExt;
 /// Instanced quad terrain renderer. Each terrain cell is a quad that samples
 /// a real 16x16 tile from the sprite atlas. No more 1-pixel-per-cell texture.
 
-const ATLAS_CELL: f32 = 1.0 / 32.0;
+// Sunnyside tileset is 1024x1024 with 16px tiles → 64x64 grid.
+const ATLAS_CELL: f32 = 1.0 / 64.0;
 
 /// One instance per visible terrain cell.
 #[repr(C)]
@@ -32,54 +33,38 @@ fn cell_hash(x: usize, y: usize) -> usize {
     (h >> 16) ^ h
 }
 
-// Atlas tile UV origins (row, col) → [f32; 2] UV top-left.
-// Sunnyside tileset terrain tiles are at atlas rows 28-29.
+// Atlas tile UV origins (col, row) → [f32; 2] UV top-left in the Sunnyside tileset.
+// Sunnyside 1024x1024, 16px tiles → 64 tiles per row.
 const fn tile_uv(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * ATLAS_CELL, row as f32 * ATLAS_CELL]
 }
 
-// Biome tile variant tables.
-// Sunnyside 1024x1024 tileset was loaded into atlas rows 28-29 (row 2 and row 4 of the tileset).
-// These are SOLID terrain tiles (fully opaque, no transparency).
-// The shader also has a fallback: if a tile pixel is transparent, fill with WorldBox palette color.
-//
-// Row 28 = Sunnyside tileset row 2 (various terrain: grass, paths, dirt, etc.)
-// Row 29 = Sunnyside tileset row 4 (water, more terrain)
-// All biomes use row 28 with different column ranges for variety.
-
 const GRASS_TILES: &[[f32; 2]] = &[
-    tile_uv(0, 28), tile_uv(1, 28), tile_uv(2, 28),
-    tile_uv(3, 28), tile_uv(4, 28),
+    tile_uv(0, 1), tile_uv(0, 2), tile_uv(1, 1), tile_uv(1, 2),
 ];
 
 const FOREST_TILES: &[[f32; 2]] = &[
-    tile_uv(5, 28), tile_uv(6, 28), tile_uv(7, 28),
-    tile_uv(8, 28), tile_uv(9, 28),
+    tile_uv(4, 1), tile_uv(4, 2), tile_uv(5, 1), tile_uv(5, 2),
 ];
 
 const DESERT_TILES: &[[f32; 2]] = &[
-    tile_uv(10, 28), tile_uv(11, 28), tile_uv(12, 28),
-    tile_uv(13, 28), tile_uv(14, 28),
+    tile_uv(8, 1), tile_uv(8, 2), tile_uv(9, 1), tile_uv(9, 2),
 ];
 
 const MOUNTAIN_TILES: &[[f32; 2]] = &[
-    tile_uv(15, 28), tile_uv(16, 28), tile_uv(17, 28),
-    tile_uv(18, 28), tile_uv(19, 28),
+    tile_uv(15, 1), tile_uv(15, 2), tile_uv(16, 1), tile_uv(16, 2),
 ];
 
 const WATER_TILES: &[[f32; 2]] = &[
-    tile_uv(0, 29), tile_uv(1, 29), tile_uv(2, 29),
-    tile_uv(3, 29), tile_uv(4, 29),
+    tile_uv(3, 15), tile_uv(3, 16), tile_uv(4, 15), tile_uv(4, 16),
 ];
 
 const WETLAND_TILES: &[[f32; 2]] = &[
-    tile_uv(20, 28), tile_uv(21, 28), tile_uv(22, 28),
-    tile_uv(23, 28), tile_uv(24, 28),
+    tile_uv(10, 1), tile_uv(10, 2), tile_uv(11, 1), tile_uv(11, 2),
 ];
 
 const SNOW_TILES: &[[f32; 2]] = &[
-    tile_uv(25, 28), tile_uv(26, 28), tile_uv(27, 28),
-    tile_uv(28, 28), tile_uv(29, 28),
+    tile_uv(12, 1), tile_uv(12, 2), tile_uv(13, 1), tile_uv(13, 2),
 ];
 
 use std::collections::HashMap;
@@ -199,15 +184,15 @@ impl TerrainRenderer {
 
         self.visible_chunks.clear();
 
-        // Calculate overlapping chunks
-        let cx_min = x_min / CHUNK_SIZE;
-        let cx_max = x_max / CHUNK_SIZE;
-        let cy_min = y_min / CHUNK_SIZE;
-        let cy_max = y_max / CHUNK_SIZE;
+        // Calculate overlapping chunks (div_euclid handles negative coords correctly)
+        let cx_min = (x_min as i32).div_euclid(CHUNK_SIZE as i32);
+        let cx_max = (x_max as i32).div_euclid(CHUNK_SIZE as i32);
+        let cy_min = (y_min as i32).div_euclid(CHUNK_SIZE as i32);
+        let cy_max = (y_max as i32).div_euclid(CHUNK_SIZE as i32);
 
         for cy in cy_min..=cy_max {
             for cx in cx_min..=cx_max {
-                let chunk_key = (cx as i32, cy as i32);
+                let chunk_key = (cx, cy);
                 self.visible_chunks.push(chunk_key);
 
                 // If chunk is missing or dirty, we generate it.
@@ -219,8 +204,8 @@ impl TerrainRenderer {
 
                 if chunk_needs_rebuild {
                     let mut instances = Vec::with_capacity(CHUNK_INSTANCES);
-                    let base_x = cx * CHUNK_SIZE;
-                    let base_y = cy * CHUNK_SIZE;
+                    let base_x = (cx as usize) * CHUNK_SIZE;
+                    let base_y = (cy as usize) * CHUNK_SIZE;
 
                     for y in base_y..(base_y + CHUNK_SIZE).min(h) {
                         for x in base_x..(base_x + CHUNK_SIZE).min(w) {

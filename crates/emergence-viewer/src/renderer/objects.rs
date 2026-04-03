@@ -34,14 +34,14 @@ const UV_SL_CAMPFIRE_UNLIT: [f32; 2] = uv(10, 20);
 const UV_SL_BRIDGE:     [f32; 2] = uv(11, 20);
 
 // Grass biome decorations — Sprout Lands (row 20, col 22-29)
-const UV_GRASS_DECOR_0: [f32; 2] = uv(22, 20);
-const UV_GRASS_DECOR_1: [f32; 2] = uv(23, 20);
-const UV_GRASS_DECOR_2: [f32; 2] = uv(24, 20);
-const UV_GRASS_DECOR_3: [f32; 2] = uv(25, 20);
-const UV_GRASS_DECOR_4: [f32; 2] = uv(26, 20);
-const UV_GRASS_DECOR_5: [f32; 2] = uv(27, 20);
-const UV_GRASS_DECOR_6: [f32; 2] = uv(28, 20);
-const UV_GRASS_DECOR_7: [f32; 2] = uv(29, 20);
+const UV_GRASS_DECOR_0: [f32; 2] = uv(15, 21); // 1 in 8 is Mushroom
+const UV_GRASS_DECOR_1: [f32; 2] = uv(8, 20); // Remainder are invisible
+const UV_GRASS_DECOR_2: [f32; 2] = uv(8, 20);
+const UV_GRASS_DECOR_3: [f32; 2] = uv(8, 20);
+const UV_GRASS_DECOR_4: [f32; 2] = uv(8, 20);
+const UV_GRASS_DECOR_5: [f32; 2] = uv(8, 20);
+const UV_GRASS_DECOR_6: [f32; 2] = uv(8, 20);
+const UV_GRASS_DECOR_7: [f32; 2] = uv(8, 20);
 
 // Fan-tasy buildings (row 20, col 30-31)
 const UV_FT_BUILDING_A: [f32; 2] = uv(30, 20);
@@ -105,27 +105,27 @@ const UV_HUT_SL_F:     [f32; 2] = uv(5, 18);
 const UV_HUT_SL_G:     [f32; 2] = uv(6, 18);
 const UV_HUT_SL_H:     [f32; 2] = uv(7, 18);
 
-// Structure atlas cells (row 20, col 11+)
-const UV_CAMPFIRE_0:  [f32; 2] = uv(11, 20);
-const UV_CAMPFIRE_1:  [f32; 2] = uv(12, 20);
-const UV_CAMPFIRE_2:  [f32; 2] = uv(13, 20);
-const UV_LEAN_TO:     [f32; 2] = uv(14, 20);
-const UV_HUT:         [f32; 2] = uv(15, 20);
-const UV_WALL:        [f32; 2] = uv(16, 20);
-const UV_FOOD_CACHE:  [f32; 2] = uv(17, 20);
+// Structure atlas cells
+const UV_CAMPFIRE_0:  [f32; 2] = uv(6, 20); // Stone
+const UV_CAMPFIRE_1:  [f32; 2] = uv(6, 20); // Stone
+const UV_CAMPFIRE_2:  [f32; 2] = uv(6, 20); // Stone
+const UV_LEAN_TO:     [f32; 2] = uv(10, 20); // Wood
+const UV_HUT:         [f32; 2] = uv(12, 20); // Crate
+const UV_WALL:        [f32; 2] = uv(10, 20); // Wood
+const UV_FOOD_CACHE:  [f32; 2] = uv(12, 20); // Crate
 
 // Variant tables
 const TREE_VARIANTS_FOREST: &[[f32; 2]] = &[
     UV_TREE_A, UV_TREE_B, UV_TREE_C, UV_TREE_D, UV_TREE_E, UV_TREE_F,
 ];
 const TREE_VARIANTS_GRASSLAND: &[[f32; 2]] = &[
-    UV_TREE_A, UV_TREE_B, UV_MW_DECOR_0,
+    UV_TREE_A, UV_TREE_B, UV_TREE_C, // Removed UV_MW_DECOR_0 which was unmapped row 19
 ];
 const BUSH_VARIANTS: &[[f32; 2]] = &[
-    UV_DECOR_BUSH, UV_MW_DECOR_1, UV_MW_DECOR_2, UV_MW_DECOR_3,
+    UV_DECOR_BUSH, UV_FLOWER_A, UV_FLOWER_B, UV_FLOWER_C,
 ];
 const ROCK_VARIANTS: &[[f32; 2]] = &[
-    UV_ROCK_A, UV_ROCK_B, UV_FT_ROCK_A, UV_FT_ROCK_B, UV_FT_ROCK_C,
+    UV_ROCK_A, UV_ROCK_B, UV_STONE, // Fixed row 20 col 6
 ];
 const FLOWER_VARIANTS: &[[f32; 2]] = &[
     UV_FLOWER_A, UV_FLOWER_B, UV_FLOWER_C,
@@ -136,8 +136,7 @@ const REED_VARIANTS: &[[f32; 2]] = &[
     UV_REED_A, UV_REED_B, UV_DECOR_REED,
 ];
 const HUT_VARIANTS: &[[f32; 2]] = &[
-    UV_HUT, UV_HUT_SL_A, UV_HUT_SL_B, UV_HUT_SL_C,
-    UV_HUT_SL_D, UV_HUT_SL_E, UV_FT_BUILDING_A, UV_FT_BUILDING_B,
+    UV_HUT, UV_LEAN_TO, UV_FOOD_CACHE, // All mapped to Wood/Crate now!
 ];
 
 /// Max decorative terrain objects per chunk

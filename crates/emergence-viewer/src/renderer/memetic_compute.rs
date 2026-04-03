@@ -43,6 +43,7 @@ pub struct MemeticComputePipeline {
     flip: std::cell::Cell<bool>,
     staging_buf: wgpu::Buffer,
     pub readback_flag: Arc<AtomicBool>,
+    pub readback_in_flight: AtomicBool,
 }
 
 impl MemeticComputePipeline {
@@ -193,6 +194,7 @@ impl MemeticComputePipeline {
             flip: std::cell::Cell::new(false),
             staging_buf,
             readback_flag: Arc::new(AtomicBool::new(false)),
+            readback_in_flight: AtomicBool::new(false),
         }
     }
 
@@ -270,7 +272,10 @@ impl MemeticComputePipeline {
 
     /// Start an async GPU→CPU copy of the current write buffer into the staging buffer.
     pub fn start_download(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        if self.readback_flag.load(Ordering::SeqCst) { return; }
+        if self.readback_in_flight.load(Ordering::SeqCst) || self.readback_flag.load(Ordering::SeqCst) {
+            return;
+        }
+        self.readback_in_flight.store(true, Ordering::SeqCst);
 
         let cell_count = (self.width * self.height) as usize;
         let total_floats = cell_count * MEMETIC_CHANNEL_COUNT;
@@ -307,6 +312,7 @@ impl MemeticComputePipeline {
         }
         self.staging_buf.unmap();
         self.readback_flag.store(false, Ordering::SeqCst);
+        self.readback_in_flight.store(false, Ordering::SeqCst);
         true
     }
 }

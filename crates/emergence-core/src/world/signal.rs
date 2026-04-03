@@ -106,7 +106,7 @@ impl SignalGrid {
 
     /// Chemical reaction step: nonlinear interactions between signal channels.
     /// Must be called BEFORE diffusion each tick.
-    fn reaction_step(&mut self) {
+    pub fn reaction_step(&mut self) {
         let w = self.width as usize;
         let h = self.height as usize;
         let len = w * h;
@@ -208,6 +208,69 @@ impl SignalGrid {
         }
     }
 
+    /// Returns the number of signal channels.
+    pub fn channel_count(&self) -> usize {
+        self.channels.len()
+    }
+
+    /// Diffuse a single channel by index. Skips if gpu_managed.
+    /// Used for staggered per-tick diffusion (1 channel per tick).
+    pub fn diffuse_single_channel(&mut self, channel_index: usize) {
+        if self.gpu_managed {
+            return;
+        }
+        let w = self.width;
+        let h = self.height;
+        let diffusion_rate = self.diffusion_rates[channel_index];
+        let decay_factor = self.decay_factors[channel_index];
+        let wrap = self.wrap_horizontal;
+
+        let channel = &mut self.channels[channel_index];
+        let scratch = &mut self.par_scratch[channel_index];
+
+        let max_val = channel.iter().cloned().fold(0.0f32, f32::max);
+        if max_val < 1e-5 {
+            return;
+        }
+
+        for v in scratch.iter_mut() { *v = 0.0; }
+
+        for y in 0..h {
+            for x in 0..w {
+                let idx = (y * w + x) as usize;
+                let val = channel[idx];
+                if val < 1e-6 { continue; }
+
+                let bleed = val * diffusion_rate;
+                scratch[idx] += val - bleed;
+
+                let mut neighbors = 0usize;
+                let mut n_idx = [0usize; 4];
+
+                if x > 0 { n_idx[neighbors] = idx - 1; neighbors += 1; }
+                else if wrap { n_idx[neighbors] = idx + (w - 1) as usize; neighbors += 1; }
+
+                if x + 1 < w { n_idx[neighbors] = idx + 1; neighbors += 1; }
+                else if wrap { n_idx[neighbors] = idx - (w - 1) as usize; neighbors += 1; }
+
+                if y > 0 { n_idx[neighbors] = idx - w as usize; neighbors += 1; }
+                if y + 1 < h { n_idx[neighbors] = idx + w as usize; neighbors += 1; }
+
+                if neighbors > 0 {
+                    let per_neighbor = bleed / (neighbors as f32);
+                    for i in 0..neighbors {
+                        scratch[n_idx[i]] += per_neighbor;
+                    }
+                }
+            }
+        }
+
+        let len = (w * h) as usize;
+        for i in 0..len {
+            channel[i] = scratch[i] * decay_factor;
+        }
+    }
+
     /// Run only the diffusion + evaporation step in parallel across channels.
     /// Each channel is diffused independently using rayon. Dormant channels
     /// (max value < 1e-5) are skipped entirely.
@@ -245,28 +308,23 @@ impl SignalGrid {
                         let bleed = val * diffusion_rate;
                         scratch[idx] += val - bleed;
 
-                        let left = if x > 0 {
-                            Some((y * w + x - 1) as usize)
-                        } else if wrap {
-                            Some((y * w + w - 1) as usize)
-                        } else { None };
+                        let mut neighbors = 0usize;
+                        let mut n_idx = [0usize; 4];
 
-                        let right = if x + 1 < w {
-                            Some((y * w + x + 1) as usize)
-                        } else if wrap {
-                            Some((y * w) as usize)
-                        } else { None };
+                        if x > 0 { n_idx[neighbors] = idx - 1; neighbors += 1; }
+                        else if wrap { n_idx[neighbors] = idx + (w - 1) as usize; neighbors += 1; }
 
-                        let up   = if y > 0     { Some(((y - 1) * w + x) as usize) } else { None };
-                        let down = if y + 1 < h { Some(((y + 1) * w + x) as usize) } else { None };
+                        if x + 1 < w { n_idx[neighbors] = idx + 1; neighbors += 1; }
+                        else if wrap { n_idx[neighbors] = idx - (w - 1) as usize; neighbors += 1; }
 
-                        let neighbor_count = [left, right, up, down]
-                            .iter().filter(|n| n.is_some()).count() as f32;
-                        if neighbor_count == 0.0 { continue; }
+                        if y > 0 { n_idx[neighbors] = idx - w as usize; neighbors += 1; }
+                        if y + 1 < h { n_idx[neighbors] = idx + w as usize; neighbors += 1; }
 
-                        let per_neighbor = bleed / neighbor_count;
-                        for nb in [left, right, up, down].into_iter().flatten() {
-                            scratch[nb] += per_neighbor;
+                        if neighbors > 0 {
+                            let per_neighbor = bleed / (neighbors as f32);
+                            for i in 0..neighbors {
+                                scratch[n_idx[i]] += per_neighbor;
+                            }
                         }
                     }
                 }

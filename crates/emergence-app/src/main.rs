@@ -986,8 +986,8 @@ impl ApplicationHandler for App {
                     let mut world = world.write().unwrap();
 
                     // Time-budgeted ticking: never spend more than 8ms per frame on simulation.
-                    // With parallel signal diffusion + rayon being updates, one tick at 1x speed
-                    // should complete in ~8ms, leaving ~8ms for render + egui at 60fps.
+                    // At 1x speed, 1 tick ≈ 2ms (release). 8ms budget allows up to 4 ticks
+                    // on fast-forward while keeping total frame under 16.6ms vsync deadline.
                     const TICK_BUDGET_MS: u128 = 8;
                     let tick_start = std::time::Instant::now();
                     let mut ticked = 0u32;
@@ -2490,13 +2490,12 @@ impl ApplicationHandler for App {
                             )
                         );
                     }
-                    world_w.signals.gpu_managed = true;
+                    // GPU signal compute disabled — CPU staggered diffusion (1 channel/tick, ~1ms)
+                    // outperforms GPU path (22ms due to PCI-e sync stall + readback latency).
+                    // world_w.signals.gpu_managed = true;
 
-                    // Pull finished async data from previous frame
-                    rs.signal_compute.try_complete_download(&mut world_w.signals.channels);
-
-                    // Push next frame to GPU IF previous readback completed
-                    if !rs.signal_compute.readback_flag.load(std::sync::atomic::Ordering::SeqCst) {
+                    // GPU signal dispatch disabled — skip readback and dispatch.
+                    if false {
                         let mut encoder = rs.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                             label: Some("Signal Diffuse Dispatch Encoder"),
                         });
@@ -2601,7 +2600,7 @@ impl ApplicationHandler for App {
                     if let Some(ref terrain_r) = self.terrain_renderer {
                         render_pass.set_pipeline(&rs.terrain_pipeline);
                         render_pass.set_bind_group(0, &rs.camera_bind_group, &[]);
-                        render_pass.set_bind_group(1, &rs.atlas.bind_group, &[]);
+                        render_pass.set_bind_group(1, &rs.terrain_bind_group, &[]);
                         render_pass.set_bind_group(2, &rs.water_time_bind_group, &[]);
                         render_pass.set_vertex_buffer(0, terrain_r.vertex_buffer.slice(..));
                         render_pass.set_index_buffer(
@@ -2654,7 +2653,7 @@ impl ApplicationHandler for App {
                     // LOD 2 dots are drawn at 2.0-5.0 px/unit; full sprites above 5.0 (handled in update).
                     let being_pixels_per_unit = rs.surface_config.height as f32 / self.camera.zoom;
                     if let Some(ref being_r) = self.being_renderer {
-                        if being_r.instance_count > 0 && being_pixels_per_unit >= 2.0 {
+                        if being_r.instance_count > 0 && being_pixels_per_unit > 0.5 {
                             render_pass.set_pipeline(&rs.sprite_pipeline);
                             render_pass.set_bind_group(0, &rs.camera_bind_group, &[]);
                             render_pass.set_bind_group(1, &rs.entity_bind_group, &[]);

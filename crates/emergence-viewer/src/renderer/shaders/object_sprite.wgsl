@@ -80,7 +80,7 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let c = textureSample(sprite_atlas, atlas_sampler, in.uv);
+    let c = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
 
     // Pixel size in atlas UV space (atlas is 1024x1024)
     let px = 1.0 / 1024.0;
@@ -93,10 +93,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let uv_s = clamp(in.uv + vec2<f32>( 0.0,  px), cell_min, cell_max);
         let uv_e = clamp(in.uv + vec2<f32>( px,  0.0), cell_min, cell_max);
         let uv_w = clamp(in.uv + vec2<f32>(-px,  0.0), cell_min, cell_max);
-        let n = textureSample(sprite_atlas, atlas_sampler, uv_n).a;
-        let s = textureSample(sprite_atlas, atlas_sampler, uv_s).a;
-        let e = textureSample(sprite_atlas, atlas_sampler, uv_e).a;
-        let w = textureSample(sprite_atlas, atlas_sampler, uv_w).a;
+        let n = textureSampleLevel(sprite_atlas, atlas_sampler, uv_n, 0.0).a;
+        let s = textureSampleLevel(sprite_atlas, atlas_sampler, uv_s, 0.0).a;
+        let e = textureSampleLevel(sprite_atlas, atlas_sampler, uv_e, 0.0).a;
+        let w = textureSampleLevel(sprite_atlas, atlas_sampler, uv_w, 0.0).a;
         if (n > 0.5 || s > 0.5 || e > 0.5 || w > 0.5) {
             return vec4<f32>(0.05, 0.03, 0.02, 0.9);
         }

@@ -128,7 +128,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(final_rgb, in.alpha);
     }
 
-    var texel = textureSample(sprite_atlas, atlas_sampler, in.uv);
+    var texel = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
     let alpha = texel.a;
 
     // Pixel size in atlas UV space
@@ -138,10 +138,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Transparent pixel: check for outline or shadow before discarding.
     if (alpha < 0.1) {
         // 1px black outline: sample 4 adjacent texels in atlas space.
-        let n = textureSample(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(0.0,  -px.y)).a;
-        let s = textureSample(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(0.0,   px.y)).a;
-        let e = textureSample(sprite_atlas, atlas_sampler, in.uv + vec2<f32>( px.x,  0.0)).a;
-        let w = textureSample(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(-px.x,  0.0)).a;
+        let n = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(0.0,  -px.y), 0.0).a;
+        let s = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(0.0,   px.y), 0.0).a;
+        let e = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>( px.x,  0.0), 0.0).a;
+        let w = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(-px.x,  0.0), 0.0).a;
         if (n > 0.5 || s > 0.5 || e > 0.5 || w > 0.5) {
             return vec4<f32>(0.05, 0.03, 0.02, 0.9);
         }

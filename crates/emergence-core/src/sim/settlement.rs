@@ -58,8 +58,9 @@ impl Settlement {
     }
 }
 
-/// Detect settlements: cells with comfort >= 0.15 and at least 2 beings in 4-unit radius.
-/// Adjacent dense cells merge via union-find into settlements.
+/// Detect settlements: cluster living Human beings by proximity (radius 8.0) via union-find
+/// over the small candidate set (~100-500 beings), then quality-gate each cluster on
+/// comfort >= 0.15. O(N_beings) instead of O(W*H).
 pub fn detect_settlements(
     signals: &SignalGrid,
     spatial: &SpatialIndex,
@@ -67,113 +68,99 @@ pub fn detect_settlements(
     tick: u32,
     existing: &mut Vec<Settlement>,
 ) {
-    let w = signals.width as usize;
-    let h = signals.height as usize;
+    use crate::being::data::{BeingState, CreatureType};
 
-    // Collect candidate cells: comfort >= 0.15, >= 2 beings in 4-unit radius
-    let mut cell_label: Vec<i32> = vec![-1i32; w * h];
+    const CLUSTER_RADIUS: f32 = 8.0;
+    const COMFORT_THRESHOLD: f32 = 0.15;
 
-    for y in 0..h {
-        for x in 0..w {
-            let idx = y * w + x;
-            let comfort = signals.read(SignalChannel::Comfort, x as u32, y as u32);
-            if comfort < 0.15 {
-                continue;
-            }
-            let count = spatial.count_in_radius(x as f32, y as f32, 4.0);
-            if count >= 2 {
-                cell_label[idx] = idx as i32;
-            }
-        }
+    // Collect living Human candidates — typically 100-500 entries, not 4M cells.
+    let candidates: Vec<usize> = (0..beings.hot.positions.len())
+        .filter(|&i| {
+            beings.hot.states[i] != BeingState::Dead
+                && beings.hot.creature_type[i] == CreatureType::Human as u8
+        })
+        .collect();
+
+    let n = candidates.len();
+    if n == 0 {
+        *existing = Vec::new();
+        return;
     }
 
-    // Union-find: merge 8-connected labeled cells
-    let mut parent: Vec<i32> = (0..w * h).map(|i| i as i32).collect();
+    // Union-find over candidates (size n, not w*h).
+    let mut parent: Vec<usize> = (0..n).collect();
 
-    fn find(parent: &mut Vec<i32>, mut x: i32) -> i32 {
-        while parent[x as usize] != x {
-            parent[x as usize] = parent[parent[x as usize] as usize];
-            x = parent[x as usize];
+    fn find(parent: &mut Vec<usize>, mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]]; // path compression (halving)
+            x = parent[x];
         }
         x
     }
 
-    fn union(parent: &mut Vec<i32>, a: i32, b: i32) {
+    fn union(parent: &mut Vec<usize>, a: usize, b: usize) {
         let ra = find(parent, a);
         let rb = find(parent, b);
         if ra != rb {
-            parent[ra as usize] = rb;
+            parent[ra] = rb;
         }
     }
 
-    let offsets: [(i32, i32); 8] = [
-        (1, 0), (-1, 0), (0, 1), (0, -1),
-        (1, 1), (-1, 1), (1, -1), (-1, -1),
-    ];
-
-    for y in 0..h {
-        for x in 0..w {
-            let idx = y * w + x;
-            if cell_label[idx] < 0 {
-                continue;
-            }
-            for (dx, dy) in offsets {
-                let nx = x as i32 + dx;
-                let ny = y as i32 + dy;
-                if nx < 0 || nx >= w as i32 || ny < 0 || ny >= h as i32 {
-                    continue;
-                }
-                let nidx = ny as usize * w + nx as usize;
-                if cell_label[nidx] >= 0 {
-                    union(&mut parent, idx as i32, nidx as i32);
+    // For each candidate, query spatial index for neighbours within CLUSTER_RADIUS
+    // and union them together.
+    for ci in 0..n {
+        let bi = candidates[ci];
+        let [px, py] = beings.hot.positions[bi];
+        let neighbours = spatial.query_radius(px, py, CLUSTER_RADIUS);
+        for &nj in &neighbours {
+            // Find nj's position in candidates slice (linear scan — n is small)
+            if let Some(cj) = candidates.iter().position(|&b| b == nj) {
+                if cj != ci {
+                    union(&mut parent, ci, cj);
                 }
             }
         }
     }
 
-    // Group cells by root
-    let mut groups: std::collections::HashMap<i32, Vec<usize>> =
+    // Group candidates by root index.
+    let mut groups: std::collections::HashMap<usize, Vec<usize>> =
         std::collections::HashMap::new();
-
-    for idx in 0..w * h {
-        if cell_label[idx] >= 0 {
-            let root = find(&mut parent, idx as i32);
-            groups.entry(root).or_default().push(idx);
-        }
+    for ci in 0..n {
+        let root = find(&mut parent, ci);
+        groups.entry(root).or_default().push(candidates[ci]);
     }
 
-    // Build settlements from groups — collect beings in each region
+    // Build settlements from clusters that pass the quality gate.
     let mut new_settlements: Vec<Settlement> = Vec::new();
     let mut next_id = existing.iter().map(|s| s.id).max().unwrap_or(0) + 1;
 
-    for (root, cells) in &groups {
-        // Compute bounding center of this group of cells
+    for (_root, members) in &groups {
+        if members.len() < 2 {
+            continue;
+        }
+
+        // Compute centroid of this cluster.
         let mut cx_sum = 0.0f32;
         let mut cy_sum = 0.0f32;
-        for &cell_idx in cells {
-            cx_sum += (cell_idx % w) as f32;
-            cy_sum += (cell_idx / w) as f32;
+        for &bi in members {
+            let pos = beings.hot.positions[bi];
+            cx_sum += pos[0];
+            cy_sum += pos[1];
         }
-        let n_cells = cells.len() as f32;
-        let center_x = cx_sum / n_cells;
-        let center_y = cy_sum / n_cells;
+        let n_m = members.len() as f32;
+        let center_x = cx_sum / n_m;
+        let center_y = cy_sum / n_m;
 
-        // Collect beings within comfort region (15-cell radius of center)
-        let radius = (n_cells.sqrt() * 1.5).max(10.0).min(30.0);
-        let members: Vec<usize> = spatial
-            .query_radius(center_x, center_y, radius)
-            .into_iter()
-            .filter(|&i| {
-                beings.hot.states[i] != crate::being::data::BeingState::Dead
-                    && beings.hot.creature_type[i] == crate::being::data::CreatureType::Human as u8
-            })
-            .collect();
-
-        if members.len() < 2 {
-            continue; // below settlement threshold
+        // Quality gate: average comfort at member positions must be >= threshold.
+        let comfort_sum: f32 = members.iter().map(|&bi| {
+            let [px, py] = beings.hot.positions[bi];
+            signals.read(SignalChannel::Comfort, px as u32, py as u32)
+        }).sum();
+        if comfort_sum / n_m < COMFORT_THRESHOLD {
+            continue;
         }
 
-        // Try to match to existing settlement (same root area)
+        // Try to match to an existing settlement by proximity.
         let existing_idx = existing.iter().position(|s| {
             let dx = s.center[0] - center_x;
             let dy = s.center[1] - center_y;
@@ -194,10 +181,10 @@ pub fn detect_settlements(
             s
         };
 
-        settlement.beings = members;
+        settlement.beings = members.clone();
         settlement.recompute_center(beings);
 
-        // Compute average warmth among members
+        // Compute average warmth (belonging need) among members.
         let warmth_sum: f32 = settlement.beings.iter().map(|&i| {
             beings.hot.needs[i][crate::being::data::NEED_BELONGING]
         }).sum();

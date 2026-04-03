@@ -116,7 +116,7 @@ const UV_FOOD_CACHE:  [f32; 2] = uv(12, 20); // Crate
 
 // Variant tables
 const TREE_VARIANTS_FOREST: &[[f32; 2]] = &[
-    UV_TREE_A, UV_TREE_B, UV_TREE_C, UV_TREE_D, UV_TREE_E, UV_TREE_F,
+    UV_TREE_A, UV_TREE_B, UV_TREE_C, UV_TREE_D,
 ];
 const TREE_VARIANTS_GRASSLAND: &[[f32; 2]] = &[
     UV_TREE_A, UV_TREE_B, UV_TREE_C, // Removed UV_MW_DECOR_0 which was unmapped row 19

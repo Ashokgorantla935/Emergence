@@ -40,7 +40,7 @@ const fn tile_uv(col: u8, row: u8) -> [f32; 2] {
 }
 
 const GRASS_TILES: &[[f32; 2]] = &[
-    tile_uv(0, 1), tile_uv(0, 2), tile_uv(1, 1), tile_uv(1, 2),
+    tile_uv(1, 1), tile_uv(1, 2), tile_uv(2, 1), tile_uv(2, 2),
 ];
 
 const FOREST_TILES: &[[f32; 2]] = &[
@@ -52,7 +52,7 @@ const DESERT_TILES: &[[f32; 2]] = &[
 ];
 
 const MOUNTAIN_TILES: &[[f32; 2]] = &[
-    tile_uv(15, 1), tile_uv(15, 2), tile_uv(16, 1), tile_uv(16, 2),
+    tile_uv(2, 15), tile_uv(3, 15), tile_uv(4, 15), tile_uv(5, 15),
 ];
 
 const WATER_TILES: &[[f32; 2]] = &[

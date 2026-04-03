@@ -1612,20 +1612,13 @@ impl ApplicationHandler for App {
 
                 if self.ui_visible {
 
-                TopBar::show(&self.egui_ctx, &mut self.speed, tick, population, &PerfStats {
-                    gpu_managed: self.world.as_ref().map(|w| w.read().unwrap().signals.gpu_managed).unwrap_or(false),
-                    fps: self.current_fps,
-                    tps: self.current_tps,
-                    mem_mb: 0.0,
-                });
-
                 // Mute toggle button — top-right corner
                 {
                     let muted = self.sound_engine.is_muted();
                     let mute_label = if muted { "Muted" } else { "Sound" };
                     let mut toggle = false;
                     egui::Area::new(egui::Id::new("mute_btn"))
-                        .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-8.0, 4.0))
+                        .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-8.0, 8.0))
                         .show(&self.egui_ctx, |ui| {
                             if ui.small_button(mute_label).clicked() {
                                 toggle = true;
@@ -1636,31 +1629,9 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                // God tool palette — left SidePanel + floating sub-tray
+                // God tool dock — floating CENTER_BOTTOM Area
                 let power_before = self.god_tool_state.active_power;
-                god_palette::ensure_icons(&self.egui_ctx, &mut self.god_tool_state);
-                {
-                    let god_state = &mut self.god_tool_state;
-                    let filters = &mut self.filters;
-                    egui::SidePanel::left("left_dock")
-                        .default_width(200.0)
-                        .resizable(false)
-                        .frame(
-                            egui::Frame::none()
-                                .fill(egui::Color32::from_rgba_premultiplied(14, 14, 18, 235))
-                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(50, 50, 70, 160))),
-                        )
-                        .show(&self.egui_ctx, |ui| {
-                            egui::ScrollArea::vertical()
-                                .id_salt("left_dock_scroll")
-                                .show(ui, |ui| {
-                                    god_palette::render_palette(ui, god_state);
-                                    ui.separator();
-                                    filters.render_into(ui);
-                                });
-                        });
-                }
-                god_palette::render_sub_tray(&self.egui_ctx, &mut self.god_tool_state);
+                god_palette::render_dock(&self.egui_ctx, &mut self.god_tool_state);
                 // Notify onboarding on first god power selection.
                 if power_before.is_none() && self.god_tool_state.active_power.is_some() {
                     self.onboarding.notify_god_power_selected();
@@ -1675,49 +1646,43 @@ impl ApplicationHandler for App {
                         self.dashboard.tick_rate,
                     );
 
-                    // Right SidePanel: Inspector + World Laws + Kingdoms
+                    // Floating inspector smart card (only when being selected)
+                    self.inspector.ui_floating(&self.egui_ctx, &world.beings, &world.events, world.tick);
+
+                    // Floating world panels (togglable via hotkeys L / K)
                     let mut viewer_laws = engine_laws_to_viewer(&world.laws);
-                    {
-                        let inspector = &mut self.inspector;
-                        let wl_panel = &mut self.world_laws_panel;
-                        let k_panel = &mut self.kingdom_panel;
-                        let kd = &self.kingdom_detector;
-                        let sd = &self.settlement_detector;
+                    self.world_laws_panel.ui(&self.egui_ctx, &mut viewer_laws);
+                    self.kingdom_panel.ui(
+                        &self.egui_ctx,
+                        &self.kingdom_detector,
+                        &self.settlement_detector,
+                        &world.beings,
+                    );
 
-                        egui::SidePanel::right("right_dock")
-                            .default_width(300.0)
-                            .resizable(true)
+                    // Statistics floating panel (togglable via S)
+                    self.stats_panel.ui(&self.egui_ctx, &self.stats_history);
+
+                    // Diagnostics overlay — minimal text at RIGHT_TOP
+                    {
+                        let fps = self.current_fps;
+                        let tps = self.current_tps;
+                        let pop = population;
+                        let t = world.tick;
+                        let season = format!("{:?}", world.climate.season());
+                        let day = format!("{:?}", world.climate.day_phase());
+                        egui::Area::new(egui::Id::new("diagnostics_overlay"))
+                            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-8.0, 30.0))
+                            .order(egui::Order::Foreground)
+                            .interactable(false)
                             .show(&self.egui_ctx, |ui| {
-                                egui::ScrollArea::vertical()
-                                    .id_salt("right_dock_scroll")
-                                    .show(ui, |ui| {
-                                        inspector.render_content(ui, &world.beings, &world.events, world.tick);
-                                        ui.separator();
-                                        wl_panel.render_collapsible(ui, &mut viewer_laws);
-                                        ui.separator();
-                                        k_panel.render_collapsible(ui, kd, sd, &world.beings);
+                                ui.set_width(160.0);
+                                let text_color = egui::Color32::from_rgba_premultiplied(200, 200, 210, 220);
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                                    ui.vertical(|ui| {
+                                        ui.colored_label(text_color, format!("FPS {fps:.0}  TPS {tps}"));
+                                        ui.colored_label(text_color, format!("Pop {pop}  Tick {t}"));
+                                        ui.colored_label(text_color, format!("{season}  {day}"));
                                     });
-                            });
-                    }
-
-                    // Bottom Strip: Dashboard | Stats (news stays as floating overlay)
-                    {
-                        let dashboard = &self.dashboard;
-                        let stats_history = &self.stats_history;
-                        let stats_panel = &self.stats_panel;
-
-                        egui::TopBottomPanel::bottom("bottom_strip")
-                            .exact_height(68.0)
-                            .frame(
-                                egui::Frame::none()
-                                    .fill(egui::Color32::from_rgba_premultiplied(12, 12, 18, 240))
-                                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(50, 50, 70, 160)))
-                            )
-                            .show(&self.egui_ctx, |ui| {
-                                ui.horizontal_centered(|ui| {
-                                    dashboard.render_into(ui, &world.climate, world.tick);
-                                    ui.separator();
-                                    stats_panel.render_summary_into(ui, stats_history);
                                 });
                             });
                     }
@@ -1731,7 +1696,7 @@ impl ApplicationHandler for App {
                         apply_viewer_laws_to_engine(&viewer_laws, &mut w.laws);
                     }
 
-                    // News feed overlay (floating Area)
+                    // News feed overlay (floating Area — LEFT_BOTTOM)
                     self.news_feed_ui.ui(&self.egui_ctx);
                 }
 

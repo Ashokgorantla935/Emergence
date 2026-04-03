@@ -53,6 +53,35 @@ impl Inspector {
             });
     }
 
+    /// Floating smart card inspector — only visible when a being is selected.
+    /// Anchored top-right; auto-despawns when deselected.
+    pub fn ui_floating(&mut self, egui_ctx: &egui::Context, beings: &Beings, events: &EventLog, tick: u32) {
+        let Some(idx) = self.selected_being else { return; };
+        if idx >= beings.hot.count {
+            self.selected_being = None;
+            return;
+        }
+
+        egui::Window::new("Inspector")
+            .id(egui::Id::new("inspector_float"))
+            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 40.0))
+            .default_width(260.0)
+            .max_height(520.0)
+            .resizable(false)
+            .collapsible(false)
+            .title_bar(false)
+            .frame(
+                egui::Frame::none()
+                    .fill(egui::Color32::from_rgba_premultiplied(12, 12, 18, 220))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(60, 60, 80, 180)))
+                    .corner_radius(egui::CornerRadius::same(8))
+                    .inner_margin(egui::Margin::same(8)),
+            )
+            .show(egui_ctx, |ui| {
+                self.render_being_details(ui, beings, events, idx, tick);
+            });
+    }
+
     /// Render inspector content into a provided Ui — for embedding in a larger panel.
     pub fn render_content(&mut self, ui: &mut egui::Ui, beings: &Beings, events: &EventLog, tick: u32) {
         if let Some(idx) = self.selected_being {

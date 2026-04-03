@@ -170,8 +170,12 @@ impl StatisticsPanel {
             return;
         }
 
-        egui::TopBottomPanel::bottom("statistics_panel")
-            .exact_height(200.0)
+        egui::Window::new("Statistics")
+            .id(egui::Id::new("statistics_panel"))
+            .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(8.0, -200.0))
+            .default_size(egui::vec2(500.0, 200.0))
+            .resizable(false)
+            .collapsible(false)
             .show(egui_ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.heading("Statistics");

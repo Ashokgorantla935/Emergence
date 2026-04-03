@@ -20,23 +20,24 @@ pub fn ensure_icons(ctx: &Context, state: &mut GodToolState) {
 // Bottom dock rendering (Task 2 replacement for the left SidePanel)
 // ---------------------------------------------------------------------------
 
-/// Bottom dock: icon ribbon + floating sub-tray above it.
+/// Bottom dock: floating icon ribbon centered at the bottom + floating sub-tray above it.
 /// Call this instead of the old egui::Window("God Tools") wrapper.
 pub fn render_dock(ctx: &Context, state: &mut GodToolState) {
     // Lazy-load icon sheets on first frame.
     ensure_icons(ctx, state);
 
-    // ── Bottom ribbon (~48px) ─────────────────────────────────────────────
-    egui::TopBottomPanel::bottom("god_tool_dock")
-        .exact_height(48.0)
-        .resizable(false)
-        .frame(
-            egui::Frame::none()
-                .fill(Color32::from_rgba_premultiplied(14, 14, 18, 235))
-                .stroke(egui::Stroke::new(1.0, Color32::from_rgba_premultiplied(50, 50, 70, 160))),
-        )
+    // ── Floating bottom ribbon ────────────────────────────────────────────
+    egui::Area::new(egui::Id::new("god_dock"))
+        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -20.0))
+        .order(egui::Order::Foreground)
         .show(ctx, |ui| {
-            ui.horizontal_centered(|ui| {
+            egui::Frame::none()
+                .fill(Color32::from_rgba_premultiplied(14, 14, 18, 220))
+                .stroke(egui::Stroke::new(1.0, Color32::from_gray(60)))
+                .corner_radius(egui::CornerRadius::same(8))
+                .inner_margin(egui::Margin::symmetric(8, 6))
+                .show(ui, |ui| {
+            ui.horizontal(|ui| {
                 ui.add_space(8.0);
 
                 // 8 icon tabs — each is row 0, col 0..7 in god_tools_icons.png
@@ -127,13 +128,14 @@ pub fn render_dock(ctx: &Context, state: &mut GodToolState) {
                     }
                 }
             });
-        });
+                }); // Frame
+        }); // Area
 
     // ── Floating sub-tray above the dock ─────────────────────────────────
     let tray_title = tab_label(state.active_tab);
     egui::Window::new(tray_title)
         .id(egui::Id::new("god_sub_tray"))
-        .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(4.0, -56.0))
+        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -90.0))
         .default_width(220.0)
         .max_height(320.0)
         .resizable(false)

@@ -111,13 +111,13 @@ impl Minimap {
 
         egui::Window::new("Map")
             .id(egui::Id::new("minimap"))
-            .anchor(egui::Align2::LEFT_TOP, egui::vec2(208.0, 34.0))
+            .anchor(egui::Align2::LEFT_TOP, egui::vec2(8.0, 8.0))
             .auto_sized()
             .title_bar(false)
             .collapsible(false)
             .resizable(false)
             .frame(egui::Frame::none()
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(80, 80, 100, 180)))
+                .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgba_premultiplied(80, 80, 100, 200)))
                 .fill(egui::Color32::from_rgba_premultiplied(12, 12, 16, 200))
                 .inner_margin(egui::Margin::same(2)))
             .show(egui_ctx, |ui| {

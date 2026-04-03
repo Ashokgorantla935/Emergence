@@ -281,12 +281,18 @@ fn real_earth() -> MapDefinition {
     MapDefinition {
         id: "real_earth",
         name: "Real Earth 4K",
-        description: "Procedural 4096×2048 Earth. Continents, poles, latitude biomes. Civilizations begin at historical river valleys.",
+        description: "Real Earth heightmap upsampled to 4096×2048. Continents, poles, latitude biomes. Civilizations begin at historical river valleys.",
         size: MapSize::Colossal,
         difficulty_rating: 4,
-        elevation_source: ElevationSource::GeneratedEarth { width: 4096, height: 2048 },
+        elevation_source: ElevationSource::Baked {
+            data: map_assets::earth::ELEVATION_256,
+            width: 256,
+            height: 256,
+        },
         biome_rules: BiomeRules::LatitudeDriven { equator_y: 0.5 },
-        water_placement: WaterPlacement::ElevationThreshold(0.30),
+        water_placement: WaterPlacement::BakedMask {
+            data: map_assets::earth::WATER_256,
+        },
         spawn_points: vec![
             SpawnPoint { name: "Fertile Crescent", center: (2624.0, 675.0),  radius: 160.0, fertility: 2.0 },
             SpawnPoint { name: "Nile Valley",       center: (2480.0, 756.0),  radius: 140.0, fertility: 2.5 },
@@ -412,6 +418,37 @@ mod tests {
             })).max().unwrap();
             assert!(om_max > 200, "Olympus Mons region should be near max elevation, got {om_max}");
         }
+    }
+
+    #[test]
+    fn real_earth_has_baked_elevation() {
+        let def = get(MapId::RealEarth);
+        match def.elevation_source {
+            ElevationSource::Baked { data, width, height } => {
+                assert_eq!(width, 256);
+                assert_eq!(height, 256);
+                assert_eq!(data.len(), 65536, "real earth elevation must be 256*256 bytes");
+            }
+            _ => panic!("RealEarth should have Baked elevation source"),
+        }
+    }
+
+    #[test]
+    fn real_earth_has_baked_water_mask() {
+        let def = get(MapId::RealEarth);
+        match def.water_placement {
+            WaterPlacement::BakedMask { data } => {
+                assert_eq!(data.len(), 8192, "real earth water mask must be 256*256/8 = 8192 bytes");
+            }
+            _ => panic!("RealEarth should have BakedMask water placement"),
+        }
+    }
+
+    #[test]
+    fn real_earth_is_colossal() {
+        let def = get(MapId::RealEarth);
+        assert_eq!(def.size, MapSize::Colossal);
+        assert_eq!(def.size.dimensions(), (4096, 2048));
     }
 
     #[test]

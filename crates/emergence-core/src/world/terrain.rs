@@ -438,6 +438,9 @@ fn dispatch_elevation_source(
             super::terrain_gen::generate_triad_world(w, h, params.seed)
         }
         ElevationSource::Baked { data, width: bw, height: bh } => {
+            if data.is_empty() {
+                panic!("Missing Earth elevation data — baked asset is empty");
+            }
             if *bw == w && *bh == h {
                 decode_baked_elevation(data, *bw, *bh, fallback_seed as u32)
             } else {
@@ -518,7 +521,12 @@ fn upsample_baked_elevation(
                   + s01 * (1.0 - tx) * ty
                   + s11 * tx * ty;
 
-            elevation[(dy * dst_w + dx) as usize] = e;
+            // Micro-noise overlay: 2 octaves of high-frequency simplex noise for local
+            // ridge/valley detail. Amplitude is small (5% + 2%) so it doesn't change
+            // land/water topology, only adds surface texture after bilinear upsampling.
+            let mn1 = simplex_noise.get([dx as f64 * 0.10, dy as f64 * 0.10]) as f32 * 0.05;
+            let mn2 = simplex_noise.get([dx as f64 * 0.20 + 100.0, dy as f64 * 0.20 + 100.0]) as f32 * 0.02;
+            elevation[(dy * dst_w + dx) as usize] = (e + mn1 + mn2).clamp(0.0, 1.0);
 
             let nx = dx as f64 * 0.015;
             let ny = dy as f64 * 0.015;

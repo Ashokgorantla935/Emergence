@@ -548,12 +548,12 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     StructureType::StoneHouse
                 } else if has_agriculture && stone_carry >= 0.5 {
                     StructureType::WoodenHouse
-                } else if stone_carry >= 0.1 {
-                    StructureType::NomadTent
                 } else if stone_carry >= 0.5 {
                     StructureType::Hut
                 } else if stone_carry >= 0.3 {
                     StructureType::LeanTo
+                } else if stone_carry >= 0.1 {
+                    StructureType::NomadTent
                 } else {
                     StructureType::Campfire
                 };

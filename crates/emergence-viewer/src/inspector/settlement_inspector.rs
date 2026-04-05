@@ -2,6 +2,7 @@ use emergence_core::being::data::{Beings, BeingState};
 use emergence_core::sim::world_state::World;
 use emergence_core::world::knowledge::{
     TECH_FISHING, TECH_SMELTING, TECH_MASONRY, TECH_AGRICULTURE, TECH_WEAVING, TECH_MEDICINE,
+    TECH_ENGINEERING,
 };
 
 pub struct SettlementData {
@@ -80,7 +81,7 @@ pub fn aggregate_settlement(world: &World, cx: f32, cy: f32, radius: f32) -> Set
     }
 
     // Count structures in radius
-    let mut structure_counts: [u32; 14] = [0; 14];
+    let mut structure_counts: [u32; 20] = [0; 20];
     let int_r = radius as i32;
     let x0 = (cell_cx as i32 - int_r).max(0) as u32;
     let y0 = (cell_cy as i32 - int_r).max(0) as u32;
@@ -122,12 +123,13 @@ pub fn aggregate_settlement(world: &World, cx: f32, cy: f32, radius: f32) -> Set
 }
 
 const TECH_DEFS: &[(&str, u32)] = &[
-    ("Fishing",     TECH_FISHING),
-    ("Smelting",    TECH_SMELTING),
-    ("Masonry",     TECH_MASONRY),
-    ("Agriculture", TECH_AGRICULTURE),
-    ("Weaving",     TECH_WEAVING),
-    ("Medicine",    TECH_MEDICINE),
+    ("Fishing",      TECH_FISHING),
+    ("Smelting",     TECH_SMELTING),
+    ("Masonry",      TECH_MASONRY),
+    ("Agriculture",  TECH_AGRICULTURE),
+    ("Weaving",      TECH_WEAVING),
+    ("Medicine",     TECH_MEDICINE),
+    ("Engineering",  TECH_ENGINEERING),
 ];
 
 /// Icon position (col, row) in the 10x10 tech_icons_spritesheet for each tech.
@@ -138,6 +140,7 @@ const TECH_ICON_POS: &[(usize, usize)] = &[
     (3, 0), // Agriculture
     (4, 1), // Weaving
     (5, 1), // Medicine
+    (5, 0), // Engineering
 ];
 
 fn structure_name(st: u8) -> &'static str {

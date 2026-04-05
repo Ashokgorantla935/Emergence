@@ -86,14 +86,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let c = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
 
-    // Detect grey/white checkerboard: high luminance + low saturation
-    let max_c = max(c.r, max(c.g, c.b));
-    let min_c = min(c.r, min(c.g, c.b));
-    let saturation = max_c - min_c;
-    if (max_c > 0.75 && saturation < 0.08) { discard; }
-    // Aggressive greyscale discard for DALL-E checkerboard backgrounds (mid-grey squares)
-    let is_grey = abs(c.r - c.g) < 0.08 && abs(c.g - c.b) < 0.08;
-    if (is_grey && c.r > 0.45) { discard; }
+    // Magenta chroma-key discard (#FF00FF) — threshold for compression artifacts
+    if (c.r > 0.9 && c.g < 0.15 && c.b > 0.9) { discard; }
     // Pixel size in atlas UV space (atlas is 1024x1024)
     let px = 1.0 / 1024.0;
 

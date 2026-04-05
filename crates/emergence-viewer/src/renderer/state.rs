@@ -94,6 +94,11 @@ pub struct RenderState {
     pub building_bind_group: wgpu::BindGroup,
     pub fauna_bind_group: wgpu::BindGroup,
     pub item_bind_group: wgpu::BindGroup,
+    /// 190-series spritesheets (8x8 atlas grid, 128px cells, magenta chroma-key).
+    pub flora_190_bind_group: wgpu::BindGroup,
+    pub architecture_190_bind_group: wgpu::BindGroup,
+    pub minerals_190_bind_group: wgpu::BindGroup,
+    pub fauna_190_bind_group: wgpu::BindGroup,
     /// V1: World objects (resources + structures) — single instanced draw call.
     pub object_pipeline: wgpu::RenderPipeline,
     /// V2: Unified particle system — single instanced draw call for ALL particles.
@@ -304,6 +309,32 @@ impl RenderState {
             include_bytes!("../../../../assets/textures/item_spritesheet.png"),
             &atlas.bind_group_layout,
             "Item Spritesheet",
+        );
+
+        // ── Wave 36: 190-series spritesheets (8x8 atlas, magenta chroma-key) ──
+        let flora_190_bind_group = Self::load_png_bind_group(
+            &device, &queue,
+            include_bytes!("../../../../assets/textures/flora_spritesheet_190.png"),
+            &atlas.bind_group_layout,
+            "Flora 190 Spritesheet",
+        );
+        let architecture_190_bind_group = Self::load_png_bind_group(
+            &device, &queue,
+            include_bytes!("../../../../assets/textures/architecture_spritesheet_190.png"),
+            &atlas.bind_group_layout,
+            "Architecture 190 Spritesheet",
+        );
+        let minerals_190_bind_group = Self::load_png_bind_group(
+            &device, &queue,
+            include_bytes!("../../../../assets/textures/minerals_spritesheet_190.png"),
+            &atlas.bind_group_layout,
+            "Minerals 190 Spritesheet",
+        );
+        let fauna_190_bind_group = Self::load_png_bind_group(
+            &device, &queue,
+            include_bytes!("../../../../assets/textures/fauna_and_races_spritesheet_190.png"),
+            &atlas.bind_group_layout,
+            "Fauna 190 Spritesheet",
         );
 
         // ── Camera uniform buffer (extended) ──────────────────────────────
@@ -945,6 +976,10 @@ impl RenderState {
             building_bind_group,
             fauna_bind_group,
             item_bind_group,
+            flora_190_bind_group,
+            architecture_190_bind_group,
+            minerals_190_bind_group,
+            fauna_190_bind_group,
             object_pipeline,
             particle_pipeline,
             postprocess,

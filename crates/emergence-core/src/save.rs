@@ -201,6 +201,21 @@ pub struct SaveFile {
     pub stockpile_food: Vec<f32>,
     pub territory: Vec<u32>,
 
+    // Elementary physics vectors (V31)
+    pub terrain_biomass: Vec<f32>,
+    pub terrain_mineralize: Vec<f32>,
+    pub terrain_moisture_dynamic: Vec<f32>,
+    pub terrain_thermal_energy: Vec<f32>,
+    pub terrain_nutrient_density: Vec<f32>,
+
+    // V36 terrain physics
+    pub terrain_pathogen: Vec<f32>,
+    // V36 being physics
+    pub being_insulation: Vec<f32>,
+    pub being_body_temp: Vec<f32>,
+    pub being_caloric_energy: Vec<f32>,
+    pub being_last_fire_tick: Vec<u32>,
+
     // World Laws (Phase 6)
     pub laws: WorldLaws,
 
@@ -371,6 +386,18 @@ impl SaveFile {
             stockpile_food: world.terrain.stockpile_food.clone(),
             territory: world.terrain.territory.clone(),
 
+            // Elementary vectors
+            terrain_biomass: world.terrain.biomass.clone(),
+            terrain_mineralize: world.terrain.mineralize.clone(),
+            terrain_moisture_dynamic: world.terrain.moisture_dynamic.clone(),
+            terrain_thermal_energy: world.terrain.thermal_energy.clone(),
+            terrain_nutrient_density: world.terrain.nutrient_density.clone(),
+            terrain_pathogen: world.terrain.pathogen.clone(),
+            being_insulation: world.beings.hot.insulation.clone(),
+            being_body_temp: world.beings.hot.body_temp.clone(),
+            being_caloric_energy: world.beings.hot.caloric_energy.clone(),
+            being_last_fire_tick: world.beings.hot.last_fire_tick.clone(),
+
             // World Laws
             laws: world.laws.clone(),
 
@@ -420,6 +447,12 @@ impl SaveFile {
             iron_vein: if self.iron_vein.len() == len { self.iron_vein.clone() } else { vec![0u16; len] },
             stockpile_food: if self.stockpile_food.len() == len { self.stockpile_food.clone() } else { vec![0.0f32; len] },
             territory: if self.territory.len() == len { self.territory.clone() } else { vec![0u32; len] },
+            biomass: if self.terrain_biomass.len() == len { self.terrain_biomass.clone() } else { vec![0.3; len] },
+            mineralize: if self.terrain_mineralize.len() == len { self.terrain_mineralize.clone() } else { vec![0.1; len] },
+            moisture_dynamic: if self.terrain_moisture_dynamic.len() == len { self.terrain_moisture_dynamic.clone() } else { vec![0.5; len] },
+            thermal_energy: if self.terrain_thermal_energy.len() == len { self.terrain_thermal_energy.clone() } else { vec![0.3; len] },
+            nutrient_density: if self.terrain_nutrient_density.len() == len { self.terrain_nutrient_density.clone() } else { vec![0.3; len] },
+            pathogen: if self.terrain_pathogen.len() == len { self.terrain_pathogen.clone() } else { vec![0.0; len] },
         };
 
         // Reconstruct ResourceLayer
@@ -497,6 +530,18 @@ impl SaveFile {
                 } else {
                     crate::being::data::init_fauna_params(self.creature_type[i])
                 }
+            );
+            beings.hot.insulation.push(
+                if i < self.being_insulation.len() { self.being_insulation[i] } else { 1.0 }
+            );
+            beings.hot.body_temp.push(
+                if i < self.being_body_temp.len() { self.being_body_temp[i] } else { 1.0 }
+            );
+            beings.hot.caloric_energy.push(
+                if i < self.being_caloric_energy.len() { self.being_caloric_energy[i] } else { 0.8 }
+            );
+            beings.hot.last_fire_tick.push(
+                if i < self.being_last_fire_tick.len() { self.being_last_fire_tick[i] } else { 0u32 }
             );
             beings.cold.parent_ids.push(self.parent_ids[i]);
             beings.cold.traits.push(if i < self.traits.len() { self.traits[i] } else { 0 });

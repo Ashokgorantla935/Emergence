@@ -367,6 +367,15 @@ pub fn score_actions(
             q_values[Action::Hunt as usize] += (0.15 - hunger) * 500.0;
         }
 
+        // V36: also consider terrain nutrient density for food seeking
+        {
+            let cell_idx = (cy as usize) * (terrain.width as usize) + (cx as usize);
+            let nutrient_at_pos = terrain.nutrient_density[cell_idx];
+            if nutrient_at_pos > 0.1 {
+                q_values[Action::SeekFood as usize] += nutrient_at_pos * 10.0; // nutrient-rich ground boosts food seeking
+            }
+        }
+
         // ── Migration pressure: flooding forces inland migration ─────────────────────────────
         let cell_idx_usize = (cy as usize) * (terrain.width as usize) + (cx as usize);
         let is_on_water = terrain.biome[cell_idx_usize] == Biome::Water;
@@ -385,6 +394,24 @@ pub fn score_actions(
             q_values[Action::Bond as usize] = 0.0;
             q_values[Action::CreateMark as usize] = 0.0;
             q_values[Action::Memorialize as usize] = 0.0;
+        }
+
+        // Kin selection gate: suppress Bond/ShareFood when no culturally-similar being is nearby
+        let has_kin_nearby = nearby.iter().any(|&ni| {
+            ni != being_index
+                && beings.hot.states[ni] != BeingState::Dead
+                && (beings.hot.cultural_frequency[being_index] - beings.hot.cultural_frequency[ni]).abs() <= 0.3
+        });
+        if !has_kin_nearby {
+            q_values[Action::Bond as usize] = 0.0;
+            q_values[Action::ShareFood as usize] = 0.0;
+        }
+
+        // Trauma engine: grieving beings avoid exploration, seek shelter instead
+        let grief = beings.hot.emotions[being_index][4]; // EMO_GRIEF
+        if grief > 0.5 {
+            q_values[Action::Explore as usize] *= (1.0 - grief).max(0.1);
+            q_values[Action::SeekShelter as usize] += grief * 50.0;
         }
 
         // Build allowed action indices for Boltzmann selection
@@ -450,8 +477,18 @@ pub fn score_actions(
             Action::ApproachBeing | Action::Bond | Action::ShareFood | Action::TakeFood | Action::AvoidBeing => {
                 let (target, _) = find_social_target(chosen_action, being_index, beings, &nearby);
                 if let Some(ti) = target {
-                    target_being = Some(ti);
-                    target_pos = Some(beings.hot.positions[ti]);
+                    // Kin selection gate: don't execute Bond/ShareFood toward non-kin
+                    if matches!(chosen_action, Action::Bond | Action::ShareFood) {
+                        let my_freq = beings.hot.cultural_frequency[being_index];
+                        let their_freq = beings.hot.cultural_frequency[ti];
+                        if (my_freq - their_freq).abs() <= 0.3 {
+                            target_being = Some(ti);
+                            target_pos = Some(beings.hot.positions[ti]);
+                        }
+                    } else {
+                        target_being = Some(ti);
+                        target_pos = Some(beings.hot.positions[ti]);
+                    }
                 }
             }
             Action::SeekFood => {
@@ -573,6 +610,12 @@ pub fn score_actions(
                     }
             });
             if let Some(appease_idx) = appease_target {
+                // Kin selection gate: don't appease non-kin (cultural distance > 0.3)
+                let my_freq = beings.hot.cultural_frequency[being_index];
+                let their_freq = beings.hot.cultural_frequency[appease_idx];
+                if (my_freq - their_freq).abs() > 0.3 {
+                    // Non-kin threat: skip appease, fall through to chosen_action
+                } else {
                 let appease_score = (1.0 - safety) * 50.0;
                 if appease_score > chosen_q {
                     let signal_levels = local.values;
@@ -593,6 +636,7 @@ pub fn score_actions(
                         signal_contrib,
                     };
                 }
+                } // end kin-check else
             }
         }
 
@@ -844,6 +888,14 @@ pub fn score_actions(
                     target_pos = Some(beings.hot.positions[ti]);
                     score += rel_score;
                     rel_contrib = rel_score;
+                    // Kin selection gate: cooperative actions only toward culturally similar beings
+                    if matches!(action, Action::Bond | Action::ShareFood) {
+                        let my_freq = beings.hot.cultural_frequency[being_index];
+                        let their_freq = beings.hot.cultural_frequency[ti];
+                        if (my_freq - their_freq).abs() > 0.3 {
+                            score = 0.0;
+                        }
+                    }
                 } else {
                     score = 0.0; // no valid target
                 }
@@ -915,6 +967,11 @@ pub fn score_actions(
                     // Random direction
                     let angle = rng.f32() * std::f32::consts::TAU;
                     target_pos = Some([pos[0] + angle.cos() * 5.0, pos[1] + angle.sin() * 5.0]);
+                }
+                // Trauma penalty: grieving beings avoid exploration
+                let grief = beings.hot.emotions[being_index][EMO_GRIEF];
+                if grief > 0.5 {
+                    score *= (1.0 - grief).max(0.1); // Heavy penalty, but not zero
                 }
             }
             Action::Cluster => {
@@ -1054,8 +1111,15 @@ pub fn score_actions(
                 } else {
                     let res_target = find_resource_need_target(being_index, beings, &nearby);
                     if let Some(rt) = res_target {
-                        target_being = Some(rt);
-                        target_pos = Some(beings.hot.positions[rt]);
+                        // Kin selection gate: only share resources with culturally similar beings
+                        let my_freq = beings.hot.cultural_frequency[being_index];
+                        let their_freq = beings.hot.cultural_frequency[rt];
+                        if (my_freq - their_freq).abs() > 0.3 {
+                            score = 0.0;
+                        } else {
+                            target_being = Some(rt);
+                            target_pos = Some(beings.hot.positions[rt]);
+                        }
                     } else {
                         score = 0.0;
                     }
@@ -1088,6 +1152,12 @@ pub fn score_actions(
                 if let Some(pp) = prey_pos {
                     target_pos = Some(pp.1);
                     target_being = Some(pp.0);
+                    // Non-kin hunt bonus: more willing to hunt culturally distant prey
+                    let my_freq = beings.hot.cultural_frequency[being_index];
+                    let their_freq = beings.hot.cultural_frequency[pp.0];
+                    if (my_freq - their_freq).abs() > 0.3 {
+                        score *= 1.5;
+                    }
                 } else {
                     score = 0.0; // no prey visible
                 }

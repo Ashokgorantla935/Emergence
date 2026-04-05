@@ -138,6 +138,7 @@ struct App {
     frames_since_last_sec: u32,
     current_fps: f32,
     current_tps: u32,
+    perf_stats: PerfStats,
 
     window: Option<Arc<Window>>,
     mouse_pos: [f32; 2],
@@ -336,6 +337,7 @@ impl App {
             frames_since_last_sec: 0,
             current_fps: 0.0,
             current_tps: 0,
+            perf_stats: PerfStats { gpu_managed: false, fps: 0.0, tps: 0, mem_mb: 0.0 },
             window: None,
             mouse_pos: [0.0, 0.0],
             pending_load_slot: None,
@@ -934,6 +936,8 @@ impl ApplicationHandler for App {
             self.current_fps = self.frames_since_last_sec as f32;
             self.frames_since_last_sec = 0;
             self.last_fps_time = now;
+            self.perf_stats.fps = self.current_fps;
+            self.perf_stats.tps = self.current_tps;
         }
 
         // --- Cinematic auto-pan during LaunchOverlay ---
@@ -1050,7 +1054,7 @@ impl ApplicationHandler for App {
 
                     // Observation pass every 600 ticks (amortized)
                     if world.tick % 600 == 0 {
-                        self.settlement_detector.detect(&world.beings, world.tick);
+                        self.settlement_detector.detect(&world.beings, &world.terrain, world.tick);
                         self.kingdom_detector.detect(
                             &self.settlement_detector,
                             &world.beings,
@@ -1679,22 +1683,7 @@ impl ApplicationHandler for App {
 
                 if self.ui_visible {
 
-                // Mute toggle button — top-right corner
-                {
-                    let muted = self.sound_engine.is_muted();
-                    let mute_label = if muted { "Muted" } else { "Sound" };
-                    let mut toggle = false;
-                    egui::Area::new(egui::Id::new("mute_btn"))
-                        .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-8.0, 8.0))
-                        .show(&self.egui_ctx, |ui| {
-                            if ui.small_button(mute_label).clicked() {
-                                toggle = true;
-                            }
-                        });
-                    if toggle {
-                        self.sound_engine.toggle_mute();
-                    }
-                }
+                // Mute toggle moved to TopBar
 
                 // God tool dock — floating CENTER_BOTTOM Area
                 let power_before = self.god_tool_state.active_power;
@@ -1779,13 +1768,18 @@ impl ApplicationHandler for App {
                 }
 
                 // Render Top Bar (FPS, Population, Tick)
-                emergence_viewer::screen_state::TopBar::show(
+                let muted = self.sound_engine.is_muted();
+                let toggle_mute = emergence_viewer::screen_state::TopBar::show(
                     &self.egui_ctx,
                     &mut self.speed,
                     tick,
                     population,
-                    &PerfStats { gpu_managed: false, fps: self.current_fps, tps: self.current_tps, mem_mb: 0.0 },
+                    &self.perf_stats,
+                    muted,
                 );
+                if toggle_mute {
+                    self.sound_engine.toggle_mute();
+                }
 
                 } // end if self.ui_visible
 
@@ -2441,6 +2435,12 @@ impl ApplicationHandler for App {
                                 ("SCENT", "F7 — Cultural identity. Beings recognize group members.", egui::Color32::from_rgb(200, 120, 220)),
                             emergence_core::world::signal::SignalChannel::Crime =>
                                 ("CRIME", "F8 — Murder beacon. Deposited by unprovoked killers. Bold beings hunt the source.", egui::Color32::from_rgb(200, 0, 200)),
+                            emergence_core::world::signal::SignalChannel::Fertilization =>
+                                ("FERTILIZATION", "Soil fertility from settlements. Boosts food regrowth.", egui::Color32::from_rgb(50, 200, 50)),
+                            emergence_core::world::signal::SignalChannel::CultureFreq =>
+                                ("CULTURE FREQ", "Tribal cultural identity wave.", egui::Color32::from_rgb(230, 150, 30)),
+                            emergence_core::world::signal::SignalChannel::CultureStrength =>
+                                ("CULTURE STRENGTH", "Tribal cultural presence intensity.", egui::Color32::from_rgb(230, 230, 70)),
                         };
 
                         egui::Area::new(egui::Id::new("heatmap_legend"))
@@ -2771,11 +2771,11 @@ impl ApplicationHandler for App {
                         obj_r.draw(&mut render_pass);
                         // Carry indicators: tiny sprites above beings holding items (same pipeline)
                         obj_r.draw_carry_indicators(&mut render_pass);
-                        // Pass 2: Flora (new flora_spritesheet)
-                        render_pass.set_bind_group(1, &rs.flora_bind_group, &[]);
+                        // Pass 2: Flora (190-series spritesheet)
+                        render_pass.set_bind_group(1, &rs.flora_190_bind_group, &[]);
                         obj_r.draw_flora(&mut render_pass);
-                        // Pass 3: Buildings (new building_spritesheet)
-                        render_pass.set_bind_group(1, &rs.building_bind_group, &[]);
+                        // Pass 3: Buildings (190-series architecture spritesheet)
+                        render_pass.set_bind_group(1, &rs.architecture_190_bind_group, &[]);
                         obj_r.draw_buildings(&mut render_pass);
                     }
 

@@ -140,6 +140,18 @@ pub struct Terrain {
     pub stockpile_food: Vec<f32>,
     /// Territory ownership — tribe/settlement ID claiming each cell. 0 = unclaimed.
     pub territory: Vec<u32>,
+    /// Elementary vector: combustible organic matter (flora roots, raw carbon). 0.0-1.0
+    pub biomass: Vec<f32>,
+    /// Elementary vector: mineral hardness (stone, structural integrity). 0.0-1.0
+    pub mineralize: Vec<f32>,
+    /// Elementary vector: dynamic moisture (flows, evaporates). Replaces static moisture for physics. 0.0-1.0
+    pub moisture_dynamic: Vec<f32>,
+    /// Elementary vector: heat distribution per cell. 0.0-1.0
+    pub thermal_energy: Vec<f32>,
+    /// Elementary vector: caloric/medicinal value of ground matter. 0.0-1.0
+    pub nutrient_density: Vec<f32>,
+    /// Pathogen field: microbiological decay. Blooms near rotting biomass in stagnant moisture. 0.0-1.0
+    pub pathogen: Vec<f32>,
 }
 
 impl Terrain {
@@ -279,6 +291,37 @@ impl Terrain {
             }
         }
 
+        // Elementary vectors — initialized from biome/terrain properties
+        let biomass: Vec<f32> = biome.iter().zip(moisture.iter()).map(|(b, &m)| match b {
+            Biome::Forest => 0.9,
+            Biome::Wetland => 0.6,
+            Biome::Grassland => 0.4 + m * 0.2,
+            Biome::Desert => 0.05,
+            Biome::Snow => 0.1,
+            Biome::Mountain => 0.1,
+            Biome::Water => 0.0,
+        }).collect();
+        let mineralize: Vec<f32> = biome.iter().zip(elevation.iter()).map(|(b, &e)| match b {
+            Biome::Mountain => 0.9,
+            Biome::Snow => 0.7,
+            Biome::Desert => 0.3 + e * 0.2,
+            Biome::Grassland => 0.1,
+            Biome::Forest => 0.1,
+            Biome::Wetland => 0.05,
+            Biome::Water => 0.0,
+        }).collect();
+        let moisture_dynamic: Vec<f32> = moisture.clone();
+        let thermal_energy: Vec<f32> = temperature_base.iter().map(|&t| (t * 0.5).clamp(0.0, 1.0)).collect();
+        let nutrient_density: Vec<f32> = biome.iter().zip(moisture.iter()).map(|(b, &m)| match b {
+            Biome::Forest => 0.7,
+            Biome::Wetland => 0.5,
+            Biome::Grassland => 0.5 + m * 0.3,
+            Biome::Desert => 0.05,
+            Biome::Snow => 0.05,
+            Biome::Mountain => 0.02,
+            Biome::Water => 0.3,
+        }).collect();
+
         Terrain {
             width: w,
             height: h,
@@ -306,6 +349,12 @@ impl Terrain {
             iron_vein,
             stockpile_food: vec![0.0f32; len],
             territory: vec![0u32; len],
+            biomass,
+            mineralize,
+            moisture_dynamic,
+            thermal_energy,
+            nutrient_density,
+            pathogen: vec![0.0f32; len],
         }
     }
 

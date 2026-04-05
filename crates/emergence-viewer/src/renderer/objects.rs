@@ -96,6 +96,55 @@ const FLORA_SWAMP_B: [f32; 2] = flora_uv(1, 4);
 const FLORA_SWAMP_C: [f32; 2] = flora_uv(2, 4);
 const FLORA_SWAMP_D: [f32; 2] = flora_uv(3, 4);
 
+// 190-series atlas: 8x8 grid, 128px per cell
+const CELL_190: f32 = 1.0 / 8.0;
+const fn uv_190(col: u8, row: u8) -> [f32; 2] {
+    [col as f32 * CELL_190, row as f32 * CELL_190]
+}
+
+// Flora 190 spritesheet grid mapping (8x8):
+// Row 0: Temperate trees
+// Row 1: Snow/ice pines and conifers
+// Row 2: Cherry blossom / exotic trees
+// Row 3: Mushrooms and fungi
+// Row 4-5: Dark swamp / dead trees
+// Row 6: Bushes and shrubs
+// Row 7: Ground cover, round bushes, saplings
+const FLORA_190_TEMPERATE: &[[f32; 2]] = &[uv_190(0,0), uv_190(1,0), uv_190(2,0), uv_190(3,0), uv_190(4,0), uv_190(5,0), uv_190(6,0), uv_190(7,0)];
+const FLORA_190_SNOW: &[[f32; 2]] = &[uv_190(0,1), uv_190(1,1), uv_190(2,1), uv_190(3,1), uv_190(4,1), uv_190(5,1), uv_190(6,1), uv_190(7,1)];
+const FLORA_190_EXOTIC: &[[f32; 2]] = &[uv_190(0,2), uv_190(1,2), uv_190(2,2), uv_190(3,2)];
+const FLORA_190_FUNGI: &[[f32; 2]] = &[uv_190(0,3), uv_190(1,3), uv_190(2,3), uv_190(3,3), uv_190(4,3), uv_190(5,3)];
+const FLORA_190_SWAMP: &[[f32; 2]] = &[uv_190(0,4), uv_190(1,4), uv_190(2,4), uv_190(3,4)];
+const FLORA_190_DEAD: &[[f32; 2]] = &[uv_190(0,5), uv_190(1,5), uv_190(2,5), uv_190(3,5)];
+const FLORA_190_BUSH: &[[f32; 2]] = &[uv_190(0,6), uv_190(1,6), uv_190(2,6), uv_190(3,6), uv_190(4,6), uv_190(5,6)];
+const FLORA_190_GROUND: &[[f32; 2]] = &[uv_190(0,7), uv_190(1,7), uv_190(2,7), uv_190(3,7)];
+
+// Architecture 190 grid (8x8):
+// Row 0: Huts, tents, basic shelters, caches, oilpump, farm
+// Row 1: Wooden houses (tier 1), windmill, campfire
+// Row 3: Stone buildings, forge, mine
+// Row 5: Walls, fences, gates
+// Row 7: Castles, keeps, advanced
+const ARCH_190_HUT: [f32; 2] = uv_190(0, 0);
+const ARCH_190_TENT: [f32; 2] = uv_190(1, 0);
+const ARCH_190_LEAN_TO: [f32; 2] = uv_190(2, 0);
+const ARCH_190_NOMAD: [f32; 2] = uv_190(3, 0);
+const ARCH_190_CACHE: [f32; 2] = uv_190(4, 0);
+const ARCH_190_OILPUMP: [f32; 2] = uv_190(5, 0);
+const ARCH_190_FARM: [f32; 2] = uv_190(6, 0);
+const ARCH_190_WOOD_HOUSE: [f32; 2] = uv_190(0, 1);
+const ARCH_190_WOOD_HOUSE_B: [f32; 2] = uv_190(1, 1);
+const ARCH_190_WINDMILL: [f32; 2] = uv_190(2, 1);
+const ARCH_190_CAMPFIRE: [f32; 2] = uv_190(3, 1);
+const ARCH_190_STONE_HOUSE: [f32; 2] = uv_190(0, 3);
+const ARCH_190_STONE_HOUSE_B: [f32; 2] = uv_190(1, 3);
+const ARCH_190_FORGE: [f32; 2] = uv_190(2, 3);
+const ARCH_190_MINE: [f32; 2] = uv_190(3, 3);
+const ARCH_190_WALL: [f32; 2] = uv_190(0, 5);
+const ARCH_190_KEEP: [f32; 2] = uv_190(0, 7);
+const ARCH_190_CASTLE: [f32; 2] = uv_190(1, 7);
+const ARCH_190_FACTORY: [f32; 2] = uv_190(2, 7);
+
 // Flora variant tables for new spritesheet
 const FLORA_TREE_VARIANTS_FOREST: &[[f32; 2]] = &[
     FLORA_TREE_A, FLORA_TREE_B, FLORA_TREE_C, FLORA_TREE_D,
@@ -670,8 +719,7 @@ fn collect_chunk_decor(
     let cell_y1 = (cell_y0 + CHUNK_CELL_SIZE as usize).min(h);
 
     // --- Buildings (Structures) ---
-    let campfire_frame_uv = [BUILD_CAMPFIRE, BUILD_CAMPFIRE, BUILD_CAMPFIRE];
-    let frame = (frame_tick / 4) as usize % 3;
+    let _frame = (frame_tick / 4) as usize % 3;
 
     for y in cell_y0..cell_y1 {
         for x in cell_x0..cell_x1 {
@@ -683,11 +731,11 @@ fn collect_chunk_decor(
             let (atlas_uv, tint, size, alpha) = match StructureType::from_u8(s) {
                 StructureType::Campfire => {
                     let a = if terrain.build_progress[idx] < StructureType::Campfire.build_ticks() { 0.5 } else { 1.0 };
-                    (campfire_frame_uv[frame], [1.0, 1.0, 1.0], 2.5, a)
+                    (ARCH_190_CAMPFIRE, [1.0, 1.0, 1.0], 2.5, a)
                 }
                 StructureType::LeanTo => {
                     let a = if terrain.build_progress[idx] < StructureType::LeanTo.build_ticks() { 0.5 } else { 1.0 };
-                    let v = [BUILD_LEANTO, BUILD_HUT, BUILD_FOODCACHE][struct_hash % 3];
+                    let v = [ARCH_190_LEAN_TO, ARCH_190_HUT, ARCH_190_CACHE][struct_hash % 3];
                     (v, [1.0, 1.0, 1.0], 3.0, a)
                 }
                 StructureType::Hut => {
@@ -697,27 +745,27 @@ fn collect_chunk_decor(
                     if age > 5000 {
                         scale *= 1.0 - ((age - 5000) as f32 / 5000.0).clamp(0.0, 0.5);
                     }
-                    (BUILD_HUT, [1.0, 1.0, 1.0], scale, a)
+                    (ARCH_190_HUT, [1.0, 1.0, 1.0], scale, a)
                 }
                 StructureType::Wall => {
                     let a = if terrain.build_progress[idx] < StructureType::Wall.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_WALL, [0.8, 0.8, 0.8], 3.0, a)
+                    (ARCH_190_WALL, [0.8, 0.8, 0.8], 3.0, a)
                 }
                 StructureType::Mine => {
                     let a = if terrain.build_progress[idx] < StructureType::Mine.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_MINE, [0.6, 0.4, 0.4], 3.0, a)
+                    (ARCH_190_MINE, [0.6, 0.4, 0.4], 3.0, a)
                 }
                 StructureType::Forge => {
                     let a = if terrain.build_progress[idx] < StructureType::Forge.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_FORGE, [0.5, 0.2, 0.2], 3.8, a)
+                    (ARCH_190_FORGE, [0.5, 0.2, 0.2], 3.8, a)
                 }
                 StructureType::Factory => {
                     let a = if terrain.build_progress[idx] < StructureType::Factory.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_FACTORY, [0.4, 0.4, 0.5], 4.2, a)
+                    (ARCH_190_FACTORY, [0.4, 0.4, 0.5], 4.2, a)
                 }
                 StructureType::Automobile => {
                     let a = if terrain.build_progress[idx] < StructureType::Automobile.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_AUTOMOBILE, [0.2, 0.2, 0.2], 2.5, a)
+                    (ARCH_190_WOOD_HOUSE_B, [0.2, 0.2, 0.2], 2.5, a)
                 }
                 StructureType::DirtPath => continue,
                 StructureType::StoneRoad => continue,
@@ -725,48 +773,47 @@ fn collect_chunk_decor(
                     let a = if terrain.build_progress[idx] < StructureType::ResourceCache.build_ticks() { 0.5 } else { 1.0 };
                     let stored = terrain.cache_food[idx] + terrain.cache_stone[idx];
                     let fill_alpha = 0.4 + (stored / 10.0).min(1.0) * 0.6;
-                    (BUILD_FOODCACHE, [0.9, 0.75, 0.2], 3.0, fill_alpha * a)
+                    (ARCH_190_CACHE, [0.9, 0.75, 0.2], 3.0, fill_alpha * a)
                 }
                 StructureType::OilPump => {
                     let a = if terrain.build_progress[idx] < StructureType::OilPump.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_OILPUMP, [0.15, 0.15, 0.15], 3.0, a)
+                    (ARCH_190_OILPUMP, [0.15, 0.15, 0.15], 3.0, a)
                 }
                 StructureType::NomadTent => {
                     let a = if terrain.build_progress[idx] < StructureType::NomadTent.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_NOMADTENT, [0.8, 0.6, 0.3], 3.0, a)
+                    (ARCH_190_NOMAD, [0.8, 0.6, 0.3], 3.0, a)
                 }
                 StructureType::WoodenHouse => {
                     let a = if terrain.build_progress[idx] < StructureType::WoodenHouse.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_WOODENHOUSE, [0.7, 0.5, 0.3], 3.5, a)
+                    (ARCH_190_WOOD_HOUSE, [0.7, 0.5, 0.3], 3.5, a)
                 }
                 StructureType::StoneHouse => {
                     let a = if terrain.build_progress[idx] < StructureType::StoneHouse.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_STONEHOUSE, [0.6, 0.6, 0.65], 3.5, a)
+                    (ARCH_190_STONE_HOUSE, [0.6, 0.6, 0.65], 3.5, a)
                 }
                 StructureType::Windmill => {
                     let a = if terrain.build_progress[idx] < StructureType::Windmill.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_WINDMILL, [0.9, 0.85, 0.7], 3.8, a)
+                    (ARCH_190_WINDMILL, [0.9, 0.85, 0.7], 3.8, a)
                 }
                 StructureType::Keep => {
                     let a = if terrain.build_progress[idx] < StructureType::Keep.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_KEEP, [0.5, 0.5, 0.55], 3.8, a)
+                    (ARCH_190_KEEP, [0.5, 0.5, 0.55], 3.8, a)
                 }
                 StructureType::Castle => {
                     let a = if terrain.build_progress[idx] < StructureType::Castle.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_CASTLE, [0.8, 0.8, 0.9], 4.2, a)
+                    (ARCH_190_CASTLE, [0.8, 0.8, 0.9], 4.2, a)
                 }
                 StructureType::FarmField => {
-                    // Tilled earth — use building slot, golden-brown tint
-                    (BUILD_FOODCACHE, [0.8, 0.65, 0.3], 3.0, 1.0)
+                    (ARCH_190_FARM, [0.8, 0.65, 0.3], 3.0, 1.0)
                 }
                 StructureType::None => continue,
-                _ => (BUILD_HUT, [0.7, 0.7, 0.7], 1.0, 1.0),
+                _ => (ARCH_190_HUT, [0.7, 0.7, 0.7], 1.0, 1.0),
             };
 
             building_out.push(ObjectInstance {
                 position:   [x as f32 + 0.5, y as f32 + 0.5],
                 atlas_uv,
-                atlas_size: [BUILD_CELL_U, BUILD_CELL_V],
+                atlas_size: [CELL_190, CELL_190],
                 tint,
                 size,
                 alpha,
@@ -775,119 +822,100 @@ fn collect_chunk_decor(
         }
     }
 
-    // --- Flora (biome-driven decorations: trees, bushes) ---
+    // --- Flora (biomass-driven from 190 atlas) ---
     let mut decor_count = 0usize;
     'outer: for y in cell_y0..cell_y1 {
         for x in cell_x0..cell_x1 {
             let idx = y * w + x;
             if terrain.water[idx] { continue; }
 
+            let biomass = terrain.biomass[idx];
+            let moisture = terrain.moisture_dynamic[idx];
+
+            if biomass < 0.4 { continue; }
+
             let biome = terrain.biome[idx];
             if biome == Biome::Water { continue; }
 
-            if (x + y) % 2 == 0 && resources.food_capacity[idx] >= 0.3 {
-                continue;
-            }
+            let hash = cell_hash(x, y);
 
-            let max_slots: usize = match biome {
-                Biome::Forest    => 3,
-                Biome::Grassland => 2,
-                Biome::Mountain | Biome::Wetland | Biome::Desert | Biome::Snow => 1,
-                Biome::Water     => continue,
+            let density_threshold = if biomass > 0.8 { 200 } else if biomass > 0.6 { 100 } else { 50 };
+            if (hash % 1000) >= density_threshold { continue; }
+
+            if decor_count >= MAX_DECORATIONS_PER_CHUNK { break 'outer; }
+
+            let jitter_x = ((hash >> 4) % 13) as f32 * 0.05 - 0.30;
+            let jitter_y = ((hash >> 10) % 13) as f32 * 0.05 - 0.30;
+
+            let temp = terrain.temperature_base[idx];
+            let (atlas_uv, size) = if temp < 0.2 {
+                let v = FLORA_190_SNOW[hash % FLORA_190_SNOW.len()];
+                (v, 4.0 + (hash % 3) as f32 * 0.3)
+            } else if biome == Biome::Wetland || (moisture > 0.8 && biomass > 0.7) {
+                if hash % 3 == 0 {
+                    let v = FLORA_190_FUNGI[hash % FLORA_190_FUNGI.len()];
+                    (v, 3.0 + (hash % 3) as f32 * 0.2)
+                } else {
+                    let v = FLORA_190_SWAMP[hash % FLORA_190_SWAMP.len()];
+                    (v, 3.5 + (hash % 3) as f32 * 0.3)
+                }
+            } else if biome == Biome::Desert {
+                let v = FLORA_190_DEAD[hash % FLORA_190_DEAD.len()];
+                (v, 3.0 + (hash % 3) as f32 * 0.2)
+            } else if biome == Biome::Mountain {
+                let v = FLORA_190_DEAD[hash % FLORA_190_DEAD.len()];
+                (v, 3.5 + (hash % 3) as f32 * 0.2)
+            } else if biome == Biome::Forest {
+                if hash % 10 < 7 {
+                    let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
+                    (v, 4.5 + (hash % 3) as f32 * 0.3)
+                } else {
+                    let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
+                    (v, 2.5 + (hash % 3) as f32 * 0.2)
+                }
+            } else {
+                if hash % 5 == 0 {
+                    let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
+                    (v, 4.0)
+                } else if hash % 5 < 3 {
+                    let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
+                    (v, 2.5)
+                } else {
+                    let v = FLORA_190_GROUND[hash % FLORA_190_GROUND.len()];
+                    (v, 1.5)
+                }
             };
 
-            for seed in 0..max_slots {
-                if decor_count >= MAX_DECORATIONS_PER_CHUNK { break 'outer; }
+            if pixels_per_unit < 5.0 && size < 2.0 { continue; }
 
-                let hash = cell_hash(x ^ seed.wrapping_mul(2654435761), y ^ seed.wrapping_mul(2246822519));
-
-                let threshold: usize = match (biome, seed) {
-                    (Biome::Forest,    0) => 50,
-                    (Biome::Forest,    1) => 30,
-                    (Biome::Forest,    _) => 15,
-                    (Biome::Grassland, 0) => 30,
-                    (Biome::Grassland, _) => 15,
-                    (Biome::Mountain,  _) => 20,
-                    (Biome::Wetland,   _) => 15,
-                    (Biome::Desert,    _) => 10,
-                    (Biome::Snow,      _) => 15,
-                    (Biome::Water,     _) => continue,
-                };
-
-                if (hash % 1000) >= threshold { continue; }
-
-                let jitter_x = ((hash >> (4 + seed * 3)) % 13) as f32 * 0.05 - 0.30;
-                let jitter_y = ((hash >> (10 + seed * 3)) % 13) as f32 * 0.05 - 0.30;
-
-                let (atlas_uv, tint, size) = match biome {
-                    Biome::Forest => {
-                        if hash % 10 < 6 {
-                            let v = FLORA_TREE_VARIANTS_FOREST[hash % FLORA_TREE_VARIANTS_FOREST.len()];
-                            let sz = 4.0 + (hash % 3) as f32 * 0.25;
-                            (v, [1.0f32, 1.0, 1.0], sz)
-                        } else {
-                            let v = FLORA_BUSH_VARIANTS[(hash >> 4) % FLORA_BUSH_VARIANTS.len()];
-                            (v, [1.0f32, 1.0, 1.0], 2.0 + (hash % 3) as f32 * 0.25)
-                        }
-                    }
-                    Biome::Grassland => {
-                        if hash % 5 == 4 {
-                            let v = FLORA_TREE_VARIANTS_GRASSLAND[(hash >> 3) % FLORA_TREE_VARIANTS_GRASSLAND.len()];
-                            (v, [1.0f32, 1.0, 1.0], 4.5)
-                        } else {
-                            continue;
-                        }
-                    }
-                    Biome::Snow => {
-                        let v = FLORA_TREE_VARIANTS_SNOW[hash % FLORA_TREE_VARIANTS_SNOW.len()];
-                        (v, [1.0f32, 1.0, 1.0], 3.5 + (hash % 3) as f32 * 0.25)
-                    }
-                    Biome::Desert => {
-                        let v = FLORA_TREE_VARIANTS_DESERT[hash % FLORA_TREE_VARIANTS_DESERT.len()];
-                        (v, [1.0f32, 1.0, 1.0], 3.0 + (hash % 3) as f32 * 0.25)
-                    }
-                    Biome::Mountain => {
-                        let v = FLORA_TREE_VARIANTS_MOUNTAIN[hash % FLORA_TREE_VARIANTS_MOUNTAIN.len()];
-                        (v, [1.0f32, 1.0, 1.0], 3.5 + (hash % 3) as f32 * 0.25)
-                    }
-                    Biome::Wetland => {
-                        let v = FLORA_TREE_VARIANTS_WETLAND[hash % FLORA_TREE_VARIANTS_WETLAND.len()];
-                        (v, [1.0f32, 1.0, 1.0], 4.0 + (hash % 3) as f32 * 0.25)
-                    }
-                    Biome::Water => continue,
-                };
-
-                if pixels_per_unit < 5.0 && size < 2.0 { continue; }
-
-                let mut tint = tint;
-                let wx = x as f32 + 0.5;
-                let wy = y as f32 + 0.5;
-                let toxin = climate.read_toxin(wx, wy);
-                let crime = signals.read(SignalChannel::Crime, x as u32, y as u32);
-                if toxin > 0.3 {
-                    let t = ((toxin - 0.3) / 0.7).min(1.0);
-                    tint[0] = tint[0] * (1.0 - t) + 0.3 * t;
-                    tint[1] = tint[1] * (1.0 - t) + 0.8 * t;
-                    tint[2] = tint[2] * (1.0 - t) + 0.2 * t;
-                }
-                if crime > 0.3 {
-                    let c = ((crime - 0.3) / 0.7).min(1.0);
-                    tint[0] = tint[0] * (1.0 - c * 0.5) + 0.4 * c * 0.5;
-                    tint[1] = tint[1] * (1.0 - c * 0.7);
-                    tint[2] = tint[2] * (1.0 - c * 0.3) + 0.5 * c * 0.3;
-                }
-
-                flora_out.push(ObjectInstance {
-                    position:   [wx + jitter_x, wy + jitter_y],
-                    atlas_uv,
-                    atlas_size: [FLORA_CELL_U, FLORA_CELL_V],
-                    tint,
-                    size,
-                    alpha:      1.0,
-                    _pad:       0.0,
-                });
-                decor_count += 1;
+            let wx = x as f32 + 0.5;
+            let wy = y as f32 + 0.5;
+            let mut tint = [1.0f32, 1.0, 1.0];
+            let toxin = climate.read_toxin(wx, wy);
+            let crime = signals.read(SignalChannel::Crime, x as u32, y as u32);
+            if toxin > 0.3 {
+                let t = ((toxin - 0.3) / 0.7).min(1.0);
+                tint[0] = tint[0] * (1.0 - t) + 0.3 * t;
+                tint[1] = tint[1] * (1.0 - t) + 0.8 * t;
+                tint[2] = tint[2] * (1.0 - t) + 0.2 * t;
             }
+            if crime > 0.3 {
+                let c = ((crime - 0.3) / 0.7).min(1.0);
+                tint[0] = tint[0] * (1.0 - c * 0.5) + 0.4 * c * 0.5;
+                tint[1] = tint[1] * (1.0 - c * 0.7);
+                tint[2] = tint[2] * (1.0 - c * 0.3) + 0.5 * c * 0.3;
+            }
+
+            flora_out.push(ObjectInstance {
+                position:   [wx + jitter_x, wy + jitter_y],
+                atlas_uv,
+                atlas_size: [CELL_190, CELL_190],
+                tint,
+                size,
+                alpha:      1.0,
+                _pad:       0.0,
+            });
+            decor_count += 1;
         }
     }
 }

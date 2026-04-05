@@ -128,18 +128,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let final_rgb = in.emotion_tint * in.brightness;
         return vec4<f32>(final_rgb, in.alpha);
     }
-
     if (in.screen_size < 2.0) { discard; }
-
     var texel = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
-
-    // Despill: discard AI-generated checkerboard background pixels
-    let max_c = max(texel.r, max(texel.g, texel.b));
-    let min_c = min(texel.r, min(texel.g, texel.b));
-    let saturation = max_c - min_c;
-    if (max_c > 0.75 && saturation < 0.08) {
-        discard;
-    }
+    
+    // Magenta chroma-key discard (#FF00FF) — threshold for compression artifacts
+    if (texel.r > 0.9 && texel.g < 0.15 && texel.b > 0.9) { discard; }
 
     let alpha = texel.a;
 

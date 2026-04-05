@@ -5,6 +5,7 @@ pub mod climate;
 pub mod signal;
 pub mod memetic;
 pub mod knowledge;
+pub mod physics;
 pub mod map;
 pub mod map_assets;
 pub mod map_registry;

@@ -36,7 +36,7 @@ impl SettlementDetector {
     }
 
     /// Run detection. Called every 600 ticks from the viewer update loop.
-    pub fn detect(&mut self, beings: &Beings, tick: u32) {
+    pub fn detect(&mut self, beings: &Beings, terrain: &emergence_core::world::terrain::Terrain, tick: u32) {
         if tick == self.last_run_tick {
             return;
         }
@@ -57,11 +57,30 @@ impl SettlementDetector {
             grid[cy * GRID + cx].push(i);
         }
 
-        // A cell is "settled" if it has >= 2 beings.
+        // A cell is "settled" if it has >= 2 beings AND at least one constructed structure
         let mut settled = vec![false; GRID * GRID];
         for idx in 0..GRID * GRID {
             if grid[idx].len() >= 2 {
-                settled[idx] = true;
+                let cy = idx / GRID;
+                let cx = idx % GRID;
+                // Check physical 4x4 terrain area for structures
+                let mut has_structure = false;
+                let start_tx = cx as u32 * CELL_SIZE as u32;
+                let start_ty = cy as u32 * CELL_SIZE as u32;
+                for ty in start_ty..(start_ty + CELL_SIZE as u32).min(terrain.height) {
+                    for tx in start_tx..(start_tx + CELL_SIZE as u32).min(terrain.width) {
+                        let tidx = (ty * terrain.width + tx) as usize;
+                        if terrain.structure[tidx] > 0 {
+                            has_structure = true;
+                            break;
+                        }
+                    }
+                    if has_structure { break; }
+                }
+                
+                if has_structure {
+                    settled[idx] = true;
+                }
             }
         }
 

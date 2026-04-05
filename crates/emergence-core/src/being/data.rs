@@ -160,6 +160,21 @@ pub fn init_fauna_params(creature_type: u8) -> [f32; 6] {
     }
 }
 
+/// Initial insulation factor per creature type.
+/// Wolf=2.0, Bear=3.0, Deer=1.5, Rabbit=1.2, Hawk=1.3, Fish=0.5, Snake=0.8, Human=1.0
+pub fn init_insulation(creature_type: u8) -> f32 {
+    match CreatureType::from_u8(creature_type) {
+        CreatureType::Wolf   => 2.0,
+        CreatureType::Bear   => 3.0,
+        CreatureType::Deer   => 1.5,
+        CreatureType::Rabbit => 1.2,
+        CreatureType::Hawk   => 1.3,
+        CreatureType::Fish   => 0.5,
+        CreatureType::Snake  => 0.8,
+        CreatureType::Human  => 1.0,
+    }
+}
+
 /// Hot data — accessed every tick in the simulation loop. Keep in contiguous memory.
 pub struct BeingsHot {
     pub positions: Vec<[f32; 2]>,
@@ -190,6 +205,14 @@ pub struct BeingsHot {
     /// Fauna use these to replace hardcoded boids/scoring constants.
     /// Humans get default [1.0; 6] (no fauna-specific behavior).
     pub fauna_params: Vec<[f32; 6]>,
+    /// Thermodynamic insulation factor. Higher = less heat loss. 1.0 = naked human.
+    pub insulation: Vec<f32>,
+    /// Internal body temperature (normalized 0.0-1.0). Below 0.3 = hypothermia.
+    pub body_temp: Vec<f32>,
+    /// Internal caloric energy reserve. Eating increases, movement/heat loss decreases.
+    pub caloric_energy: Vec<f32>,
+    /// Last tick when this being performed a Build/fire action. For memetic decay tracking.
+    pub last_fire_tick: Vec<u32>,
 
     /// Per-human MLP brain weights for Q-value action scoring.
     /// Architecture: 14 input → 8 hidden (tanh) → 22 output (Q-values)
@@ -297,6 +320,10 @@ impl Beings {
                 states: Vec::new(),
                 creature_type: Vec::new(),
                 fauna_params: Vec::new(),
+                insulation: Vec::new(),
+                body_temp: Vec::new(),
+                caloric_energy: Vec::new(),
+                last_fire_tick: Vec::new(),
                 brain_weights: Vec::new(),
                 count: 0,
                 alive_count: 0,
@@ -356,6 +383,10 @@ impl Beings {
         self.hot.states.push(BeingState::Awake);
         self.hot.creature_type.push(CreatureType::Human as u8); // default to Human; override after spawn for fauna
         self.hot.fauna_params.push([1.0; 6]); // human default; call init_fauna_params after setting creature_type
+        self.hot.insulation.push(1.0); // human default; call init_insulation after setting creature_type
+        self.hot.body_temp.push(1.0);
+        self.hot.caloric_energy.push(0.8);
+        self.hot.last_fire_tick.push(0u32);
         self.hot.brain_weights.push([0.0; 318]); // zeroed by default; init_human_brain called for humans after spawn
         self.cold.causal_memories.push(CausalMemoryRing::new());
         self.cold.relationships.push(RelationshipSlots::new());

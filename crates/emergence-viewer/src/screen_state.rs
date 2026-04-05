@@ -677,72 +677,55 @@ pub struct TopBar;
 
 impl TopBar {
     /// Draw the top-right HUD overlay. Returns true if ESC/pause was toggled via the UI.
-    pub fn show(ctx: &egui::Context, controls: &mut SpeedControls, tick: u32, population: u32, perf: &PerfStats) -> bool {
-        let esc_pressed = false;
+    pub fn show(ctx: &egui::Context, controls: &mut SpeedControls, tick: u32, population: u32, perf: &PerfStats, muted: bool) -> bool {
+        let mut mute_clicked = false;
 
         egui::Area::new(egui::Id::new("top_bar_area"))
             .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 8.0))
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 egui::Frame::none()
-                    .fill(egui::Color32::from_rgba_premultiplied(10, 10, 14, 160))
-                    .corner_radius(egui::CornerRadius::same(6))
-                    .inner_margin(egui::Margin::symmetric(8, 4))
+                    .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 40, 220))
+                    .rounding(6.0)
+                    .inner_margin(8.0)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            // Speed buttons
-                            for &speed in &[
-                                SimSpeed::Paused,
-                                SimSpeed::Speed1x,
-                                SimSpeed::Speed2x,
-                                SimSpeed::Speed5x,
-                                SimSpeed::Speed10x,
-                                SimSpeed::Speed50x,
-                                SimSpeed::Speed100x,
-                                SimSpeed::Speed200x,
-                                SimSpeed::Speed500x,
-                            ] {
-                                let active = controls.speed == speed;
-                                let label = if active {
-                                    egui::RichText::new(speed.label()).color(egui::Color32::GOLD).strong()
-                                } else {
-                                    egui::RichText::new(speed.label())
-                                };
-                                let btn = egui::Button::new(label)
-                                    .fill(if active { egui::Color32::from_rgb(60, 50, 0) } else { egui::Color32::from_rgb(30, 30, 30) });
-                                if ui.add(btn).clicked() {
-                                    controls.set_speed(speed);
-                                }
-                            }
+                            ui.spacing_mut().item_spacing.x = 12.0;
 
-                            ui.separator();
-                            ui.label(format!("T:{tick}"));
-                            ui.separator();
-                            ui.colored_label(egui::Color32::from_rgb(100, 220, 100), format!("P:{population}"));
-                            ui.separator();
-
-                            // GPU/CPU indicator
+                            // Tick (Neon Pink)
+                            ui.colored_label(egui::Color32::from_rgb(255, 20, 147), format!("T:{tick}"));
+                            
+                            // Population (Cyan)
+                            ui.colored_label(egui::Color32::from_rgb(0, 255, 255), format!("Pop:{population}"));
+                            
+                            // compute target (Neon Green vs Red)
                             if perf.gpu_managed {
-                                ui.colored_label(egui::Color32::from_rgb(80, 220, 80), "GPU");
+                                ui.colored_label(egui::Color32::from_rgb(50, 255, 50), "GPU");
                             } else {
-                                ui.colored_label(egui::Color32::from_rgb(220, 80, 80), "CPU");
+                                ui.colored_label(egui::Color32::from_rgb(255, 50, 50), "CPU");
                             }
-                            ui.separator();
 
-                            // FPS
+                            // FPS (Neon Lime / Red)
                             let fps_color = if perf.fps < 30.0 {
-                                egui::Color32::from_rgb(220, 180, 60)
+                                egui::Color32::from_rgb(255, 50, 50)
                             } else {
-                                egui::Color32::from_rgb(100, 220, 100)
+                                egui::Color32::from_rgb(0, 255, 0)
                             };
                             ui.colored_label(fps_color, format!("FPS:{:.0}", perf.fps));
-                            ui.separator();
-                            ui.label(format!("TPS:{}", perf.tps));
+                            
+                            // TPS (Neon Yellow)
+                            ui.colored_label(egui::Color32::from_rgb(255, 255, 0), format!("TPS:{}", perf.tps));
+
+                            // Mute Button
+                            let mute_label = if muted { "🔇 Muted" } else { "🔊 Sound" };
+                            if ui.button(mute_label).clicked() {
+                                mute_clicked = true;
+                            }
                         });
                     });
             });
 
-        esc_pressed
+        mute_clicked
     }
 }
 

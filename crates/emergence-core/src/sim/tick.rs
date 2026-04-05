@@ -62,28 +62,8 @@ pub fn tick(world: &mut World) {
         world.tick,
     );
 
-    // 2b. Flora cellular automata (every 60 ticks)
-    if world.tick % 60 == 0 {
-        world.resources.tick_flora(&world.terrain, world.tick);
-
-        // Chemical agriculture: fertilization signal boosts food regrowth
-        let tw = world.terrain.width as usize;
-        let th = world.terrain.height as usize;
-        for y in 0..th {
-            for x in 0..tw {
-                let idx = y * tw + x;
-                let sx = (x as u32).min(world.signals.width - 1);
-                let sy = (y as u32).min(world.signals.height - 1);
-                let fert = world.signals.read(SignalChannel::Fertilization, sx, sy);
-                if fert > 0.3 {
-                    let boost = (fert * 10.0).min(5.0);
-                    world.resources.food[idx] = (world.resources.food[idx]
-                        + world.resources.regrowth_rate[idx] * boost)
-                        .min(world.resources.food_capacity[idx] * 3.0);
-                }
-            }
-        }
-    }
+    // 2b. Flora CA disabled — V36: biomass/nutrient driven by tick_physics()
+    // Fertilization boost preserved via physics signal coupling
 
     // 2c. Weather field: rain boosts flora hydration (every 10 ticks)
     if world.tick % 10 == 0 {
@@ -95,12 +75,30 @@ pub fn tick(world: &mut World) {
         world.terrain.tick_extraction();
     }
 
-    // 2e. Fire cellular automaton — every tick when active
-    if world.resources.has_active_fire() {
-        world.resources.tick_fire(&mut world.terrain, &mut world.signals, world.tick);
+    // 2e. Fire CA disabled — V36: combustion driven by tick_physics() (thermal > 0.9 + biomass)
+
+    // 2f. Thermodynamic physics — combustion, diffusion, moisture, nutrients, signal coupling (every 30 ticks)
+    if world.tick % 30 == 0 {
+        crate::world::physics::tick_physics(&mut world.terrain, &mut world.signals);
     }
 
-    // 2f. Territory expansion CA (every 100 ticks) — Wave 27
+    // 2h. Pathogen exposure — beings on high-pathogen cells lose caloric energy (every 30 ticks)
+    if world.tick % 30 == 0 {
+        let tw = world.terrain.width;
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] == crate::being::data::BeingState::Dead { continue; }
+            let pos = world.beings.hot.positions[i];
+            let cx = (pos[0] as u32).min(tw - 1);
+            let cy = (pos[1] as u32).min(world.terrain.height - 1);
+            let idx = (cy * tw + cx) as usize;
+            let pathogen = world.terrain.pathogen[idx];
+            if pathogen > 0.5 {
+                world.beings.hot.caloric_energy[i] = (world.beings.hot.caloric_energy[i] - 0.01 * (pathogen - 0.5)).max(0.0);
+            }
+        }
+    }
+
+    // 2g. Territory expansion CA (every 100 ticks) — Wave 27
     if world.tick % 100 == 0 {
         let tw = world.terrain.width as usize;
         let th = world.terrain.height as usize;
@@ -285,6 +283,22 @@ pub fn tick(world: &mut World) {
             world.beings.hot.carry[dead_idx][0] = 0.0;
         }
 
+        // Closed-loop mass: dead beings fertilize the terrain
+        {
+            let tcx = (pos[0] as u32).min(world.terrain.width - 1);
+            let tcy = (pos[1] as u32).min(world.terrain.height - 1);
+            let terrain_idx = (tcy * world.terrain.width + tcx) as usize;
+            let (bio_inject, nutrient_inject) = match crate::being::data::CreatureType::from_u8(world.beings.hot.creature_type[dead_idx]) {
+                crate::being::data::CreatureType::Human => (0.3, 0.5),
+                crate::being::data::CreatureType::Bear => (0.5, 0.6),
+                crate::being::data::CreatureType::Wolf => (0.3, 0.4),
+                crate::being::data::CreatureType::Deer => (0.3, 0.4),
+                _ => (0.1, 0.2), // small fauna
+            };
+            world.terrain.biomass[terrain_idx] = (world.terrain.biomass[terrain_idx] + bio_inject).min(1.0);
+            world.terrain.nutrient_density[terrain_idx] = (world.terrain.nutrient_density[terrain_idx] + nutrient_inject).min(1.0);
+        }
+
         // Handout grief to bonded beings.
         // We do a single pass over active beings to check relationships.
         for i in 0..world.beings.hot.count {
@@ -294,6 +308,37 @@ pub fn tick(world: &mut World) {
             if let Some(imp) = world.beings.cold.relationships[i].find(dead_idx as u32) {
                 if imp.warmth > 0.3 {
                     trigger_emotion(&mut world.beings, i, EMO_GRIEF, 0.9);
+                }
+            }
+        }
+
+        // Trauma Engine: violent death triggers grief in nearby kin
+        let was_violent = world.beings.hot.ages[dead_idx]
+            < (world.beings.hot.lifespans[dead_idx] as f32 * 0.85) as u32;
+
+        if was_violent {
+            let dead_pos = world.beings.hot.positions[dead_idx];
+            let dead_freq = world.beings.hot.cultural_frequency[dead_idx];
+            let perception_radius = 10.0_f32;
+
+            for j in 0..world.beings.hot.count {
+                if j == dead_idx || world.beings.hot.states[j] == BeingState::Dead {
+                    continue;
+                }
+                let jpos = world.beings.hot.positions[j];
+                let dx = dead_pos[0] - jpos[0];
+                let dy = dead_pos[1] - jpos[1];
+                if dx * dx + dy * dy > perception_radius * perception_radius {
+                    continue;
+                }
+                // Kin check: cultural frequency match
+                let freq_dist = (dead_freq - world.beings.hot.cultural_frequency[j]).abs();
+                if freq_dist < 0.3 {
+                    // Spike grief emotion
+                    world.beings.hot.emotions[j][EMO_GRIEF] = 1.0;
+                    // Also spike fear
+                    world.beings.hot.emotions[j][EMO_FEAR] =
+                        (world.beings.hot.emotions[j][EMO_FEAR] + 0.5).min(1.0);
                 }
             }
         }
@@ -516,6 +561,11 @@ pub fn tick(world: &mut World) {
             let needs_before = world.beings.hot.needs[i];
 
             execute_action(world, i, action);
+
+            // Record fire/build activity for memetic decay tracking
+            if action.action == Action::Build {
+                world.beings.hot.last_fire_tick[i] = world.tick;
+            }
 
             // Hebbian update: fauna only, after action execution
             if world.beings.hot.creature_type[i] != CreatureType::Human as u8
@@ -1053,6 +1103,22 @@ pub fn tick(world: &mut World) {
                 crate::being::lifecycle::check_and_award_traits(&mut world.beings, i, world.tick);
             }
         }
+
+        // Memetic decay: beings who haven't built/used fire in 50 years lose the ability
+        let decay_threshold = 1_440_000u32; // 50 years in ticks (28800 * 50)
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] == BeingState::Dead { continue; }
+            if world.beings.hot.creature_type[i] != 0 { continue; } // humans only
+
+            let last_fire = world.beings.hot.last_fire_tick[i];
+            if last_fire > 0 && world.tick.saturating_sub(last_fire) > decay_threshold {
+                // Dark Age: zero the Build action Q-weight in the brain
+                // Brain layout: W1(112) + b1(8) + W2(176) + b2(22) = 318 total
+                // b2 starts at index 296, Build = Action index 16, so b2[16] = index 312
+                world.beings.hot.brain_weights[i][312] = -5.0; // Strong negative bias = effectively disabled
+                world.beings.hot.last_fire_tick[i] = 0; // Reset so we don't keep decaying
+            }
+        }
     }
 
     // Settlement detection every 50 ticks (was 600). Amortized ~0.002ms/tick.
@@ -1424,6 +1490,19 @@ fn process_births(world: &mut World) {
         let freq_b = if pb < world.beings.hot.cultural_frequency.len() { world.beings.hot.cultural_frequency[pb] } else { 0.5 };
         let mutation = (world.rng.f32() - 0.5) * 0.02;
         world.beings.hot.cultural_frequency[idx] = ((freq_a + freq_b) / 2.0 + mutation).clamp(0.0, 1.0);
+
+        // Darwinian phenotype mutation: ±5% RNG on heritable traits
+        let insulation_mutation = 0.95 + world.rng.f32() * 0.1; // 0.95 to 1.05
+        let parent_insulation = if pa < world.beings.hot.insulation.len() {
+            world.beings.hot.insulation[pa]
+        } else {
+            1.0
+        };
+        world.beings.hot.insulation[idx] = (parent_insulation * insulation_mutation).clamp(0.5, 5.0);
+        // Body temp and caloric energy start fresh
+        world.beings.hot.body_temp[idx] = 1.0;
+        world.beings.hot.caloric_energy[idx] = 0.6; // children start with less reserves
+
         world.beings.cold.genotypes[idx] = child_genotype;
         // Initialize brain with inherited Q-baselines seeded into output biases
         world.beings.hot.brain_weights[idx] = init_human_brain_with_genotype(

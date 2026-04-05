@@ -80,6 +80,12 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                         // Eating brings hunger near-full: one eat = substantial meal
                         world.beings.hot.needs[being_index][NEED_HUNGER] =
                             (world.beings.hot.needs[being_index][NEED_HUNGER] + consumed * 15.0).min(1.0);
+                        // V36: also drain terrain nutrient_density (closed-loop mass)
+                        let nidx = (cy.min(world.terrain.height - 1) * world.terrain.width + cx.min(world.terrain.width - 1)) as usize;
+                        let nutrient_consumed = consumed * 0.02; // scale to 0.0-1.0 range
+                        world.terrain.nutrient_density[nidx] = (world.terrain.nutrient_density[nidx] - nutrient_consumed).max(0.0);
+                        // Also feed caloric energy
+                        world.beings.hot.caloric_energy[being_index] = (world.beings.hot.caloric_energy[being_index] + consumed * 0.01).min(1.0);
                         trigger_emotion(&mut world.beings, being_index, EMO_JOY, 0.1);
                         // Deposit food trail
                         world.signals.deposit(

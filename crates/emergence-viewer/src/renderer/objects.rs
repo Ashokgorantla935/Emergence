@@ -24,18 +24,20 @@ const fn uv(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * ATLAS_CELL, row as f32 * ATLAS_CELL]
 }
 
-// Flora spritesheet layout (8 cols × 6 rows)
-const FLORA_CELL_U: f32 = 1.0 / 8.0;
-const FLORA_CELL_V: f32 = 1.0 / 6.0;
+// Flora spritesheet layout (12 cols × 12 rows)
+const FLORA_CELL_U: f32 = 1.0 / 12.0;
+const FLORA_CELL_V: f32 = 1.0 / 12.0;
 const fn flora_uv(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * FLORA_CELL_U, row as f32 * FLORA_CELL_V]
 }
 
-// Building spritesheet layout (4 cols × 4 rows)
-const BUILD_CELL_U: f32 = 1.0 / 4.0;
-const BUILD_CELL_V: f32 = 1.0 / 4.0;
+// Building spritesheet layout (12 cols × 12 rows)
+const BUILD_CELL_U: f32 = 1.0 / 12.0;
+const BUILD_CELL_V: f32 = 1.0 / 12.0;
 const fn build_uv(col: u8, row: u8) -> [f32; 2] {
-    [col as f32 * BUILD_CELL_U, row as f32 * BUILD_CELL_V]
+    // Legacy 4x4 maps to 12x12: each old cell = 3x3 in new grid.
+    // Pick center cell (+1 offset) of the 3x3 cluster.
+    [(col as u32 * 3 + 1) as f32 * BUILD_CELL_U, (row as u32 * 3 + 1) as f32 * BUILD_CELL_V]
 }
 
 // Flora spritesheet — row 0: tree variants, row 1: bush/flower variants

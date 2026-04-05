@@ -8,9 +8,9 @@ use emergence_core::being::data::{BeingState, Beings, CreatureType};
 const ENTITY_CELL_U: f32 = 1.0 / 4.0;
 /// Cell size in the entity spritesheet vertical (1 / 96)
 const ENTITY_CELL_V: f32 = 1.0 / 96.0;
-/// Cell size in the fauna spritesheet (8 cols × 6 rows).
-const FAUNA_CELL_U: f32 = 1.0 / 8.0;
-const FAUNA_CELL_V: f32 = 1.0 / 6.0;
+/// Cell size in the fauna spritesheet (12 cols × 12 rows).
+const FAUNA_CELL_U: f32 = 1.0 / 12.0;
+const FAUNA_CELL_V: f32 = 1.0 / 12.0;
 
 /// 10 animation states (matches atlas row layout).
 #[repr(u8)]
@@ -309,23 +309,26 @@ fn body_build_index(beings: &Beings, i: usize) -> u32 {
 }
 
 /// Atlas UV for a fauna sprite.
-/// fauna_spritesheet.png: 8 cols × 6 rows. 2 species per row, 4 animation frames each.
-///   Row 0: Wolf (cols 0-3), Deer (cols 4-7)
-///   Row 1: Rabbit (cols 0-3), Bear (cols 4-7)
-///   Row 2: Hawk (cols 0-3), Fish (cols 4-7)
-///   Row 3: Snake (cols 0-3)
-///   Row 4-5: (unused)
+/// fauna_spritesheet.png: 12 cols × 12 rows. 1 species per row, 3 frames per direction.
+///   Row 0: Rabbit
+///   Row 1: Deer
+///   Row 2: Wolf
+///   Row 3: Bear
+///   Row 4: Hawk
+///   Row 5: Fish
+///   Row 6: Snake
+///   Rows 7-11: (unused)
 fn fauna_atlas_uv(ct: CreatureType, frame: u8) -> [f32; 2] {
-    let (row, col_offset): (usize, usize) = match ct {
-        CreatureType::Wolf   => (0, 0),
-        CreatureType::Deer   => (0, 4),
-        CreatureType::Rabbit => (1, 0),
-        CreatureType::Bear   => (1, 4),
-        CreatureType::Hawk   => (2, 0),
-        CreatureType::Fish   => (2, 4),
-        CreatureType::Snake  => (3, 0),
-        CreatureType::Human  => (0, 0),  // fallback
+    let row: u32 = match ct {
+        CreatureType::Rabbit => 0,
+        CreatureType::Deer   => 1,
+        CreatureType::Wolf   => 2,
+        CreatureType::Bear   => 3,
+        CreatureType::Hawk   => 4,
+        CreatureType::Fish   => 5,
+        CreatureType::Snake  => 6,
+        CreatureType::Human  => 0,  // fallback
     };
-    let col = col_offset + (frame as usize % 4);
+    let col = (frame as u32) % 3; // 3 frames per direction
     [col as f32 * FAUNA_CELL_U, row as f32 * FAUNA_CELL_V]
 }

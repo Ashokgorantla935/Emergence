@@ -1,4 +1,5 @@
 pub mod data;
+pub mod fauna_boids;
 pub mod memory;
 pub mod needs;
 pub mod emotions;

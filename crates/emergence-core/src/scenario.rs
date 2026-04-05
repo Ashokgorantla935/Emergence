@@ -390,6 +390,7 @@ pub fn create_world_from_scenario(scenario: &ScenarioConfig) -> crate::sim::worl
         kingdoms: Vec::new(),
         wars: Vec::new(),
         memetic: crate::world::memetic::MemeticGrid::new(w, h),
+        knowledge: crate::world::knowledge::KnowledgeGrid::new(w, h),
     }
 }
 

@@ -8,6 +8,7 @@ use crate::world::config::WorldConfig;
 use crate::world::resource::ResourceLayer;
 use crate::world::signal::SignalGrid;
 use crate::world::memetic::MemeticGrid;
+use crate::world::knowledge::KnowledgeGrid;
 use crate::world::terrain::Terrain;
 use super::spatial::SpatialIndex;
 
@@ -211,6 +212,7 @@ pub struct World {
     pub climate_grid: ClimateGrid,
     pub signals: SignalGrid,
     pub memetic: MemeticGrid,
+    pub knowledge: KnowledgeGrid,
     pub beings: Beings,
     pub spatial: SpatialIndex,
     pub events: EventLog,

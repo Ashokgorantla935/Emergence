@@ -637,6 +637,69 @@ pub fn tick(world: &mut World) {
         }
     }
 
+    // 7b. Geographic tech discovery (every 100 ticks) — humans only
+    if world.tick % 100 == 0 {
+        use crate::world::knowledge::{
+            TECH_AGRICULTURE, TECH_FISHING, TECH_MASONRY, TECH_SMELTING,
+        };
+        use crate::world::terrain::Biome;
+        use crate::world::resource::FoodType;
+        let tw = world.terrain.width;
+        let th = world.terrain.height;
+
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] != BeingState::Awake { continue; }
+            if world.beings.hot.creature_type[i] != 0 { continue; } // humans only
+
+            let pos = world.beings.hot.positions[i];
+            let x = (pos[0] as u32).min(tw - 1);
+            let y = (pos[1] as u32).min(th - 1);
+            let idx = (y * tw + x) as usize;
+
+            // Deterministic discovery probability per being per check (2% chance)
+            let hash = (x as usize).wrapping_mul(2654435761)
+                ^ (y as usize).wrapping_mul(2246822519)
+                ^ (i.wrapping_mul(31));
+            let roll = (hash ^ (world.tick as usize)) % 1000;
+            if roll > 20 { continue; }
+
+            // FISHING: near water cell
+            let near_water = world.terrain.water[idx]
+                || (x > 0 && world.terrain.water[(y * tw + x - 1) as usize])
+                || (x + 1 < tw && world.terrain.water[(y * tw + x + 1) as usize])
+                || (y > 0 && world.terrain.water[((y - 1) * tw + x) as usize])
+                || (y + 1 < th && world.terrain.water[((y + 1) * tw + x) as usize]);
+            if near_water && !world.knowledge.has_tech(x, y, TECH_FISHING) {
+                world.knowledge.deposit_tech(x, y, TECH_FISHING, 8);
+            }
+
+            // SMELTING: campfire or forge on mountain biome
+            let has_fire = world.terrain.structure[idx] == 1 || world.terrain.structure[idx] == 10;
+            if has_fire
+                && matches!(world.terrain.biome[idx], Biome::Mountain)
+                && !world.knowledge.has_tech(x, y, TECH_SMELTING)
+            {
+                world.knowledge.deposit_tech(x, y, TECH_SMELTING, 6);
+            }
+
+            // MASONRY: hut present + carrying stone
+            if world.terrain.structure[idx] == 3
+                && world.beings.hot.carry[i][1] > 0.1
+                && !world.knowledge.has_tech(x, y, TECH_MASONRY)
+            {
+                world.knowledge.deposit_tech(x, y, TECH_MASONRY, 6);
+            }
+
+            // AGRICULTURE: adult+ flora + grain food type
+            if world.resources.flora_stage[idx] >= 2
+                && world.resources.food_type[idx] == FoodType::Grain
+                && !world.knowledge.has_tech(x, y, TECH_AGRICULTURE)
+            {
+                world.knowledge.deposit_tech(x, y, TECH_AGRICULTURE, 10);
+            }
+        }
+    }
+
     // Personality drift once per year — humans only
     if world.tick % 28800 == 0 && world.tick > 0 {
         drift_personality_humans(&mut world.beings, &mut world.rng);

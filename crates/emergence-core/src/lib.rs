@@ -18,6 +18,7 @@ use world::config::WorldConfig;
 use world::resource::ResourceLayer;
 use world::signal::SignalGrid;
 use world::memetic::MemeticGrid;
+use world::knowledge::KnowledgeGrid;
 use world::terrain::{Biome, Terrain};
 
 pub fn create_world(config: WorldConfig) -> World {
@@ -27,6 +28,7 @@ pub fn create_world(config: WorldConfig) -> World {
     let climate_grid = ClimateGrid::new(config.size.0, config.size.1);
     let signals = SignalGrid::new(config.size.0, config.size.1);
     let memetic = MemeticGrid::new(config.size.0, config.size.1);
+    let knowledge = KnowledgeGrid::new(config.size.0, config.size.1);
     let spatial = SpatialIndex::new(config.size.0, config.size.1, 4.0);
     let events = EventLog::new(100_000);
 
@@ -114,6 +116,7 @@ pub fn create_world(config: WorldConfig) -> World {
         climate_grid,
         signals,
         memetic,
+        knowledge,
         beings,
         spatial,
         events,
@@ -193,6 +196,7 @@ pub fn spawn_fauna(beings: &mut Beings, terrain: &Terrain, rng: &mut fastrand::R
             let idx = beings.spawn([jx, jy], personality, lifespan, [u32::MAX, u32::MAX]);
             beings.hot.creature_type[idx] = creature_type as u8;
             beings.hot.fauna_params[idx] = crate::being::data::init_fauna_params(creature_type as u8);
+            beings.hot.cultural_frequency[idx] = 0.0; // fauna have no culture
             // Random starting age so some fauna are already adults/elders at world start
             beings.hot.ages[idx] = rng.u32(0..lifespan);
         }

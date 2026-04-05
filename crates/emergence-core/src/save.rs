@@ -573,6 +573,7 @@ impl SaveFile {
                 }
                 mg
             },
+        knowledge: crate::world::knowledge::KnowledgeGrid::new(w, h),
         }
     }
 }

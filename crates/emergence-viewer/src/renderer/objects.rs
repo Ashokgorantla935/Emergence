@@ -6,9 +6,13 @@
 //! Each chunk independently manages its own GPU instance buffer, enabling frustum culling
 //! and incremental rebuilds.
 
+use emergence_core::being::data::{BeingState, Beings};
 use emergence_core::world::resource::{FoodType, ResourceLayer};
 use emergence_core::world::terrain::{Biome, Terrain, StructureType};
 use wgpu::util::DeviceExt;
+
+/// Max carry indicator instances (2 per being, up to 20K beings)
+const MAX_CARRY_INDICATORS: usize = 40_000;
 
 // Atlas layout constants — rows 18-23 (cell = 1/32 UV)
 const ATLAS_CELL: f32 = 1.0 / 32.0;
@@ -186,6 +190,9 @@ pub struct ChunkedObjectRenderer {
     frame_tick: u32,
     /// Last known pixels_per_unit (for LOD filtering)
     pixels_per_unit: f32,
+    /// Dynamic carry indicator instances (rebuilt every frame when beings carry items)
+    pub carry_instance_buffer: wgpu::Buffer,
+    pub carry_instance_count: u32,
     /// Camera cache — skip rebuild when camera is static
     last_cam_x: f32,
     last_cam_y: f32,
@@ -243,6 +250,13 @@ impl ChunkedObjectRenderer {
             }
         }
 
+        let carry_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label:              Some("CarryIndicatorInstances"),
+            size:               (MAX_CARRY_INDICATORS * std::mem::size_of::<ObjectInstance>()) as u64,
+            usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         ChunkedObjectRenderer {
             vertex_buffer,
             index_buffer,
@@ -251,6 +265,8 @@ impl ChunkedObjectRenderer {
             chunk_grid_h,
             frame_tick: 0,
             pixels_per_unit: 32.0,
+            carry_instance_buffer,
+            carry_instance_count: 0,
             last_cam_x: f32::NAN,
             last_cam_y: f32::NAN,
             last_cam_zoom: f32::NAN,
@@ -376,6 +392,92 @@ impl ChunkedObjectRenderer {
         if idx < self.chunks.len() {
             self.chunks[idx].dirty = true;
         }
+    }
+
+    /// Rebuild dynamic carry indicator instances from current being positions.
+    /// Only visible at medium/close zoom (pixels_per_unit > 4.0).
+    pub fn update_carry_indicators(
+        &mut self,
+        queue:           &wgpu::Queue,
+        beings:          &Beings,
+        pixels_per_unit: f32,
+        cam_x:           f32,
+        cam_y:           f32,
+        cam_half_w:      f32,
+        cam_half_h:      f32,
+    ) {
+        // Skip carry indicators at macro zoom — too small to be useful
+        if pixels_per_unit < 4.0 {
+            self.carry_instance_count = 0;
+            return;
+        }
+
+        let mut instances: Vec<ObjectInstance> = Vec::new();
+
+        for i in 0..beings.hot.count {
+            if beings.hot.states[i] == BeingState::Dead { continue; }
+
+            let pos = beings.hot.positions[i];
+
+            // Frustum cull
+            let margin = 2.0;
+            if pos[0] < cam_x - cam_half_w - margin || pos[0] > cam_x + cam_half_w + margin ||
+               pos[1] < cam_y - cam_half_h - margin || pos[1] > cam_y + cam_half_h + margin {
+                continue;
+            }
+
+            if i >= beings.hot.carry.len() { continue; }
+            let food_carry  = beings.hot.carry[i][0];
+            let stone_carry = beings.hot.carry[i][1];
+
+            if food_carry < 0.1 && stone_carry < 0.1 { continue; }
+
+            // Indicator sits above being head (y is "up" in screen space here = smaller y value)
+            let head_y = pos[1] - 1.2;
+
+            if food_carry > 0.1 {
+                instances.push(ObjectInstance {
+                    position:   [pos[0], head_y],
+                    atlas_uv:   UV_WHEAT_FULL,
+                    atlas_size: [ATLAS_CELL, ATLAS_CELL],
+                    tint:       [1.0, 0.85, 0.2],  // golden
+                    size:       0.7,
+                    alpha:      0.9,
+                    _pad:       0.0,
+                });
+            }
+            if stone_carry > 0.1 {
+                // Offset right slightly when both food and stone are carried
+                let x_off = if food_carry > 0.1 { 0.5 } else { 0.0 };
+                instances.push(ObjectInstance {
+                    position:   [pos[0] + x_off, head_y],
+                    atlas_uv:   UV_STONE,
+                    atlas_size: [ATLAS_CELL, ATLAS_CELL],
+                    tint:       [0.7, 0.7, 0.7],  // grey
+                    size:       0.6,
+                    alpha:      0.9,
+                    _pad:       0.0,
+                });
+            }
+
+            if instances.len() >= MAX_CARRY_INDICATORS { break; }
+        }
+
+        self.carry_instance_count = instances.len() as u32;
+        if !instances.is_empty() {
+            queue.write_buffer(
+                &self.carry_instance_buffer,
+                0,
+                bytemuck::cast_slice(&instances),
+            );
+        }
+    }
+
+    /// Draw carry indicator sprites using the already-bound object pipeline.
+    pub fn draw_carry_indicators<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
+        if self.carry_instance_count == 0 { return; }
+        render_pass.set_vertex_buffer(1, self.carry_instance_buffer.slice(..));
+        render_pass.draw_indexed(0..6, 0, 0..self.carry_instance_count);
     }
 }
 

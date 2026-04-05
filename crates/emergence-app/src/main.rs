@@ -448,14 +448,14 @@ impl App {
                 HeatmapRenderer::new(
                     &rs.device,
                     &rs.queue,
-                    w.config.size.0,
-                    w.config.size.1,
+                    w.terrain.width,
+                    w.terrain.height,
                     &rs.simple_texture_bind_group_layout,
                 )
             };
             let object_renderer = {
                 let w = world.read().unwrap();
-                ChunkedObjectRenderer::new(&rs.device, w.config.size.0, w.config.size.1)
+                ChunkedObjectRenderer::new(&rs.device, w.terrain.width, w.terrain.height)
             };
             self.terrain_renderer = Some(terrain_renderer);
             self.heatmap_renderer = Some(heatmap_renderer);
@@ -503,14 +503,14 @@ impl App {
                         HeatmapRenderer::new(
                             &rs.device,
                             &rs.queue,
-                            w_ref.config.size.0,
-                            w_ref.config.size.1,
+                            w_ref.terrain.width,
+                            w_ref.terrain.height,
                             &rs.simple_texture_bind_group_layout,
                         )
                     };
                     let object_renderer = {
                         let w_ref = world.read().unwrap();
-                        ChunkedObjectRenderer::new(&rs.device, w_ref.config.size.0, w_ref.config.size.1)
+                        ChunkedObjectRenderer::new(&rs.device, w_ref.terrain.width, w_ref.terrain.height)
                     };
                     self.terrain_renderer = Some(terrain_renderer);
                     self.heatmap_renderer = Some(heatmap_renderer);
@@ -597,11 +597,11 @@ impl ApplicationHandler for App {
             self.heatmap_renderer = Some(HeatmapRenderer::new(
                 &render_state.device,
                 &render_state.queue,
-                world.config.size.0,
-                world.config.size.1,
+                world.terrain.width,
+                world.terrain.height,
                 &render_state.simple_texture_bind_group_layout,
             ));
-            let object_renderer = ChunkedObjectRenderer::new(&render_state.device, world.config.size.0, world.config.size.1);
+            let object_renderer = ChunkedObjectRenderer::new(&render_state.device, world.terrain.width, world.terrain.height);
             self.object_renderer = Some(object_renderer);
         }
 
@@ -1419,6 +1419,11 @@ impl ApplicationHandler for App {
                     self.camera.zoom,
                     self.camera.aspect,
                 );
+                let cx = self.camera.position[0];
+                let cy = self.camera.position[1];
+                let half_w = self.camera.zoom * self.camera.aspect * 0.5 + 4.0;
+                let half_h = self.camera.zoom * 0.5 + 4.0;
+                obj.update_carry_indicators(&rs.queue, &world.beings, pixels_per_unit, cx, cy, half_w, half_h);
             }
 
             // Particle system update
@@ -2703,6 +2708,8 @@ impl ApplicationHandler for App {
                             wgpu::IndexFormat::Uint16,
                         );
                         obj_r.draw(&mut render_pass);
+                        // Carry indicators: tiny sprites above beings holding items (same pipeline)
+                        obj_r.draw_carry_indicators(&mut render_pass);
                     }
 
                     // Beings (sprites)

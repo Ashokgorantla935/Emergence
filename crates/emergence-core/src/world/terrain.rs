@@ -40,6 +40,7 @@ pub enum StructureType {
     Windmill = 17,     // requires TECH_AGRICULTURE + TECH_MASONRY
     Keep = 18,         // requires TECH_MASONRY + TECH_SMELTING
     Castle = 19,       // requires TECH_MASONRY + TECH_SMELTING + TECH_ENGINEERING
+    FarmField = 20,    // tilled agricultural land
 }
 
 impl StructureType {
@@ -65,6 +66,7 @@ impl StructureType {
             StructureType::Windmill => 80,
             StructureType::Keep => 150,
             StructureType::Castle => 300,
+            StructureType::FarmField => 5,
         }
     }
 
@@ -89,6 +91,7 @@ impl StructureType {
             17 => StructureType::Windmill,
             18 => StructureType::Keep,
             19 => StructureType::Castle,
+            20 => StructureType::FarmField,
             _ => StructureType::None,
         }
     }

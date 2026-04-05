@@ -930,7 +930,61 @@ pub fn tick(world: &mut World) {
         }
     }
 
-    // 8. Increment tick
+    // 8. Agrarian sprawl: beings near settlements with TECH_AGRICULTURE cultivate nearby tiles
+    if world.tick % 30 == 0 {
+        use crate::world::knowledge::TECH_AGRICULTURE;
+        use crate::world::terrain::StructureType;
+        use crate::world::resource::FoodType;
+        let tw = world.terrain.width;
+        let th = world.terrain.height;
+
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] != BeingState::Awake { continue; }
+            if world.beings.hot.creature_type[i] != 0 { continue; } // humans only
+
+            let pos = world.beings.hot.positions[i];
+            let x = (pos[0] as u32).min(tw - 1);
+            let y = (pos[1] as u32).min(th - 1);
+            let idx = (y * tw + x) as usize;
+
+            // Must have TECH_AGRICULTURE locally
+            if !world.knowledge.has_tech(x, y, TECH_AGRICULTURE) { continue; }
+
+            // Must be near a settlement (high comfort signal = near campfire/hut)
+            let sx = x.min(world.signals.width - 1);
+            let sy = y.min(world.signals.height - 1);
+            let comfort = world.signals.read(SignalChannel::Comfort, sx, sy);
+            if comfort < 0.2 { continue; } // must be near settlement
+
+            // Only farm on empty land cells (no existing structure, not water)
+            if world.terrain.structure[idx] != 0 { continue; }
+            if world.terrain.water[idx] { continue; }
+
+            // Deterministic hash check — ~10% chance per eligible being per check
+            let hash = (x as usize).wrapping_mul(2654435761)
+                ^ (y as usize).wrapping_mul(2246822519)
+                ^ (i * 17);
+            if (hash ^ (world.tick as usize)) % 100 > 9 { continue; }
+
+            // Bulldoze: clear flora on this tile
+            world.resources.flora_stage[idx] = 0;
+            world.resources.flora_energy[idx] = 0;
+            world.resources.flora_hydration[idx] = 0;
+
+            // Place farm field
+            world.terrain.structure[idx] = StructureType::FarmField as u8;
+            world.terrain.build_progress[idx] = 5; // instant completion
+            world.terrain.builder_id[idx] = i as u32;
+            world.terrain.structure_age[idx] = 0;
+
+            // Boost food capacity on the farm tile
+            world.resources.food_capacity[idx] = 15.0;
+            world.resources.food_type[idx] = FoodType::Grain;
+            world.resources.regrowth_rate[idx] = 0.5;
+        }
+    }
+
+    // 9. Increment tick
     world.tick += 1;
 }
 

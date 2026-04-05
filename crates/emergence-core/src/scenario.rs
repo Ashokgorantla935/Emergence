@@ -317,9 +317,25 @@ pub fn create_world_from_scenario(scenario: &ScenarioConfig) -> crate::sim::worl
             let ideal_left = [w as f32 * 0.25, h as f32 * 0.5];
             let ideal_right = [w as f32 * 0.75, h as f32 * 0.5];
 
-            // Find nearest walkable cell to each ideal center
-            let left = if !walkable.is_empty() {
-                *walkable.iter().min_by(|a, b| {
+            // Filter walkable to coastal cells only (adjacent to water)
+            let coastal: Vec<[f32; 2]> = walkable.iter()
+                .filter(|pos| {
+                    let x = pos[0] as usize;
+                    let y = pos[1] as usize;
+                    let tw = terrain.width as usize;
+                    let th = terrain.height as usize;
+                    (x > 0 && terrain.water[y * tw + (x - 1)])
+                        || (x + 1 < tw && terrain.water[y * tw + (x + 1)])
+                        || (y > 0 && terrain.water[(y - 1) * tw + x])
+                        || (y + 1 < th && terrain.water[(y + 1) * tw + x])
+                })
+                .copied()
+                .collect();
+            let spawn_pool = if !coastal.is_empty() { &coastal } else { &walkable };
+
+            // Find nearest coastal cell to each ideal center
+            let left = if !spawn_pool.is_empty() {
+                *spawn_pool.iter().min_by(|a, b| {
                     let da = (a[0] - ideal_left[0]).powi(2) + (a[1] - ideal_left[1]).powi(2);
                     let db = (b[0] - ideal_left[0]).powi(2) + (b[1] - ideal_left[1]).powi(2);
                     da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
@@ -327,8 +343,8 @@ pub fn create_world_from_scenario(scenario: &ScenarioConfig) -> crate::sim::worl
             } else {
                 ideal_left
             };
-            let right = if !walkable.is_empty() {
-                *walkable.iter().min_by(|a, b| {
+            let right = if !spawn_pool.is_empty() {
+                *spawn_pool.iter().min_by(|a, b| {
                     let da = (a[0] - ideal_right[0]).powi(2) + (a[1] - ideal_right[1]).powi(2);
                     let db = (b[0] - ideal_right[0]).powi(2) + (b[1] - ideal_right[1]).powi(2);
                     da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)

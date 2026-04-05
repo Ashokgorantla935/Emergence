@@ -81,7 +81,7 @@ pub fn aggregate_settlement(world: &World, cx: f32, cy: f32, radius: f32) -> Set
     }
 
     // Count structures in radius
-    let mut structure_counts: [u32; 20] = [0; 20];
+    let mut structure_counts: [u32; 21] = [0; 21];
     let int_r = radius as i32;
     let x0 = (cell_cx as i32 - int_r).max(0) as u32;
     let y0 = (cell_cy as i32 - int_r).max(0) as u32;

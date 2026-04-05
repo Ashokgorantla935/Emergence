@@ -373,6 +373,15 @@ fn apply_structure(base: vec4<f32>, structure_type: u32, build_progress: f32, wo
         }
     }
 
+    // FarmField (20) — dark brown tilled earth with golden wheat patches
+    if (structure_type == 20u) {
+        let farm = vec4<f32>(0.45, 0.32, 0.18, 1.0);  // dark tilled earth
+        let wheat_noise = organic_noise(world_pos * 3.0);
+        let wheat_mix = smoothstep(0.3, 0.7, wheat_noise);
+        let wheat_color = vec4<f32>(0.85, 0.72, 0.25, 1.0);  // golden wheat
+        return mix(farm, wheat_color, wheat_mix * 0.6);
+    }
+
     return base;
 }
 

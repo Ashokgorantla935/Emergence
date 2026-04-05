@@ -623,6 +623,10 @@ fn rebuild_chunk_standalone(
                     if terrain.build_progress[idx] < StructureType::Castle.build_ticks() { a = 0.5; }
                     (UV_HUT, [0.8, 0.8, 0.9], 1.5, a)
                 }
+                StructureType::FarmField => {
+                    // Tilled earth with wheat — use wheat sprite tinted golden-brown
+                    (UV_WHEAT_FULL, [0.8, 0.65, 0.3], 1.2, 1.0)
+                }
                 StructureType::None => continue,
                 _ => (UV_MW_DECOR_30, [0.7, 0.7, 0.7], 1.0, 1.0),
             };

@@ -111,7 +111,7 @@ pub fn detect_settlements(
     for ci in 0..n {
         let bi = candidates[ci];
         let [px, py] = beings.hot.positions[bi];
-        let neighbours = spatial.query_radius(px, py, CLUSTER_RADIUS);
+        let neighbours = spatial.query_radius_with_positions(px, py, CLUSTER_RADIUS, &beings.hot.positions);
         for &nj in &neighbours {
             // Find nj's position in candidates slice (linear scan — n is small)
             if let Some(cj) = candidates.iter().position(|&b| b == nj) {

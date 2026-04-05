@@ -528,7 +528,7 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
             let cidx = (cy.min(world.terrain.height - 1) * world.terrain.width
                 + cx.min(world.terrain.width - 1)) as usize;
 
-            if world.terrain.structure[cidx] == 0 {
+            if world.terrain.structure[cidx] == 0 && !world.terrain.is_water(cx.min(world.terrain.width - 1), cy.min(world.terrain.height - 1)) {
                 // Determine target structure type based on context
                 // Default: Campfire (cheapest, 10 ticks). If enough stone, choose Hut.
                 let target_type = if world.beings.hot.carry[being_index][1] >= 0.5 {

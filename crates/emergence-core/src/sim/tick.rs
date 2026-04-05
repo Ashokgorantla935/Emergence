@@ -283,7 +283,7 @@ pub fn tick(world: &mut World) {
 
         if danger > 0.85 || world.beings.hot.flee_ticks[i] > 0 {
             // Trigger or continue flee state
-            if danger > 0.85 {
+            if danger > 0.85 && world.beings.hot.flee_ticks[i] == 0 {
                 world.beings.hot.flee_ticks[i] = 15; // 15 ticks of fleeing
 
                 // Drop all carried items
@@ -313,7 +313,15 @@ pub fn tick(world: &mut World) {
                     .clamp(0.0, (world.terrain.width - 1) as f32);
                 let new_y = (pos[1] + world.beings.hot.velocities[i][1])
                     .clamp(0.0, (world.terrain.height - 1) as f32);
-                world.beings.hot.positions[i] = [new_x, new_y];
+                if !world.terrain.is_water_f(new_x, new_y) {
+                    world.beings.hot.positions[i] = [new_x, new_y];
+                } else if !world.terrain.is_water_f(new_x, pos[1]) {
+                    world.beings.hot.positions[i][0] = new_x;
+                } else if !world.terrain.is_water_f(pos[0], new_y) {
+                    world.beings.hot.positions[i][1] = new_y;
+                } else {
+                    world.beings.hot.velocities[i] = [0.0, 0.0];
+                }
             }
         }
     }

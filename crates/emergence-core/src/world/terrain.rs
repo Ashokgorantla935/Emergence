@@ -32,6 +32,7 @@ pub enum StructureType {
     Forge = 10,        // refines iron into steel
     Factory = 11,      // produces advanced goods like automobiles
     Automobile = 12,   // built vehicle for fast transport
+    OilPump = 13,      // extracts oil from lowland deposits
 }
 
 impl StructureType {
@@ -50,6 +51,7 @@ impl StructureType {
             StructureType::Forge => 200,
             StructureType::Factory => 300,
             StructureType::Automobile => 400,
+            StructureType::OilPump => 120,
         }
     }
 
@@ -67,6 +69,7 @@ impl StructureType {
             10 => StructureType::Forge,
             11 => StructureType::Factory,
             12 => StructureType::Automobile,
+            13 => StructureType::OilPump,
             _ => StructureType::None,
         }
     }
@@ -107,6 +110,10 @@ pub struct Terrain {
     pub cache_stone: Vec<f32>,
     /// Traffic accumulator per cell. Increments on every being movement; at 200 triggers DirtPath formation.
     pub trample: Vec<u8>,
+    /// Underground oil deposit — finite, drained by OilPump structures. 0 = dry.
+    pub oil_deposit: Vec<u16>,
+    /// Underground iron vein — finite, drained by Mine structures. 0 = exhausted.
+    pub iron_vein: Vec<u16>,
 }
 
 impl Terrain {
@@ -219,6 +226,33 @@ impl Terrain {
             if matches!(b, Biome::Mountain | Biome::Snow) { 1.0 } else { 0.0 }
         }).collect();
 
+        // Deep crust deposits — low-frequency noise for geological veins
+        let deposit_noise = OpenSimplex::new(config.terrain_seed.wrapping_add(42) as u32);
+        let iron_noise = OpenSimplex::new(config.terrain_seed.wrapping_add(99) as u32);
+        let mut oil_deposit = Vec::with_capacity(len);
+        let mut iron_vein = Vec::with_capacity(len);
+        for y in 0..h {
+            for x in 0..w {
+                let idx = (y * w + x) as usize;
+                // Oil: rare, in lowland non-water cells
+                let oil_val = deposit_noise.get([x as f64 * 0.005, y as f64 * 0.005]);
+                let oil = if oil_val > 0.4 && !water_cells[idx] && elevation[idx] < 0.4 {
+                    ((oil_val - 0.4) * 500.0) as u16
+                } else {
+                    0
+                };
+                oil_deposit.push(oil);
+                // Iron: in mountainous/elevated terrain
+                let iron_val = iron_noise.get([x as f64 * 0.008, y as f64 * 0.008]);
+                let iron = if iron_val > 0.35 && elevation[idx] > 0.5 {
+                    ((iron_val - 0.35) * 400.0) as u16
+                } else {
+                    0
+                };
+                iron_vein.push(iron);
+            }
+        }
+
         Terrain {
             width: w,
             height: h,
@@ -242,6 +276,8 @@ impl Terrain {
             cache_food: vec![0.0f32; len],
             cache_stone: vec![0.0f32; len],
             trample: vec![0u8; len],
+            oil_deposit,
+            iron_vein,
         }
     }
 
@@ -328,6 +364,30 @@ impl Terrain {
         // Hut/LeanTo/Campfire: mark as shelter
         if matches!(stype, StructureType::Hut | StructureType::LeanTo | StructureType::Campfire) {
             self.shelter[idx] = true;
+        }
+    }
+
+    /// Extraction tick — drains underground deposits for active Mine/OilPump structures.
+    /// Called every 30 ticks from the main tick loop.
+    pub fn tick_extraction(&mut self) {
+        let len = (self.width * self.height) as usize;
+        for idx in 0..len {
+            match self.structure[idx] {
+                9 => {
+                    // Mine: drain iron vein, add to stone economy
+                    if self.iron_vein[idx] > 0 {
+                        self.iron_vein[idx] -= 1;
+                        self.stone[idx] += 1.0;
+                    }
+                }
+                13 => {
+                    // OilPump: drain oil deposit
+                    if self.oil_deposit[idx] > 0 {
+                        self.oil_deposit[idx] -= 1;
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -491,6 +551,10 @@ fn upsample_baked_elevation(
     dst_w: u32, dst_h: u32,
     seed: u32,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    if src_w == dst_w && src_h == dst_h {
+        // Native resolution — decode directly, no upsampling or micro-noise
+        return decode_baked_elevation(data, src_w, src_h, seed);
+    }
     let dst_len = (dst_w * dst_h) as usize;
     let mut elevation = vec![0.0f32; dst_len];
     let mut moisture = vec![0.0f32; dst_len];
@@ -662,6 +726,7 @@ fn assign_latitude_biomes(
     let mut biome = Vec::with_capacity(len);
     let mut water_cells = Vec::with_capacity(len);
     let equator = equator_y * h as f32;
+    let simplex = OpenSimplex::new(42);
 
     for y in 0..h {
         for x in 0..w {
@@ -672,37 +737,16 @@ fn assign_latitude_biomes(
                 continue;
             }
             let elev = elevation[i];
-            if elev > 0.80 {
-                biome.push(Biome::Mountain);
-                water_cells.push(false);
-                continue;
-            }
 
-            // Introduce OpenSimplex noise to disrupt perfect lateral bands
-            let nx = x as f64 * 0.02;
-            let ny = y as f64 * 0.02;
-            use noise::{NoiseFn, OpenSimplex};
-            let simplex = OpenSimplex::new(42);
+            // Introduce OpenSimplex noise to disrupt perfect lateral bands organically
+            let nx = x as f64 * 0.003;
+            let ny = y as f64 * 0.003;
             let noise_val = simplex.get([nx, ny]) as f32 * 0.15;
 
-            // Perturb the virtual equator distance for smooth winding borders
-            let lat_temp = (1.0 - ((y as f32 - equator) / equator).abs() + noise_val).clamp(0.0, 1.0);
-            let temp = (lat_temp * 0.6 + temperature[i] * 0.4 - elev * 0.4).clamp(0.0, 1.0);
             let m = (moisture[i] + noise_val * 0.5).clamp(0.0, 1.0);
+            let lat_y = y as f32 / h as f32;
 
-            let b = if temp > 0.7 && m > 0.6 {
-                Biome::Forest
-            } else if temp > 0.7 && m <= 0.6 {
-                Biome::Grassland
-            } else if temp < 0.3 {
-                Biome::Wetland // polar/ice represented as wetland
-            } else if m < 0.2 {
-                Biome::Desert
-            } else if m > 0.6 {
-                Biome::Forest
-            } else {
-                Biome::Grassland
-            };
+            let b = super::earth_gen::classify_earth_biome(elev, m, lat_y);
 
             biome.push(b);
             water_cells.push(false);
@@ -813,16 +857,14 @@ fn place_water(
 }
 
 /// Decode a 1-bit-per-cell water mask, upscaling via nearest-neighbor if needed.
-/// The asset is assumed to be sqrt(data.len() * 8) x sqrt(data.len() * 8) square.
 fn decode_water_mask(data: &[u8], w: u32, h: u32) -> Vec<bool> {
-    // Infer source dimensions from data length (square 1-bit mask)
-    let total_bits = data.len() * 8;
-    let src_dim = (total_bits as f32).sqrt() as u32;
-    // If dimensions match exactly, decode directly
-    if src_dim == w && src_dim == h {
-        let len = (w * h) as usize;
-        let mut mask = vec![false; len];
-        for i in 0..len {
+    let total_bits = (data.len() * 8) as u32;
+    let dst_len = (w * h) as usize;
+
+    // If source bits match destination cells exactly, decode directly (any aspect ratio)
+    if total_bits == w * h {
+        let mut mask = vec![false; dst_len];
+        for i in 0..dst_len {
             let byte = i / 8;
             let bit = i % 8;
             if byte < data.len() {
@@ -831,8 +873,9 @@ fn decode_water_mask(data: &[u8], w: u32, h: u32) -> Vec<bool> {
         }
         return mask;
     }
-    // Nearest-neighbor upscale from src_dim x src_dim to w x h
-    let dst_len = (w * h) as usize;
+
+    // Infer square source dimensions for legacy assets, upscale to w x h
+    let src_dim = (total_bits as f32).sqrt() as u32;
     let mut mask = vec![false; dst_len];
     for dy in 0..h {
         for dx in 0..w {

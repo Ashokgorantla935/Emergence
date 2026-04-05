@@ -950,12 +950,33 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
             }
         }
     } else {
-        // Land being hit water boundary — BOUNCE to prevent infinite sticking
-        world.beings.hot.velocities[being_index] = [-nx * 0.5, -ny * 0.5];
-        let bounce_x = (pos[0] - nx * 0.5).clamp(0.0, world.terrain.width as f32 - 1.0);
-        let bounce_y = (pos[1] - ny * 0.5).clamp(0.0, world.terrain.height as f32 - 1.0);
-        if !world.terrain.is_water(bounce_x as u32, bounce_y as u32) {
-            world.beings.hot.positions[being_index] = [bounce_x, bounce_y];
+        // Land being hit water boundary — SLIDE to prevent vibrating against scent gradients
+        world.beings.hot.velocities[being_index] = [0.0, 0.0];
+        
+        let try_x = (pos[0] + nx * clamped_dist).clamp(0.0, world.terrain.width as f32 - 1.0);
+        let try_y = (pos[1] + ny * clamped_dist).clamp(0.0, world.terrain.height as f32 - 1.0);
+        
+        let cx = pos[0] as u32;
+        let cy = pos[1] as u32;
+        let can_x = !world.terrain.is_water_f(try_x, pos[1]);
+        let can_y = !world.terrain.is_water_f(pos[0], try_y);
+        
+        if can_x && !can_y {
+            world.beings.hot.positions[being_index][0] = try_x;
+            world.beings.hot.velocities[being_index][0] = (nx * clamped_dist).clamp(-MAX_VEL, MAX_VEL);
+        } else if can_y && !can_x {
+            world.beings.hot.positions[being_index][1] = try_y;
+            world.beings.hot.velocities[being_index][1] = (ny * clamped_dist).clamp(-MAX_VEL, MAX_VEL);
+        } else {
+            // Completely trapped in concave corner (or bay). Bounce away!
+            // Use tick and being_index for pseudo-random deterministic jitter to simulate frustration.
+            let jitter_x = ((world.tick.wrapping_mul(being_index as u32) % 100) as f32 / 50.0) - 1.0;
+            let jitter_y = (((world.tick + 1).wrapping_mul(being_index as u32) % 100) as f32 / 50.0) - 1.0;
+            let esc_x = (pos[0] + jitter_x * 0.5).clamp(0.0, world.terrain.width as f32 - 1.0);
+            let esc_y = (pos[1] + jitter_y * 0.5).clamp(0.0, world.terrain.height as f32 - 1.0);
+            if !world.terrain.is_water_f(esc_x, esc_y) {
+                world.beings.hot.positions[being_index] = [esc_x, esc_y];
+            }
         }
     }
 }

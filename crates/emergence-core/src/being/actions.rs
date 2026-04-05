@@ -677,8 +677,15 @@ pub fn score_actions(
                 }
             }
             Action::SeekShelter => {
-                let shelter_pos = find_nearest_shelter(pos, radius, terrain);
-                if let Some(mut t) = shelter_pos {
+                // Prefer comfort gradient (hearth signal) over raw shelter proximity
+                let [gx, gy] = local.gradients[CH_COMFORT];
+                if gx.abs() > 0.03 || gy.abs() > 0.03 {
+                    let mut t = [pos[0] + gx * 8.0, pos[1] + gy * 8.0];
+                    t[0] += (rng.f32() - 0.5) * 1.5;
+                    t[1] += (rng.f32() - 0.5) * 1.5;
+                    target_pos = Some(t);
+                    score *= 1.2; // bonus for having a gradient to follow
+                } else if let Some(mut t) = find_nearest_shelter(pos, radius, terrain) {
                     // Jitter so they cluster AROUND the shelter organically
                     t[0] += (rng.f32() - 0.5) * 1.5;
                     t[1] += (rng.f32() - 0.5) * 1.5;
@@ -849,8 +856,17 @@ pub fn score_actions(
                 if all_satisfied {
                     score *= 1.5;
                 }
-                let angle = rng.f32() * std::f32::consts::TAU;
-                target_pos = Some([pos[0] + angle.cos() * 3.0, pos[1] + angle.sin() * 3.0]);
+                // Hearth gravity: if near comfort gradient, drift toward camp instead of random wander
+                let [gx, gy] = local.gradients[CH_COMFORT];
+                if gx.abs() > 0.02 || gy.abs() > 0.02 {
+                    target_pos = Some([
+                        pos[0] + gx * 4.0 + (rng.f32() - 0.5) * 2.0,
+                        pos[1] + gy * 4.0 + (rng.f32() - 0.5) * 2.0,
+                    ]);
+                } else {
+                    let angle = rng.f32() * std::f32::consts::TAU;
+                    target_pos = Some([pos[0] + angle.cos() * 3.0, pos[1] + angle.sin() * 3.0]);
+                }
             }
             Action::Sleep => {
                 target_pos = Some(pos); // stay in place

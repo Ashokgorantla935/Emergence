@@ -31,9 +31,9 @@ const fn flora_uv(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * FLORA_CELL_U, row as f32 * FLORA_CELL_V]
 }
 
-// Building spritesheet layout (8 cols × 7 rows)
-const BUILD_CELL_U: f32 = 1.0 / 8.0;
-const BUILD_CELL_V: f32 = 1.0 / 7.0;
+// Building spritesheet layout (4 cols × 4 rows)
+const BUILD_CELL_U: f32 = 1.0 / 4.0;
+const BUILD_CELL_V: f32 = 1.0 / 4.0;
 const fn build_uv(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * BUILD_CELL_U, row as f32 * BUILD_CELL_V]
 }
@@ -50,23 +50,27 @@ const FLORA_FLOWER_C: [f32; 2] = flora_uv(3, 1);
 const FLORA_GRASS_A:  [f32; 2] = flora_uv(4, 1);
 const FLORA_GRASS_B:  [f32; 2] = flora_uv(5, 1);
 
-// Building spritesheet — row 0: basic structures, row 1: advanced
+// Building spritesheet — 4×4 grid:
+//   Row 0: campfires/tents  — Campfire(0), NomadTent(1), FoodCache(2), OilPump(3)
+//   Row 1: wooden buildings — WoodenHouse(0), LeanTo(1), Windmill(2), Automobile(3)
+//   Row 2: stone buildings  — StoneHouse(0), Hut(1), Wall(2), Mine(3)
+//   Row 3: advanced         — Keep(0), Castle(1), Forge(2), Factory(3)
 const BUILD_CAMPFIRE:    [f32; 2] = build_uv(0, 0);
-const BUILD_LEANTO:      [f32; 2] = build_uv(1, 0);
-const BUILD_HUT:         [f32; 2] = build_uv(2, 0);
-const BUILD_WALL:        [f32; 2] = build_uv(3, 0);
-const BUILD_FOODCACHE:   [f32; 2] = build_uv(4, 0);
-const BUILD_MINE:        [f32; 2] = build_uv(5, 0);
-const BUILD_FORGE:       [f32; 2] = build_uv(6, 0);
-const BUILD_FACTORY:     [f32; 2] = build_uv(7, 0);
-const BUILD_AUTOMOBILE:  [f32; 2] = build_uv(0, 1);
-const BUILD_OILPUMP:     [f32; 2] = build_uv(1, 1);
-const BUILD_NOMADTENT:   [f32; 2] = build_uv(2, 1);
-const BUILD_WOODENHOUSE: [f32; 2] = build_uv(3, 1);
-const BUILD_STONEHOUSE:  [f32; 2] = build_uv(4, 1);
-const BUILD_WINDMILL:    [f32; 2] = build_uv(5, 1);
-const BUILD_KEEP:        [f32; 2] = build_uv(6, 1);
-const BUILD_CASTLE:      [f32; 2] = build_uv(7, 1);
+const BUILD_NOMADTENT:   [f32; 2] = build_uv(1, 0);
+const BUILD_FOODCACHE:   [f32; 2] = build_uv(2, 0);
+const BUILD_OILPUMP:     [f32; 2] = build_uv(3, 0);
+const BUILD_WOODENHOUSE: [f32; 2] = build_uv(0, 1);
+const BUILD_LEANTO:      [f32; 2] = build_uv(1, 1);
+const BUILD_WINDMILL:    [f32; 2] = build_uv(2, 1);
+const BUILD_AUTOMOBILE:  [f32; 2] = build_uv(3, 1);
+const BUILD_STONEHOUSE:  [f32; 2] = build_uv(0, 2);
+const BUILD_HUT:         [f32; 2] = build_uv(1, 2);
+const BUILD_WALL:        [f32; 2] = build_uv(2, 2);
+const BUILD_MINE:        [f32; 2] = build_uv(3, 2);
+const BUILD_KEEP:        [f32; 2] = build_uv(0, 3);
+const BUILD_CASTLE:      [f32; 2] = build_uv(1, 3);
+const BUILD_FORGE:       [f32; 2] = build_uv(2, 3);
+const BUILD_FACTORY:     [f32; 2] = build_uv(3, 3);
 
 // Flora spritesheet row 2: snow pines (cols 0-3) + cacti (cols 4-7)
 const FLORA_SNOW_A: [f32; 2] = flora_uv(0, 2);

@@ -953,7 +953,7 @@ pub fn tick(world: &mut World) {
         }
     }
 
-    // Structure comfort/warmth emissions (every 20 ticks)
+    // Structure comfort/warmth emissions (every 20 ticks, high-strength to build gradient)
     if world.tick % 20 == 0 {
         use crate::world::terrain::StructureType;
         let tw = world.terrain.width;
@@ -967,11 +967,13 @@ pub fn tick(world: &mut World) {
                 let needed_ticks = st.build_ticks();
                 if needed_ticks > 0 && world.terrain.build_progress[idx] < needed_ticks { continue; }
 
+                // Values are ~5x the per-tick rate to compensate for the 20-tick gate
                 let comfort_amt = match st {
-                    StructureType::Campfire => 0.8,
-                    StructureType::Hut => 0.4,
-                    StructureType::LeanTo => 0.2,
-                    StructureType::Forge => 0.3,
+                    StructureType::Campfire => 2.0,
+                    StructureType::LeanTo => 1.5,
+                    StructureType::Hut | StructureType::WoodenHouse | StructureType::StoneHouse => 2.5,
+                    StructureType::Forge => 1.5,
+                    StructureType::Keep | StructureType::Castle => 4.0,
                     _ => continue,
                 };
 

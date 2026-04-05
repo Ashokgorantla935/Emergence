@@ -2073,8 +2073,12 @@ impl ApplicationHandler for App {
                 // Each frame: scan 1/30 of beings and push notable actions into the
                 // toast queue. The queue holds labels for 120 frames (~2s at 60fps)
                 // and fades out over the last 30 frames, eliminating 1-tick strobing.
+                // LOD rules: macro zoom (<3 ppu) → no text; fauna → no text;
+                // only emergent actions or extreme emotional states are shown.
                 {
                     // Push new toasts from this frame's bucket slice
+                    let pixels_per_unit = rs.surface_config.height as f32 / self.camera.zoom;
+                    if pixels_per_unit >= 3.0 {
                     if let Some(ref world) = self.world {
                         let world = world.read().unwrap();
                         let tick_bucket = (world.tick % 30) as usize;
@@ -2085,23 +2089,38 @@ impl ApplicationHandler for App {
                             if world.beings.hot.states[i] == emergence_core::being::data::BeingState::Dead {
                                 continue;
                             }
+                            // Skip fauna — only humans get action floaters
+                            if world.beings.hot.creature_type[i] != 0 { continue; }
+
                             let action_u8 = world.beings.hot.pending_action[i];
-                            let (text, color): (&'static str, egui::Color32) = match action_u8 {
-                                5  => ("Bonding",   egui::Color32::from_rgb(255, 180, 220)),
-                                6  => ("Sharing",   egui::Color32::from_rgb(255, 220, 30)),
-                                8  => ("Exploring", egui::Color32::from_rgb(60, 210, 80)),
-                                11 => ("Mourning",  egui::Color32::from_rgb(120, 140, 255)),
-                                14 => ("Hunting",   egui::Color32::from_rgb(230, 50, 50)),
-                                15 => ("Teaching",  egui::Color32::from_rgb(255, 160, 30)),
-                                16 => ("Building",  egui::Color32::from_rgb(100, 200, 255)),
-                                3  => ("Fighting",  egui::Color32::from_rgb(220, 40, 40)),
-                                _  => continue,
+                            // Emergent-only action whitelist
+                            let action_entry: Option<(&'static str, egui::Color32)> = match action_u8 {
+                                3  => Some(("Fleeing",       egui::Color32::from_rgb(255, 80,  80))),
+                                11 => Some(("Mourning",      egui::Color32::from_rgb(120, 140, 255))),
+                                14 => Some(("Hunting",       egui::Color32::from_rgb(230, 50,  50))),
+                                18 => Some(("Memorializing", egui::Color32::from_rgb(180, 120, 255))),
+                                25 => Some(("Assaulting",    egui::Color32::from_rgb(220, 40,  40))),
+                                _  => None,
                             };
+                            // Also surface extreme emotional states even for mundane actions
+                            let entry = action_entry.or_else(|| {
+                                let grief = world.beings.hot.emotions[i][4];
+                                let fear  = world.beings.hot.emotions[i][0];
+                                if grief > 0.8 {
+                                    Some(("Grief",  egui::Color32::from_rgb(120, 140, 255)))
+                                } else if fear > 0.8 {
+                                    Some(("Terror", egui::Color32::from_rgb(255, 100, 50)))
+                                } else {
+                                    None
+                                }
+                            });
+                            let Some((text, color)) = entry else { continue };
                             let pos = world.beings.hot.positions[i];
                             self.toast_queue.push(text, pos, color);
                             pushed += 1;
                         }
                     }
+                    } // pixels_per_unit >= 3.0
 
                     // Advance toast timers (drift + countdown)
                     self.toast_queue.tick();

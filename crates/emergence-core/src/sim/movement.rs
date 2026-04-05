@@ -612,6 +612,10 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     let bx = cx.min(world.terrain.width - 1);
                     let by = cy.min(world.terrain.height - 1);
                     world.terrain.place_structure(bx, by, target_type, being_index as u32);
+                    // Deforestation: clear biomass for construction foundation
+                    world.terrain.biomass[cidx] = 0.0;
+                    // Structure presence increases mineralize (foundation)
+                    world.terrain.mineralize[cidx] = (world.terrain.mineralize[cidx] + 0.5).min(1.0);
                     // Bond builder to this location as home settlement
                     world.beings.cold.home_settlement_pos[being_index] = Some([bx, by]);
                     // Claim territory for builder's tribe (Wave 27)
@@ -890,6 +894,9 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     let bx = cx.min(world.terrain.width - 1);
                     let by = cy.min(world.terrain.height - 1);
                     world.terrain.place_structure(bx, by, crate::world::terrain::StructureType::SignalBeacon, being_index as u32);
+                    // Deforestation: clear biomass for construction foundation
+                    world.terrain.biomass[cidx] = 0.0;
+                    world.terrain.mineralize[cidx] = (world.terrain.mineralize[cidx] + 0.5).min(1.0);
                     trigger_emotion(&mut world.beings, being_index, EMO_JOY, 0.5);
                     world.beings.hot.needs[being_index][NEED_PURPOSE] =
                         (world.beings.hot.needs[being_index][NEED_PURPOSE] + 0.2).min(1.0);

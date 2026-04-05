@@ -102,6 +102,8 @@ pub fn tick_physics(terrain: &mut Terrain, signals: &mut SignalGrid) {
     // Low-biomass cells lose nutrients over time (erosion)
     for idx in 0..len {
         if terrain.water[idx] { continue; }
+        // Settlement protection: high mineralize blocks biomass regrowth (paved/built land)
+        if terrain.mineralize[idx] > 0.5 { continue; }
 
         let bio = terrain.biomass[idx];
         let nutrient = terrain.nutrient_density[idx];

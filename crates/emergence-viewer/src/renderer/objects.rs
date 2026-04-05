@@ -740,12 +740,7 @@ fn collect_chunk_decor(
                 }
                 StructureType::Hut => {
                     let a = if terrain.build_progress[idx] < StructureType::Hut.build_ticks() { 0.5 } else { 1.0 };
-                    let age = terrain.structure_age[idx];
-                    let mut scale = 3.5;
-                    if age > 5000 {
-                        scale *= 1.0 - ((age - 5000) as f32 / 5000.0).clamp(0.0, 0.5);
-                    }
-                    (ARCH_190_HUT, [1.0, 1.0, 1.0], scale, a)
+                    (ARCH_190_HUT, [1.0, 1.0, 1.0], 3.5, a)
                 }
                 StructureType::Wall => {
                     let a = if terrain.build_progress[idx] < StructureType::Wall.build_ticks() { 0.5 } else { 1.0 };

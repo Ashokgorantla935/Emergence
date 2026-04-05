@@ -173,6 +173,7 @@ pub struct BeingsHot {
     pub hunger_zero_ticks: Vec<u16>,
     pub warmth_zero_ticks: Vec<u16>,
     pub freeze_ticks: Vec<u16>,      // rabbit freeze countdown; 0 = not frozen
+    pub flee_ticks: Vec<u8>,         // danger flee countdown; when > 0, being is fleeing
     pub pending_action: Vec<u8>,
     pub pending_context: Vec<u16>,
     pub pending_tick: Vec<u32>,
@@ -277,6 +278,7 @@ impl Beings {
                 hunger_zero_ticks: Vec::new(),
                 warmth_zero_ticks: Vec::new(),
                 freeze_ticks: Vec::new(),
+                flee_ticks: Vec::new(),
                 pending_action: Vec::new(),
                 pending_context: Vec::new(),
                 pending_tick: Vec::new(),
@@ -330,6 +332,7 @@ impl Beings {
         self.hot.hunger_zero_ticks.push(0);
         self.hot.warmth_zero_ticks.push(0);
         self.hot.freeze_ticks.push(0);
+        self.hot.flee_ticks.push(0u8);
         self.hot.pending_action.push(255); // no pending action
         self.hot.pending_context.push(0);
         self.hot.pending_tick.push(0);

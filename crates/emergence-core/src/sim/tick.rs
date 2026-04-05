@@ -262,6 +262,57 @@ pub fn tick(world: &mut World) {
         );
     }
 
+    // 5e-pre2a. Danger flee override — highest priority survival behavior
+    for i in 0..world.beings.hot.count {
+        if world.beings.hot.states[i] != BeingState::Awake { continue; }
+
+        // Decrement active flee countdown
+        if world.beings.hot.flee_ticks[i] > 0 {
+            world.beings.hot.flee_ticks[i] -= 1;
+        }
+
+        let pos = world.beings.hot.positions[i];
+        let x = (pos[0] as u32).min(world.signals.width - 1);
+        let y = (pos[1] as u32).min(world.signals.height - 1);
+        let danger = world.signals.read(SignalChannel::Danger, x, y);
+
+        if danger > 0.85 || world.beings.hot.flee_ticks[i] > 0 {
+            // Trigger or continue flee state
+            if danger > 0.85 {
+                world.beings.hot.flee_ticks[i] = 15; // 15 ticks of fleeing
+
+                // Drop all carried items
+                let carry_food = world.beings.hot.carry[i][0];
+                let carry_stone = world.beings.hot.carry[i][1];
+                if carry_food > 0.0 || carry_stone > 0.0 {
+                    let cx = (pos[0] as u32).min(world.terrain.width - 1);
+                    let cy = (pos[1] as u32).min(world.terrain.height - 1);
+                    world.resources.deposit(cx, cy, world.terrain.width, carry_food);
+                    world.beings.hot.carry[i] = [0.0, 0.0];
+                }
+
+                // Cancel pending action
+                world.beings.hot.pending_action[i] = 255; // no action
+
+                // Spike fear emotion
+                world.beings.hot.emotions[i][EMO_FEAR] = (world.beings.hot.emotions[i][EMO_FEAR] + 0.5).min(1.0);
+            }
+
+            // Flee: move DOWN the danger gradient (away from highest danger)
+            let (gx, gy) = world.signals.gradient(SignalChannel::Danger, pos[0], pos[1], 6.0);
+            let mag = (gx * gx + gy * gy).sqrt();
+            if mag > 0.01 {
+                let speed = 0.6; // full flee speed
+                world.beings.hot.velocities[i] = [-gx / mag * speed, -gy / mag * speed];
+                let new_x = (pos[0] + world.beings.hot.velocities[i][0])
+                    .clamp(0.0, (world.terrain.width - 1) as f32);
+                let new_y = (pos[1] + world.beings.hot.velocities[i][1])
+                    .clamp(0.0, (world.terrain.height - 1) as f32);
+                world.beings.hot.positions[i] = [new_x, new_y];
+            }
+        }
+    }
+
     // 5e-pre2. Comfort gradient climbing: critically cold humans seek shelter
     for i in 0..world.beings.hot.count {
         if world.beings.hot.states[i] != BeingState::Awake { continue; }

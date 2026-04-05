@@ -849,14 +849,14 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
 /// Species-specific maximum speed in tiles per tick.
 fn max_speed_for(creature_type: u8) -> f32 {
     match CreatureType::from_u8(creature_type) {
-        CreatureType::Human  => 0.07,
-        CreatureType::Wolf   => 0.15,
-        CreatureType::Hawk   => 0.18,
-        CreatureType::Deer   => 0.12,
-        CreatureType::Rabbit => 0.10,
-        CreatureType::Bear   => 0.07,
-        CreatureType::Fish   => 0.06,
-        CreatureType::Snake  => 0.04,
+        CreatureType::Human  => 0.015,
+        CreatureType::Wolf   => 0.035,
+        CreatureType::Hawk   => 0.05,
+        CreatureType::Deer   => 0.025,
+        CreatureType::Rabbit => 0.02,
+        CreatureType::Bear   => 0.015,
+        CreatureType::Fish   => 0.012,
+        CreatureType::Snake  => 0.008,
     }
 }
 

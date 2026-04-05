@@ -320,7 +320,7 @@ pub fn tick(world: &mut World) {
             let (gx, gy) = world.signals.gradient(SignalChannel::Danger, pos[0], pos[1], 6.0);
             let mag = (gx * gx + gy * gy).sqrt();
             if mag > 0.01 {
-                let speed = 0.3; // full flee speed
+                let speed = 0.06; // full flee speed
                 world.beings.hot.velocities[i] = [-gx / mag * speed, -gy / mag * speed];
                 let new_x = (pos[0] + world.beings.hot.velocities[i][0])
                     .clamp(0.0, (world.terrain.width - 1) as f32);
@@ -350,7 +350,7 @@ pub fn tick(world: &mut World) {
             let (gx, gy) = world.signals.gradient(SignalChannel::Comfort, pos[0], pos[1], 8.0);
             let mag = (gx * gx + gy * gy).sqrt();
             if mag > 0.01 {
-                let speed = 0.2;
+                let speed = 0.04;
                 world.beings.hot.velocities[i] = [gx / mag * speed, gy / mag * speed];
                 let new_x = (pos[0] + world.beings.hot.velocities[i][0])
                     .clamp(0.0, (world.terrain.width - 1) as f32);
@@ -560,12 +560,20 @@ pub fn tick(world: &mut World) {
                 if world.beings.hot.creature_type[j] != 0 { continue; } // humans only
 
                 let pos_j = world.beings.hot.positions[j];
-                let dx = pos_i[0] - pos_j[0];
-                let dy = pos_i[1] - pos_j[1];
-                let dist_sq = dx * dx + dy * dy;
+                let mut dx = pos_i[0] - pos_j[0];
+                let mut dy = pos_i[1] - pos_j[1];
+                let mut dist_sq = dx * dx + dy * dy;
 
-                if dist_sq < 0.16 && dist_sq > 0.0001 { // within 0.4 units
-                    let dist = dist_sq.sqrt();
+                // Handle absolute perfect stacking (singularity prevention)
+                if dist_sq <= 0.0001 {
+                    dx = (world.rng.f32() - 0.5) * 0.02;
+                    dy = (world.rng.f32() - 0.5) * 0.02;
+                    // Provide a minimum non-zero distance squared so it processes
+                    dist_sq = dx * dx + dy * dy;
+                }
+
+                if dist_sq < 0.16 { // within 0.4 units
+                    let dist = dist_sq.sqrt().max(0.01);
                     let strength = 0.02 * (0.4 - dist) / 0.4;
                     push_x += dx / dist * strength;
                     push_y += dy / dist * strength;

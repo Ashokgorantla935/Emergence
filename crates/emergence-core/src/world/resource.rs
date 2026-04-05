@@ -29,6 +29,7 @@ pub struct ResourceLayer {
     pub flora_stage: Vec<u8>,      // 0=None, 1=Sapling, 2=Adult, 3=Elder
     pub flora_hydration: Vec<u8>,  // 0-255 water saturation
     pub flora_energy: Vec<u16>,    // accumulates → threshold triggers stage up
+    pub fire: Vec<u8>,             // 0=not burning, 1-255=burn ticks remaining (countdown)
 }
 
 impl ResourceLayer {
@@ -140,6 +141,7 @@ impl ResourceLayer {
             flora_stage,
             flora_hydration,
             flora_energy,
+            fire: vec![0u8; len],
         }
     }
 
@@ -315,6 +317,93 @@ impl ResourceLayer {
                 };
             }
         }
+    }
+
+    /// Fire cellular automaton — spreads based on neighbor flora, destroys environment, emits Danger signal.
+    /// Runs every tick when any fire is active.
+    pub fn tick_fire(&mut self, terrain: &mut Terrain, signals: &mut crate::world::signal::SignalGrid, world_tick: u32) {
+        use crate::world::signal::SignalChannel;
+        let w = terrain.width as usize;
+        let h = terrain.height as usize;
+        let len = w * h;
+
+        let mut ignitions: Vec<usize> = Vec::new();
+
+        for idx in 0..len {
+            if self.fire[idx] == 0 { continue; }
+
+            // Countdown burn timer
+            self.fire[idx] = self.fire[idx].saturating_sub(1);
+
+            // Environmental destruction during early burn phase (ticks 210-240)
+            if self.fire[idx] > 200 {
+                self.flora_stage[idx] = 0;
+                self.flora_energy[idx] = 0;
+                self.flora_hydration[idx] = 0;
+                self.food[idx] = (self.food[idx] - 2.0).max(0.0);
+                self.food_capacity[idx] = (self.food_capacity[idx] * 0.5).max(0.0);
+                // Convert structures to ruins (DirtPath=6 represents ash)
+                if terrain.structure[idx] != 0 && terrain.structure[idx] != 6 && terrain.structure[idx] != 7 {
+                    terrain.structure[idx] = 6;
+                    terrain.build_progress[idx] = 0;
+                    terrain.structure_age[idx] = 0;
+                }
+            }
+
+            // Emit extreme Danger signal
+            let x = (idx % w) as u32;
+            let y = (idx / w) as u32;
+            let sx = x.min(signals.width - 1);
+            let sy = y.min(signals.height - 1);
+            signals.deposit(SignalChannel::Danger, sx, sy, 5.0);
+
+            // Spread to 4-connected neighbors
+            let neighbors: [(isize, isize); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+            for (dx, dy) in neighbors {
+                let nx = x as isize + dx;
+                let ny = y as isize + dy;
+                if nx < 0 || ny < 0 || nx >= w as isize || ny >= h as isize { continue; }
+                let nidx = ny as usize * w + nx as usize;
+
+                if self.fire[nidx] > 0 { continue; }
+                if terrain.water[nidx] { continue; }
+
+                let neighbor_flammability = match self.flora_stage[nidx] {
+                    3 => 40u32, // Elder: very flammable
+                    2 => 25,    // Adult
+                    1 => 10,    // Sapling
+                    _ => 2,     // bare ground
+                };
+                let hydration_resist = self.flora_hydration[nidx] as u32 / 10;
+                let effective_chance = neighbor_flammability.saturating_sub(hydration_resist);
+
+                let hash = (nx as usize).wrapping_mul(2654435761)
+                    ^ (ny as usize).wrapping_mul(2246822519)
+                    ^ (world_tick as usize);
+                if (hash % 100) < effective_chance as usize {
+                    ignitions.push(nidx);
+                }
+            }
+        }
+
+        for nidx in ignitions {
+            if self.fire[nidx] == 0 {
+                self.fire[nidx] = 240;
+            }
+        }
+    }
+
+    /// Ignite a single cell — used by God Actions to start fires.
+    pub fn ignite(&mut self, x: usize, y: usize, w: usize) {
+        let idx = y * w + x;
+        if idx < self.fire.len() {
+            self.fire[idx] = 240;
+        }
+    }
+
+    /// Returns true if any fire is active — used to skip tick_fire when world is calm.
+    pub fn has_active_fire(&self) -> bool {
+        self.fire.iter().any(|&f| f > 0)
     }
 }
 

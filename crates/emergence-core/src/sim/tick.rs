@@ -77,6 +77,11 @@ pub fn tick(world: &mut World) {
         world.terrain.tick_extraction();
     }
 
+    // 2e. Fire cellular automaton — every tick when active
+    if world.resources.has_active_fire() {
+        world.resources.tick_fire(&mut world.terrain, &mut world.signals, world.tick);
+    }
+
     // 3. Signal tick — reaction every tick, diffusion staggered: 1 channel per tick.
     // Spreads diffusion cost across 8 ticks instead of running all channels every 2 ticks.
     // When GPU manages signals, skip all CPU signal work.

@@ -793,18 +793,17 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         }
 
         GodAction::WildfireIgnite { x, y } => {
-            // Mark region around pos for wildfire — removes food
+            // Ignite a 3-cell radius around the target point
             let r = 3i32;
             let w = world.config.size.0 as i32;
             let h = world.config.size.1 as i32;
+            let width = world.terrain.width as usize;
             for dy in -r..=r {
                 for dx in -r..=r {
                     let tx = x as i32 + dx;
                     let ty = y as i32 + dy;
                     if tx >= 0 && tx < w && ty >= 0 && ty < h {
-                        let idx = (ty * w + tx) as usize;
-                        world.resources.food[idx] = 0.0;
-                        world.terrain.modified[idx] = world.terrain.modified[idx].saturating_add(1);
+                        world.resources.ignite(tx as usize, ty as usize, width);
                     }
                 }
             }

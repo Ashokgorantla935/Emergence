@@ -24,9 +24,9 @@ const fn uv(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * ATLAS_CELL, row as f32 * ATLAS_CELL]
 }
 
-// Flora spritesheet layout (12 cols × 12 rows)
-const FLORA_CELL_U: f32 = 1.0 / 12.0;
-const FLORA_CELL_V: f32 = 1.0 / 12.0;
+// Flora spritesheet layout (8 cols × 6 rows — verified visually)
+const FLORA_CELL_U: f32 = 1.0 / 8.0;
+const FLORA_CELL_V: f32 = 1.0 / 6.0;
 const fn flora_uv(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * FLORA_CELL_U, row as f32 * FLORA_CELL_V]
 }
@@ -683,17 +683,17 @@ fn collect_chunk_decor(
             let (atlas_uv, tint, size, alpha) = match StructureType::from_u8(s) {
                 StructureType::Campfire => {
                     let a = if terrain.build_progress[idx] < StructureType::Campfire.build_ticks() { 0.5 } else { 1.0 };
-                    (campfire_frame_uv[frame], [1.0, 1.0, 1.0], 1.0, a)
+                    (campfire_frame_uv[frame], [1.0, 1.0, 1.0], 2.5, a)
                 }
                 StructureType::LeanTo => {
                     let a = if terrain.build_progress[idx] < StructureType::LeanTo.build_ticks() { 0.5 } else { 1.0 };
                     let v = [BUILD_LEANTO, BUILD_HUT, BUILD_FOODCACHE][struct_hash % 3];
-                    (v, [1.0, 1.0, 1.0], 1.2, a)
+                    (v, [1.0, 1.0, 1.0], 3.0, a)
                 }
                 StructureType::Hut => {
                     let a = if terrain.build_progress[idx] < StructureType::Hut.build_ticks() { 0.5 } else { 1.0 };
                     let age = terrain.structure_age[idx];
-                    let mut scale = 1.3;
+                    let mut scale = 3.5;
                     if age > 5000 {
                         scale *= 1.0 - ((age - 5000) as f32 / 5000.0).clamp(0.0, 0.5);
                     }
@@ -701,23 +701,23 @@ fn collect_chunk_decor(
                 }
                 StructureType::Wall => {
                     let a = if terrain.build_progress[idx] < StructureType::Wall.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_WALL, [0.8, 0.8, 0.8], 1.2, a)
+                    (BUILD_WALL, [0.8, 0.8, 0.8], 3.0, a)
                 }
                 StructureType::Mine => {
                     let a = if terrain.build_progress[idx] < StructureType::Mine.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_MINE, [0.6, 0.4, 0.4], 1.2, a)
+                    (BUILD_MINE, [0.6, 0.4, 0.4], 3.0, a)
                 }
                 StructureType::Forge => {
                     let a = if terrain.build_progress[idx] < StructureType::Forge.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_FORGE, [0.5, 0.2, 0.2], 1.3, a)
+                    (BUILD_FORGE, [0.5, 0.2, 0.2], 3.8, a)
                 }
                 StructureType::Factory => {
                     let a = if terrain.build_progress[idx] < StructureType::Factory.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_FACTORY, [0.4, 0.4, 0.5], 1.5, a)
+                    (BUILD_FACTORY, [0.4, 0.4, 0.5], 4.2, a)
                 }
                 StructureType::Automobile => {
                     let a = if terrain.build_progress[idx] < StructureType::Automobile.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_AUTOMOBILE, [0.2, 0.2, 0.2], 1.0, a)
+                    (BUILD_AUTOMOBILE, [0.2, 0.2, 0.2], 2.5, a)
                 }
                 StructureType::DirtPath => continue,
                 StructureType::StoneRoad => continue,
@@ -725,39 +725,39 @@ fn collect_chunk_decor(
                     let a = if terrain.build_progress[idx] < StructureType::ResourceCache.build_ticks() { 0.5 } else { 1.0 };
                     let stored = terrain.cache_food[idx] + terrain.cache_stone[idx];
                     let fill_alpha = 0.4 + (stored / 10.0).min(1.0) * 0.6;
-                    (BUILD_FOODCACHE, [0.9, 0.75, 0.2], 1.0, fill_alpha * a)
+                    (BUILD_FOODCACHE, [0.9, 0.75, 0.2], 3.0, fill_alpha * a)
                 }
                 StructureType::OilPump => {
                     let a = if terrain.build_progress[idx] < StructureType::OilPump.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_OILPUMP, [0.15, 0.15, 0.15], 1.2, a)
+                    (BUILD_OILPUMP, [0.15, 0.15, 0.15], 3.0, a)
                 }
                 StructureType::NomadTent => {
                     let a = if terrain.build_progress[idx] < StructureType::NomadTent.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_NOMADTENT, [0.8, 0.6, 0.3], 1.2, a)
+                    (BUILD_NOMADTENT, [0.8, 0.6, 0.3], 3.0, a)
                 }
                 StructureType::WoodenHouse => {
                     let a = if terrain.build_progress[idx] < StructureType::WoodenHouse.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_WOODENHOUSE, [0.7, 0.5, 0.3], 1.3, a)
+                    (BUILD_WOODENHOUSE, [0.7, 0.5, 0.3], 3.5, a)
                 }
                 StructureType::StoneHouse => {
                     let a = if terrain.build_progress[idx] < StructureType::StoneHouse.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_STONEHOUSE, [0.6, 0.6, 0.65], 1.3, a)
+                    (BUILD_STONEHOUSE, [0.6, 0.6, 0.65], 3.5, a)
                 }
                 StructureType::Windmill => {
                     let a = if terrain.build_progress[idx] < StructureType::Windmill.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_WINDMILL, [0.9, 0.85, 0.7], 1.4, a)
+                    (BUILD_WINDMILL, [0.9, 0.85, 0.7], 3.8, a)
                 }
                 StructureType::Keep => {
                     let a = if terrain.build_progress[idx] < StructureType::Keep.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_KEEP, [0.5, 0.5, 0.55], 1.4, a)
+                    (BUILD_KEEP, [0.5, 0.5, 0.55], 3.8, a)
                 }
                 StructureType::Castle => {
                     let a = if terrain.build_progress[idx] < StructureType::Castle.build_ticks() { 0.5 } else { 1.0 };
-                    (BUILD_CASTLE, [0.8, 0.8, 0.9], 1.5, a)
+                    (BUILD_CASTLE, [0.8, 0.8, 0.9], 4.2, a)
                 }
                 StructureType::FarmField => {
                     // Tilled earth — use building slot, golden-brown tint
-                    (BUILD_FOODCACHE, [0.8, 0.65, 0.3], 1.2, 1.0)
+                    (BUILD_FOODCACHE, [0.8, 0.65, 0.3], 3.0, 1.0)
                 }
                 StructureType::None => continue,
                 _ => (BUILD_HUT, [0.7, 0.7, 0.7], 1.0, 1.0),

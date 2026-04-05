@@ -376,7 +376,7 @@ pub fn create_world_from_scenario(scenario: &ScenarioConfig) -> crate::sim::worl
         } else {
             generate_initial_personality(&mut rng)
         };
-        let lifespan = 2_304_000 + rng.u32(0..576_001); // 80-100 years (28800 ticks/year)
+        let lifespan = 1_152_000 + rng.u32(0..288_001); // 40-50 years
         let idx = beings.spawn(*pos, personality, lifespan, [u32::MAX, u32::MAX]);
         // Starting ages: mix of children, young adults, adults (0..50% of lifespan). No elders at start.
         beings.hot.ages[idx] = rng.u32(0..(lifespan / 2));

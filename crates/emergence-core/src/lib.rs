@@ -84,8 +84,8 @@ pub fn create_world(config: WorldConfig) -> World {
             generate_initial_personality(&mut rng)
         };
 
-        // Varied lifespan: 80-100 sim-year range (using tick scale: 1 sim-year ≈ 28800 ticks)
-        let lifespan = 2_304_000 + rng.u32(0..576_001); // 80-100 years (28800 ticks/year)
+        // Varied lifespan: 40-50 sim-year range (using tick scale: 1 sim-year ≈ 28800 ticks)
+        let lifespan = 1_152_000 + rng.u32(0..288_001); // 40-50 years
         let idx = beings.spawn([x, y], personality, lifespan, [u32::MAX, u32::MAX]);
         beings.cold.names[idx] = generate_name(&mut rng);
         // Starting ages: mix of children, young adults, adults (0..~50% of lifespan).
@@ -176,14 +176,14 @@ pub fn spawn_fauna(beings: &mut Beings, terrain: &Terrain, rng: &mut fastrand::R
             return;
         }
         let lifespan_base: u32 = match creature_type {
-            CreatureType::Wolf => 432_000,   // ~15 game-years
-            CreatureType::Bear => 576_000,   // ~20 game-years
-            CreatureType::Deer => 432_000,   // ~15 game-years
-            CreatureType::Rabbit => 432_000, // ~15 game-years
-            CreatureType::Fish => 432_000,   // ~15 game-years
-            CreatureType::Hawk => 432_000,   // ~15 game-years
-            CreatureType::Snake => 576_000,  // ~20 game-years
-            CreatureType::Human => 2_304_000, // ~80 years
+            CreatureType::Wolf => 288_000,   // ~10 game-years
+            CreatureType::Bear => 432_000,   // ~15 game-years
+            CreatureType::Deer => 288_000,   // ~10 game-years
+            CreatureType::Rabbit => 288_000, // ~10 game-years
+            CreatureType::Fish => 288_000,   // ~10 game-years
+            CreatureType::Hawk => 288_000,   // ~10 game-years
+            CreatureType::Snake => 432_000,  // ~15 game-years
+            CreatureType::Human => 1_152_000, // ~40 years
         };
         for _ in 0..count {
             let base = cells[rng.usize(..cells.len())];

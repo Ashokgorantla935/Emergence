@@ -62,6 +62,16 @@ pub fn tick(world: &mut World) {
         world.tick,
     );
 
+    // 2b. Flora cellular automata (every 60 ticks)
+    if world.tick % 60 == 0 {
+        world.resources.tick_flora(&world.terrain, world.tick);
+    }
+
+    // 2c. Extraction tick — drain underground deposits every 30 ticks
+    if world.tick % 30 == 0 {
+        world.terrain.tick_extraction();
+    }
+
     // 3. Signal tick — reaction every tick, diffusion staggered: 1 channel per tick.
     // Spreads diffusion cost across 8 ticks instead of running all channels every 2 ticks.
     // When GPU manages signals, skip all CPU signal work.
@@ -308,6 +318,9 @@ pub fn tick(world: &mut World) {
                     &old_brain_input,
                 );
                 let chosen_action_idx = action.action as usize;
+                if chosen_action_idx >= old_q_values.len() {
+                    continue;
+                }
                 let old_q_chosen = old_q_values[chosen_action_idx];
 
                 // New state input for next-state Q-values

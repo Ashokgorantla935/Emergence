@@ -183,7 +183,7 @@ pub fn classify_earth_biome(
 fn micro_noise(noise: &OpenSimplex, nx: f64, ny: f64) -> f32 {
     let mut val = 0.0f64;
     let mut amp = 0.5f64;
-    let mut freq = 0.07f64;
+    let mut freq = 0.35f64; // x5 larger scale
     for _ in 0..3 {
         val += noise.get([nx / freq, ny / freq]) * amp;
         amp *= 0.5;

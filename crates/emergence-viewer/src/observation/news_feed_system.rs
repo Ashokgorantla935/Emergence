@@ -116,6 +116,13 @@ impl NewsFeedSystem {
 
         for idx in &new_event_indices {
             let event = &events.events[*idx];
+
+            let is_human_actor = event.actor_id as usize >= beings.hot.count || beings.hot.creature_type[event.actor_id as usize] == 0;
+            let is_human_target = event.target_id as usize >= beings.hot.count || beings.hot.creature_type[event.target_id as usize] == 0;
+            if !is_human_actor && !is_human_target && event.event_type != EventType::MassDeath && event.event_type != EventType::Flood && event.event_type != EventType::GodAction {
+                continue;
+            }
+
             if event.event_type == EventType::Died {
                 self.track_death(event.tick);
             }

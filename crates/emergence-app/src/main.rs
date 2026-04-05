@@ -1029,10 +1029,9 @@ impl ApplicationHandler for App {
 
                     let mut world = world.write().unwrap();
 
-                    // Time-budgeted ticking: never spend more than 8ms per frame on simulation.
-                    // At 1x speed, 1 tick ≈ 2ms (release). 8ms budget allows up to 4 ticks
-                    // on fast-forward while keeping total frame under 16.6ms vsync deadline.
-                    const TICK_BUDGET_MS: u128 = 8;
+                    // Time-budgeted ticking: allow 33ms budget for fast speeds
+                    // This lets 10x speed actually hit 10x without getting throttled
+                    const TICK_BUDGET_MS: u128 = 33;
                     let tick_start = std::time::Instant::now();
                     let mut ticked = 0u32;
                     for _ in 0..ticks {

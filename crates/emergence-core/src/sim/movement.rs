@@ -612,7 +612,7 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     let bx = cx.min(world.terrain.width - 1);
                     let by = cy.min(world.terrain.height - 1);
                     world.terrain.place_structure(bx, by, target_type, being_index as u32);
-                    // Deforestation: clear biomass for construction foundation
+                    // Deforestation: violently clear biomass (trees) to make room for solid structure
                     world.terrain.biomass[cidx] = 0.0;
                     // Structure presence increases mineralize (foundation)
                     world.terrain.mineralize[cidx] = (world.terrain.mineralize[cidx] + 0.5).min(1.0);

@@ -734,17 +734,14 @@ fn collect_chunk_decor(
                     (ARCH_190_CAMPFIRE, [1.0, 1.0, 1.0], 2.5, a)
                 }
                 StructureType::LeanTo => {
-                    let a = if terrain.build_progress[idx] < StructureType::LeanTo.build_ticks() { 0.5 } else { 1.0 };
                     let v = [ARCH_190_LEAN_TO, ARCH_190_HUT, ARCH_190_CACHE][struct_hash % 3];
-                    (v, [1.0, 1.0, 1.0], 3.0, a)
+                    (v, [1.0, 1.0, 1.0], 3.0, 1.0)
                 }
                 StructureType::Hut => {
-                    let a = if terrain.build_progress[idx] < StructureType::Hut.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_HUT, [1.0, 1.0, 1.0], 3.5, a)
+                    (ARCH_190_HUT, [1.0, 1.0, 1.0], 3.5, 1.0)
                 }
                 StructureType::Wall => {
-                    let a = if terrain.build_progress[idx] < StructureType::Wall.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_WALL, [0.8, 0.8, 0.8], 3.0, a)
+                    (ARCH_190_WALL, [0.8, 0.8, 0.8], 3.0, 1.0)
                 }
                 StructureType::Mine => {
                     let a = if terrain.build_progress[idx] < StructureType::Mine.build_ticks() { 0.5 } else { 1.0 };
@@ -779,24 +776,19 @@ fn collect_chunk_decor(
                     (ARCH_190_NOMAD, [0.8, 0.6, 0.3], 3.0, a)
                 }
                 StructureType::WoodenHouse => {
-                    let a = if terrain.build_progress[idx] < StructureType::WoodenHouse.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_WOOD_HOUSE, [0.7, 0.5, 0.3], 3.5, a)
+                    (ARCH_190_WOOD_HOUSE, [0.7, 0.5, 0.3], 3.5, 1.0)
                 }
                 StructureType::StoneHouse => {
-                    let a = if terrain.build_progress[idx] < StructureType::StoneHouse.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_STONE_HOUSE, [0.6, 0.6, 0.65], 3.5, a)
+                    (ARCH_190_STONE_HOUSE, [0.6, 0.6, 0.65], 3.5, 1.0)
                 }
                 StructureType::Windmill => {
-                    let a = if terrain.build_progress[idx] < StructureType::Windmill.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_WINDMILL, [0.9, 0.85, 0.7], 3.8, a)
+                    (ARCH_190_WINDMILL, [0.9, 0.85, 0.7], 3.8, 1.0)
                 }
                 StructureType::Keep => {
-                    let a = if terrain.build_progress[idx] < StructureType::Keep.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_KEEP, [0.5, 0.5, 0.55], 3.8, a)
+                    (ARCH_190_KEEP, [0.5, 0.5, 0.55], 3.8, 1.0)
                 }
                 StructureType::Castle => {
-                    let a = if terrain.build_progress[idx] < StructureType::Castle.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_CASTLE, [0.8, 0.8, 0.9], 4.2, a)
+                    (ARCH_190_CASTLE, [0.8, 0.8, 0.9], 4.2, 1.0)
                 }
                 StructureType::FarmField => {
                     (ARCH_190_FARM, [0.8, 0.65, 0.3], 3.0, 1.0)

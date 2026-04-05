@@ -68,6 +68,28 @@ const BUILD_WINDMILL:    [f32; 2] = build_uv(5, 1);
 const BUILD_KEEP:        [f32; 2] = build_uv(6, 1);
 const BUILD_CASTLE:      [f32; 2] = build_uv(7, 1);
 
+// Flora spritesheet row 2: snow pines (cols 0-3) + cacti (cols 4-7)
+const FLORA_SNOW_A: [f32; 2] = flora_uv(0, 2);
+const FLORA_SNOW_B: [f32; 2] = flora_uv(1, 2);
+const FLORA_SNOW_C: [f32; 2] = flora_uv(2, 2);
+const FLORA_SNOW_D: [f32; 2] = flora_uv(3, 2);
+const FLORA_CACTUS_A: [f32; 2] = flora_uv(4, 2);
+const FLORA_CACTUS_B: [f32; 2] = flora_uv(5, 2);
+const FLORA_CACTUS_C: [f32; 2] = flora_uv(6, 2);
+const FLORA_CACTUS_D: [f32; 2] = flora_uv(7, 2);
+
+// Flora spritesheet row 3: dead/crystal trees (mountain)
+const FLORA_DEAD_A: [f32; 2] = flora_uv(0, 3);
+const FLORA_DEAD_B: [f32; 2] = flora_uv(1, 3);
+const FLORA_DEAD_C: [f32; 2] = flora_uv(2, 3);
+const FLORA_DEAD_D: [f32; 2] = flora_uv(3, 3);
+
+// Flora spritesheet rows 4-5: dark swamp trees (wetland)
+const FLORA_SWAMP_A: [f32; 2] = flora_uv(0, 4);
+const FLORA_SWAMP_B: [f32; 2] = flora_uv(1, 4);
+const FLORA_SWAMP_C: [f32; 2] = flora_uv(2, 4);
+const FLORA_SWAMP_D: [f32; 2] = flora_uv(3, 4);
+
 // Flora variant tables for new spritesheet
 const FLORA_TREE_VARIANTS_FOREST: &[[f32; 2]] = &[
     FLORA_TREE_A, FLORA_TREE_B, FLORA_TREE_C, FLORA_TREE_D,
@@ -77,6 +99,18 @@ const FLORA_TREE_VARIANTS_GRASSLAND: &[[f32; 2]] = &[
 ];
 const FLORA_BUSH_VARIANTS: &[[f32; 2]] = &[
     FLORA_BUSH_A, FLORA_FLOWER_A, FLORA_FLOWER_B, FLORA_FLOWER_C,
+];
+const FLORA_TREE_VARIANTS_SNOW: &[[f32; 2]] = &[
+    FLORA_SNOW_A, FLORA_SNOW_B, FLORA_SNOW_C, FLORA_SNOW_D,
+];
+const FLORA_TREE_VARIANTS_DESERT: &[[f32; 2]] = &[
+    FLORA_CACTUS_A, FLORA_CACTUS_B, FLORA_CACTUS_C, FLORA_CACTUS_D,
+];
+const FLORA_TREE_VARIANTS_MOUNTAIN: &[[f32; 2]] = &[
+    FLORA_DEAD_A, FLORA_DEAD_B, FLORA_DEAD_C, FLORA_DEAD_D,
+];
+const FLORA_TREE_VARIANTS_WETLAND: &[[f32; 2]] = &[
+    FLORA_SWAMP_A, FLORA_SWAMP_B, FLORA_SWAMP_C, FLORA_SWAMP_D,
 ];
 
 // Resource atlas cells (row 20, col 0-7)
@@ -798,7 +832,23 @@ fn collect_chunk_decor(
                             continue;
                         }
                     }
-                    Biome::Mountain | Biome::Wetland | Biome::Desert | Biome::Snow | Biome::Water => continue,
+                    Biome::Snow => {
+                        let v = FLORA_TREE_VARIANTS_SNOW[hash % FLORA_TREE_VARIANTS_SNOW.len()];
+                        (v, [1.0f32, 1.0, 1.0], 3.5 + (hash % 3) as f32 * 0.25)
+                    }
+                    Biome::Desert => {
+                        let v = FLORA_TREE_VARIANTS_DESERT[hash % FLORA_TREE_VARIANTS_DESERT.len()];
+                        (v, [1.0f32, 1.0, 1.0], 3.0 + (hash % 3) as f32 * 0.25)
+                    }
+                    Biome::Mountain => {
+                        let v = FLORA_TREE_VARIANTS_MOUNTAIN[hash % FLORA_TREE_VARIANTS_MOUNTAIN.len()];
+                        (v, [1.0f32, 1.0, 1.0], 3.5 + (hash % 3) as f32 * 0.25)
+                    }
+                    Biome::Wetland => {
+                        let v = FLORA_TREE_VARIANTS_WETLAND[hash % FLORA_TREE_VARIANTS_WETLAND.len()];
+                        (v, [1.0f32, 1.0, 1.0], 4.0 + (hash % 3) as f32 * 0.25)
+                    }
+                    Biome::Water => continue,
                 };
 
                 if pixels_per_unit < 5.0 && size < 2.0 { continue; }

@@ -1747,31 +1747,6 @@ impl ApplicationHandler for App {
                     // Statistics floating panel (togglable via S)
                     self.stats_panel.ui(&self.egui_ctx, &self.stats_history);
 
-                    // Diagnostics overlay — minimal text at RIGHT_TOP
-                    {
-                        let fps = self.current_fps;
-                        let tps = self.current_tps;
-                        let pop = population;
-                        let t = world.tick;
-                        let season = format!("{:?}", world.climate.season());
-                        let day = format!("{:?}", world.climate.day_phase());
-                        egui::Area::new(egui::Id::new("diagnostics_overlay"))
-                            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-8.0, 30.0))
-                            .order(egui::Order::Foreground)
-                            .interactable(false)
-                            .show(&self.egui_ctx, |ui| {
-                                ui.set_width(160.0);
-                                let text_color = egui::Color32::from_rgba_premultiplied(200, 200, 210, 220);
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                                    ui.vertical(|ui| {
-                                        ui.colored_label(text_color, format!("FPS {fps:.0}  TPS {tps}"));
-                                        ui.colored_label(text_color, format!("Pop {pop}  Tick {t}"));
-                                        ui.colored_label(text_color, format!("{season}  {day}"));
-                                    });
-                                });
-                            });
-                    }
-
                     // Drop world before write-back
                     drop(world);
 

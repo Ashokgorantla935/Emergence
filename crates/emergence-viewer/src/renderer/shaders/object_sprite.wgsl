@@ -86,6 +86,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let c = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
 
+    // Chroma-key: discard fake-transparent checkerboard background pixels
+    // AI-generated sprites use white/grey grid instead of alpha channel
+    let lum = dot(c.rgb, vec3<f32>(0.299, 0.587, 0.114));
+    if (lum > 0.85 && c.a > 0.9) {
+        discard;
+    }
+
     // Pixel size in atlas UV space (atlas is 1024x1024)
     let px = 1.0 / 1024.0;
 

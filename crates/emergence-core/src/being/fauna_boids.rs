@@ -172,10 +172,28 @@ pub fn tick_fauna_boids(
 
         hot.velocities[i] = [nvx, nvy];
 
-        // Update position, clamped to world bounds
+        // Update position with terrain-aware boundary checks
         let new_x = (hot.positions[i][0] + nvx).clamp(0.0, (w - 1) as f32);
         let new_y = (hot.positions[i][1] + nvy).clamp(0.0, (h - 1) as f32);
-        hot.positions[i] = [new_x, new_y];
+        let new_idx = (new_y as usize).min(h - 1) * w + (new_x as usize).min(w - 1);
+        let is_water_cell = terrain.water[new_idx];
+
+        let is_fish = ctype == CreatureType::Fish as u8;
+        if is_fish {
+            // Fish MUST stay in water
+            if is_water_cell {
+                hot.positions[i] = [new_x, new_y];
+            } else {
+                hot.velocities[i] = [0.0, 0.0]; // stop at boundary
+            }
+        } else {
+            // Non-fish MUST stay on land
+            if !is_water_cell {
+                hot.positions[i] = [new_x, new_y];
+            } else {
+                hot.velocities[i] = [0.0, 0.0]; // stop at boundary
+            }
+        }
     }
 }
 

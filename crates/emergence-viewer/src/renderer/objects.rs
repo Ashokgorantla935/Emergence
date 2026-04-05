@@ -7,7 +7,9 @@
 //! and incremental rebuilds.
 
 use emergence_core::being::data::{BeingState, Beings};
+use emergence_core::world::climate::ClimateGrid;
 use emergence_core::world::resource::{FoodType, ResourceLayer};
+use emergence_core::world::signal::{SignalChannel, SignalGrid};
 use emergence_core::world::terrain::{Biome, Terrain, StructureType};
 use wgpu::util::DeviceExt;
 
@@ -284,6 +286,8 @@ impl ChunkedObjectRenderer {
         queue:          &wgpu::Queue,
         terrain:        &Terrain,
         resources:      &ResourceLayer,
+        signals:        &SignalGrid,
+        climate:        &ClimateGrid,
         pixels_per_unit: f32,
         cam_x:          f32,
         cam_y:          f32,
@@ -353,7 +357,7 @@ impl ChunkedObjectRenderer {
                     let ft = self.frame_tick;
                     let chunk = &mut self.chunks[idx];
                     // Inline rebuild to avoid &self/&mut self conflict
-                    rebuild_chunk_standalone(chunk, queue, terrain, resources, ppu, ft);
+                    rebuild_chunk_standalone(chunk, queue, terrain, resources, signals, climate, ppu, ft);
                 }
             }
         }
@@ -487,6 +491,8 @@ fn rebuild_chunk_standalone(
     queue: &wgpu::Queue,
     terrain: &Terrain,
     resources: &ResourceLayer,
+    signals: &SignalGrid,
+    climate: &ClimateGrid,
     pixels_per_unit: f32,
     frame_tick: u32,
 ) {
@@ -780,8 +786,27 @@ fn rebuild_chunk_standalone(
                     continue;
                 }
 
+                // Toxin/Crime corruption tinting for flora
+                let mut tint = tint;
+                let wx = x as f32 + 0.5;
+                let wy = y as f32 + 0.5;
+                let toxin = climate.read_toxin(wx, wy);
+                let crime = signals.read(SignalChannel::Crime, x as u32, y as u32);
+                if toxin > 0.3 {
+                    let t = ((toxin - 0.3) / 0.7).min(1.0);
+                    tint[0] = tint[0] * (1.0 - t) + 0.3 * t;
+                    tint[1] = tint[1] * (1.0 - t) + 0.8 * t;
+                    tint[2] = tint[2] * (1.0 - t) + 0.2 * t;
+                }
+                if crime > 0.3 {
+                    let c = ((crime - 0.3) / 0.7).min(1.0);
+                    tint[0] = tint[0] * (1.0 - c * 0.5) + 0.4 * c * 0.5;
+                    tint[1] = tint[1] * (1.0 - c * 0.7);
+                    tint[2] = tint[2] * (1.0 - c * 0.3) + 0.5 * c * 0.3;
+                }
+
                 instances.push(ObjectInstance {
-                    position:   [x as f32 + 0.5 + jitter_x, y as f32 + 0.5 + jitter_y],
+                    position:   [wx + jitter_x, wy + jitter_y],
                     atlas_uv,
                     atlas_size: [ATLAS_CELL, ATLAS_CELL],
                     tint,

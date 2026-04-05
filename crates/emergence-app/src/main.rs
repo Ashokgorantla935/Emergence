@@ -10,7 +10,7 @@ use emergence_viewer::animation::AnimationManager;
 use emergence_viewer::audio::{AudioContext, BiomeAmbience, SoundEngine};
 use emergence_viewer::camera::Camera;
 use emergence_viewer::dashboard::Dashboard;
-use emergence_viewer::inspector::Inspector;
+use emergence_viewer::inspector::{Inspector, SettlementData, aggregate_settlement, show_settlement_panel};
 use emergence_viewer::observation::kingdom::KingdomDetector;
 use emergence_viewer::observation::kingdom_panel::KingdomPanel;
 use emergence_viewer::observation::news_feed_system::NewsFeedSystem;
@@ -104,6 +104,7 @@ struct App {
     anim: AnimationManager,
     camera: Camera,
     inspector: Inspector,
+    settlement_inspect: Option<SettlementData>,
     dashboard: Dashboard,
 
     // Speed controls (replaces old TimeControls)
@@ -312,6 +313,7 @@ impl App {
             anim: AnimationManager::new(MAX_BEINGS),
             camera: Camera::new(256.0, 256.0),
             inspector: Inspector::new(),
+            settlement_inspect: None,
             dashboard: Dashboard::new(),
             speed: SpeedControls::new(),
             screen: ScreenState::LaunchOverlay,
@@ -858,6 +860,17 @@ impl ApplicationHandler for App {
                             let world = world.read().unwrap();
                             self.inspector
                                 .select_being_at(world_pos, &world.beings, &world.spatial);
+                            // If no specific being selected, open settlement inspector
+                            if self.inspector.selected_being.is_none() {
+                                self.settlement_inspect = Some(aggregate_settlement(
+                                    &world,
+                                    world_pos[0],
+                                    world_pos[1],
+                                    15.0,
+                                ));
+                            } else {
+                                self.settlement_inspect = None;
+                            }
                         }
                     }
                 }
@@ -870,6 +883,7 @@ impl ApplicationHandler for App {
                 self.had_interaction = true;
                 self.inspector.selected_being = None;
                 self.inspector.follow = false;
+                self.settlement_inspect = None;
             }
             _ => {}
         }
@@ -1413,6 +1427,8 @@ impl ApplicationHandler for App {
                     &rs.queue,
                     &world.terrain,
                     &world.resources,
+                    &world.signals,
+                    &world.climate_grid,
                     pixels_per_unit,
                     self.camera.position[0],
                     self.camera.position[1],

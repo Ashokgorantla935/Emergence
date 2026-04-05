@@ -39,6 +39,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Time-of-day color grade
     color = vec4<f32>(color.rgb * pp.tint_color * pp.brightness, color.a);
 
+    // +20% saturation boost for WorldBox-tier vibrancy
+    let luminance = dot(color.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let grey = vec3<f32>(luminance, luminance, luminance);
+    color = vec4<f32>(mix(grey, color.rgb, 1.2), color.a);
+
     // Vignette: darken edges to draw eye toward center
     let center = vec2<f32>(0.5, 0.5);
     let dist = distance(in.uv, center);

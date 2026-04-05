@@ -523,7 +523,7 @@ fn rebuild_chunk_standalone(
                     if terrain.build_progress[idx] < StructureType::Campfire.build_ticks() {
                         a = 0.5;
                     }
-                    (campfire_frame_uv[frame], [1.0, 1.0, 1.0], 2.5, a)
+                    (campfire_frame_uv[frame], [1.0, 1.0, 1.0], 1.0, a)
                 }
                 StructureType::LeanTo => {
                     let mut a = 1.0;
@@ -531,12 +531,12 @@ fn rebuild_chunk_standalone(
                         a = 0.5;
                     }
                     let v = LEANTO_VARIANTS[struct_hash % LEANTO_VARIANTS.len()];
-                    (v, [1.0, 1.0, 1.0], 3.0, a)
+                    (v, [1.0, 1.0, 1.0], 1.2, a)
                 }
                 StructureType::Hut => {
                     let mut a = 1.0;
                     let age = terrain.structure_age[idx];
-                    let mut scale = 3.5;
+                    let mut scale = 1.3;
                     if terrain.build_progress[idx] < StructureType::Hut.build_ticks() {
                         a = 0.5;
                     } else if age > 5000 {
@@ -551,27 +551,27 @@ fn rebuild_chunk_standalone(
                     if terrain.build_progress[idx] < StructureType::Wall.build_ticks() {
                         a = 0.5;
                     }
-                    (UV_MW_DECOR_30, [0.8, 0.8, 0.8], 3.0, a)
+                    (UV_MW_DECOR_30, [0.8, 0.8, 0.8], 1.2, a)
                 }
                 StructureType::Mine => {
                     let mut a = 1.0;
                     if terrain.build_progress[idx] < StructureType::Mine.build_ticks() { a = 0.5; }
-                    (UV_MW_DECOR_30, [0.6, 0.4, 0.4], 3.0, a) // Using stone decor with red-ish tint for mine
+                    (UV_MW_DECOR_30, [0.6, 0.4, 0.4], 1.2, a) // Using stone decor with red-ish tint for mine
                 }
                 StructureType::Forge => {
                     let mut a = 1.0;
                     if terrain.build_progress[idx] < StructureType::Forge.build_ticks() { a = 0.5; }
-                    (UV_HUT, [0.5, 0.2, 0.2], 3.5, a) // red-ish hut for forge
+                    (UV_HUT, [0.5, 0.2, 0.2], 1.3, a) // red-ish hut for forge
                 }
                 StructureType::Factory => {
                     let mut a = 1.0;
                     if terrain.build_progress[idx] < StructureType::Factory.build_ticks() { a = 0.5; }
-                    (UV_HUT, [0.4, 0.4, 0.5], 4.5, a) // huge metallic building for factory
+                    (UV_HUT, [0.4, 0.4, 0.5], 1.5, a) // huge metallic building for factory
                 }
                 StructureType::Automobile => {
                     let mut a = 1.0;
                     if terrain.build_progress[idx] < StructureType::Automobile.build_ticks() { a = 0.5; }
-                    (UV_MW_DECOR_30, [0.2, 0.2, 0.2], 2.0, a) // dark metallic small object
+                    (UV_MW_DECOR_30, [0.2, 0.2, 0.2], 1.0, a) // dark metallic small object
                 }
                 StructureType::DirtPath => continue,   // rendered by terrain shader
                 StructureType::StoneRoad => continue,  // rendered by terrain shader
@@ -580,15 +580,15 @@ fn rebuild_chunk_standalone(
                     if terrain.build_progress[idx] < StructureType::ResourceCache.build_ticks() { a = 0.5; }
                     let stored = terrain.cache_food[idx] + terrain.cache_stone[idx];
                     let fill_alpha = 0.4 + (stored / 10.0).min(1.0) * 0.6;
-                    (UV_FOOD_CACHE, [0.9, 0.75, 0.2], 2.0, fill_alpha * a)
+                    (UV_FOOD_CACHE, [0.9, 0.75, 0.2], 1.0, fill_alpha * a)
                 }
                 StructureType::OilPump => {
                     let mut a = 1.0;
                     if terrain.build_progress[idx] < StructureType::OilPump.build_ticks() { a = 0.5; }
-                    (UV_MW_DECOR_30, [0.15, 0.15, 0.15], 3.0, a) // dark industrial
+                    (UV_MW_DECOR_30, [0.15, 0.15, 0.15], 1.2, a) // dark industrial
                 }
                 StructureType::None => continue,
-                _ => (UV_MW_DECOR_30, [0.7, 0.7, 0.7], 2.0, 1.0),
+                _ => (UV_MW_DECOR_30, [0.7, 0.7, 0.7], 1.0, 1.0),
             };
 
             instances.push(ObjectInstance {

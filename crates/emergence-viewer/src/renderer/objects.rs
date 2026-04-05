@@ -471,6 +471,20 @@ fn rebuild_chunk_standalone(
                     if terrain.build_progress[idx] < StructureType::Automobile.build_ticks() { a = 0.5; }
                     (UV_MW_DECOR_30, [0.2, 0.2, 0.2], 2.0, a) // dark metallic small object
                 }
+                StructureType::DirtPath => continue,   // rendered by terrain shader
+                StructureType::StoneRoad => continue,  // rendered by terrain shader
+                StructureType::ResourceCache => {
+                    let mut a = 1.0;
+                    if terrain.build_progress[idx] < StructureType::ResourceCache.build_ticks() { a = 0.5; }
+                    let stored = terrain.cache_food[idx] + terrain.cache_stone[idx];
+                    let fill_alpha = 0.4 + (stored / 10.0).min(1.0) * 0.6;
+                    (UV_FOOD_CACHE, [0.9, 0.75, 0.2], 2.0, fill_alpha * a)
+                }
+                StructureType::OilPump => {
+                    let mut a = 1.0;
+                    if terrain.build_progress[idx] < StructureType::OilPump.build_ticks() { a = 0.5; }
+                    (UV_MW_DECOR_30, [0.15, 0.15, 0.15], 3.0, a) // dark industrial
+                }
                 StructureType::None => continue,
                 _ => (UV_MW_DECOR_30, [0.7, 0.7, 0.7], 2.0, 1.0),
             };
@@ -510,34 +524,33 @@ fn rebuild_chunk_standalone(
             let (atlas_uv, tint, size) = match resources.food_type[idx] {
                 FoodType::Berries => {
                     if depleted {
-                        (UV_BERRY_DEPLETED, [0.7f32, 0.7, 0.7], 1.5)
+                        (UV_BERRY_DEPLETED, [0.7f32, 0.7, 0.7], 1.0)
                     } else {
-                        (UV_BERRY_FULL, [1.0f32, 1.0, 1.0], 1.5)
+                        (UV_BERRY_FULL, [1.0f32, 1.0, 1.0], 1.0)
                     }
                 }
                 FoodType::Grain => {
                     if depleted {
-                        (UV_WHEAT_DEPLETED, [0.7f32, 0.7, 0.7], 1.8)
+                        (UV_WHEAT_DEPLETED, [0.7f32, 0.7, 0.7], 1.2)
                     } else {
-                        (UV_WHEAT_FULL, [1.0f32, 1.0, 1.0], 1.8)
+                        (UV_WHEAT_FULL, [1.0f32, 1.0, 1.0], 1.2)
                     }
                 }
                 FoodType::Fish => {
                     if depleted {
-                        (UV_FISH_DEPLETED, [0.7f32, 0.7, 0.7], 1.5)
+                        (UV_FISH_DEPLETED, [0.7f32, 0.7, 0.7], 1.2)
                     } else {
-                        (UV_FISH_FULL, [1.0f32, 1.0, 1.0], 1.5)
+                        (UV_FISH_FULL, [1.0f32, 1.0, 1.0], 1.2)
                     }
                 }
                 FoodType::Stone => {
-                    (UV_STONE, [1.0f32, 1.0, 1.0], 1.6)
+                    (UV_STONE, [1.0f32, 1.0, 1.0], 1.3)
                 }
                 FoodType::Iron => {
-                    (UV_STONE, [0.7f32, 0.4, 0.4], 1.5) // reddish tint for iron ore
+                    (UV_STONE, [0.7f32, 0.4, 0.4], 1.2) // reddish tint for iron ore
                 }
                 FoodType::Oil => {
-                    // Let's use UV_STONE but blackish for an oil deposit
-                    (UV_STONE, [0.2f32, 0.2, 0.2], 1.4)
+                    (UV_STONE, [0.2f32, 0.2, 0.2], 1.2)
                 }
                 FoodType::None => continue,
             };
@@ -550,9 +563,9 @@ fn rebuild_chunk_standalone(
             // Organic jitter so resources aren't mathematically locked to absolute cell grid-centers
             let hash = cell_hash(x, y);
 
-            // Density thinning: only render ~40% of resource sprites so organic
-            // terrain patches show through the oversized wheat/stone carpets.
-            if hash % 10 > 3 {
+            // Density thinning: only render ~10% of resource sprites so organic
+            // terrain patches show through instead of a chaotic carpet.
+            if hash % 100 > 10 {
                 continue;
             }
 

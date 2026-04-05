@@ -75,6 +75,35 @@ impl Action {
         Action::BuildClean,
     ];
 
+    pub fn from_u8(v: u8) -> Self {
+        match v {
+            1 => Action::SeekFood,
+            2 => Action::SeekShelter,
+            3 => Action::Flee,
+            4 => Action::ApproachBeing,
+            5 => Action::Bond,
+            6 => Action::ShareFood,
+            7 => Action::TakeFood,
+            8 => Action::Explore,
+            9 => Action::Sleep,
+            10 => Action::Cluster,
+            11 => Action::Mourn,
+            12 => Action::AvoidBeing,
+            13 => Action::PickUpFood,
+            14 => Action::Hunt,
+            15 => Action::Teach,
+            16 => Action::Build,
+            17 => Action::Craft,
+            18 => Action::Memorialize,
+            19 => Action::CreateMark,
+            20 => Action::ShareResource,
+            21 => Action::PickUpStone,
+            22 => Action::Appease,
+            23 => Action::BuildClean,
+            _ => Action::Wander,
+        }
+    }
+
     /// Return the action subset allowed for the given creature type.
     /// Fauna get simplified subsets (5-9 actions). Humans get all 24.
     /// Predators (Wolf, Bear, Hawk) include Hunt. Prey flee, seek food, avoid.
@@ -683,6 +712,14 @@ pub fn score_actions(
                 }
             }
             Action::SeekShelter => {
+                // Home settlement takes priority — move toward known home with jitter
+                if let Some(home) = beings.cold.home_settlement_pos[being_index] {
+                    let mut t = [home[0] as f32, home[1] as f32];
+                    t[0] += (rng.f32() - 0.5) * 2.0;
+                    t[1] += (rng.f32() - 0.5) * 2.0;
+                    target_pos = Some(t);
+                    score *= 1.3; // strong bonus for having a known home
+                } else {
                 // Prefer comfort gradient (hearth signal) over raw shelter proximity
                 let [gx, gy] = local.gradients[CH_COMFORT];
                 if gx.abs() > 0.03 || gy.abs() > 0.03 {
@@ -699,6 +736,7 @@ pub fn score_actions(
                 } else {
                     score *= 0.1; // no shelter nearby, heavily penalize
                 }
+                } // end else (no home settlement)
             }
             Action::Flee => {
                 // Use cached danger gradient

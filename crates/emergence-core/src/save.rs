@@ -481,6 +481,8 @@ impl SaveFile {
             beings.hot.cultural_frequency.push(
                 if i < self.cultural_frequency.len() { self.cultural_frequency[i] } else { fastrand::f32() }
             );
+            beings.hot.action_target_pos.push(None);
+            beings.hot.action_lock_ticks.push(0u16);
             beings.hot.states.push(being_state_from_u8(self.states[i]));
             beings.hot.creature_type.push(self.creature_type[i]);
             beings.hot.fauna_params.push(
@@ -514,6 +516,7 @@ impl SaveFile {
                 crate::being::data::Genotype::default()
             };
             beings.cold.genotypes.push(genotype);
+            beings.cold.home_settlement_pos.push(None);
 
             // Relationships
             let mut slots = crate::being::memory::RelationshipSlots::new();

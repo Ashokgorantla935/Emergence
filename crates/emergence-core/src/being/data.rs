@@ -181,6 +181,8 @@ pub struct BeingsHot {
     pub tool_quality: Vec<f32>,   // renamed from combat_modifier; 0=bare hands, 1=excellent tool
     pub signal_style: Vec<u8>,    // cultural fingerprint: personality_hash % 8
     pub cultural_frequency: Vec<f32>,  // continuous tribal identity [0.0, 1.0]
+    pub action_target_pos: Vec<Option<[f32; 2]>>,  // locked geometric target for current action
+    pub action_lock_ticks: Vec<u16>,                // ticks remaining before action re-evaluation
     pub personalities: Vec<[f32; 5]>,
     pub states: Vec<BeingState>,
     pub creature_type: Vec<u8>,   // 0=Human. See CreatureType enum. 1 byte per being.
@@ -255,6 +257,9 @@ pub struct BeingsCold {
     pub meme_slots: Vec<MemeSlots>,
     /// Inherited genetic data. Default genotype for initial population; evolved from generation 1+.
     pub genotypes: Vec<Genotype>,
+    /// Home settlement position: set when a being builds or bonds to a structure.
+    /// Used by SeekShelter to move toward a known home rather than any nearby structure.
+    pub home_settlement_pos: Vec<Option<[u32; 2]>>,
 }
 
 /// Wrapper that owns both hot and cold sub-structs. All callers go through this.
@@ -286,6 +291,8 @@ impl Beings {
                 tool_quality: Vec::new(),
                 signal_style: Vec::new(),
                 cultural_frequency: Vec::new(),
+                action_target_pos: Vec::new(),
+                action_lock_ticks: Vec::new(),
                 personalities: Vec::new(),
                 states: Vec::new(),
                 creature_type: Vec::new(),
@@ -309,6 +316,7 @@ impl Beings {
                 names: Vec::new(),
                 meme_slots: Vec::new(),
                 genotypes: Vec::new(),
+                home_settlement_pos: Vec::new(),
             },
         }
     }
@@ -342,6 +350,8 @@ impl Beings {
         let style = personality_to_style(&personality);
         self.hot.signal_style.push(style);
         self.hot.cultural_frequency.push(fastrand::f32()); // random for new wanderers; override to 0.0 for fauna, or to inherited value for births
+        self.hot.action_target_pos.push(None);
+        self.hot.action_lock_ticks.push(0u16);
         self.hot.personalities.push(personality);
         self.hot.states.push(BeingState::Awake);
         self.hot.creature_type.push(CreatureType::Human as u8); // default to Human; override after spawn for fauna
@@ -357,6 +367,7 @@ impl Beings {
         self.cold.names.push(String::new());
         self.cold.meme_slots.push([super::memes::MemeSlotState::default(); 4]);
         self.cold.genotypes.push(Genotype::default());
+        self.cold.home_settlement_pos.push(None);
         self.hot.count += 1;
         self.hot.alive_count += 1;
         idx

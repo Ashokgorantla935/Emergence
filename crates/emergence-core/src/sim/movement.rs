@@ -582,6 +582,8 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     let bx = cx.min(world.terrain.width - 1);
                     let by = cy.min(world.terrain.height - 1);
                     world.terrain.place_structure(bx, by, target_type, being_index as u32);
+                    // Bond builder to this location as home settlement
+                    world.beings.cold.home_settlement_pos[being_index] = Some([bx, by]);
                     // Clear flora footprint — chop trees to make space for construction
                     world.resources.flora_stage[cidx] = 0;
                     world.resources.flora_energy[cidx] = 0;
@@ -951,6 +953,23 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
                     world.terrain.structure[dest_idx] = 6; // Auto-create DirtPath
                     world.terrain.trample[dest_idx] = 0;
                 }
+            }
+        }
+        // Arrival detection: release action lock when being reaches its locked target.
+        if let Some(locked_target) = world.beings.hot.action_target_pos[being_index] {
+            let ax = world.beings.hot.positions[being_index][0] - locked_target[0];
+            let ay = world.beings.hot.positions[being_index][1] - locked_target[1];
+            if ax * ax + ay * ay < 1.0 {
+                world.beings.hot.action_lock_ticks[being_index] = 0;
+            }
+        }
+        // Social migration: homeless beings near a structure adopt it as home.
+        if world.beings.cold.home_settlement_pos[being_index].is_none() {
+            let cur_x = (world.beings.hot.positions[being_index][0] as u32).min(world.terrain.width - 1);
+            let cur_y = (world.beings.hot.positions[being_index][1] as u32).min(world.terrain.height - 1);
+            let cur_idx = (cur_y * world.terrain.width + cur_x) as usize;
+            if world.terrain.structure[cur_idx] != 0 {
+                world.beings.cold.home_settlement_pos[being_index] = Some([cur_x, cur_y]);
             }
         }
     } else {

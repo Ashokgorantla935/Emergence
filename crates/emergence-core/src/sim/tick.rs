@@ -7,7 +7,7 @@ use rayon::prelude::*;
 /// At 100x speed: 1000 ticks/frame, render every 100th (~15-25fps, documented and accepted).
 pub const FIXED_DT: f32 = 1.0;
 
-use crate::being::actions::{score_actions, ScoredAction};
+use crate::being::actions::{score_actions, Action, ScoredAction};
 use crate::being::data::*;
 use crate::being::emotions::{decay_emotions, trigger_emotion, update_emotions_from_needs};
 use crate::being::lifecycle::{age_beings, age_beings_no_death, blend_child_genotype, check_death_conditions, drift_personality_humans, generate_personality};
@@ -362,14 +362,27 @@ pub fn tick(world: &mut World) {
     }
 
     // 5e. Score actions (parallel via rayon)
+    // Action persistence gate: only re-evaluate when action_lock_ticks[i] == 0.
+    // Flee override (flee_ticks > 0) breaks the lock before scoring.
     let base_seed = world.rng.u64(..);
     let being_count = world.beings.hot.count;
+
+    // Pre-pass: break action lock for beings that are actively fleeing.
+    for i in 0..being_count {
+        if world.beings.hot.flee_ticks[i] > 0 {
+            world.beings.hot.action_lock_ticks[i] = 0;
+        }
+    }
 
     let decisions: Vec<Option<ScoredAction>> = (0..being_count)
         .into_par_iter()
         .map(|i| {
             if world.beings.hot.states[i] != BeingState::Awake {
                 return None;
+            }
+            // Only re-score when lock has expired
+            if world.beings.hot.action_lock_ticks[i] > 0 {
+                return None; // use locked action (handled in execute phase)
             }
             let mut rng = fastrand::Rng::with_seed(base_seed.wrapping_add(i as u64));
             Some(score_actions(
@@ -387,7 +400,56 @@ pub fn tick(world: &mut World) {
 
     // 5f. Execute actions (sequential)
     for (i, decision) in decisions.iter().enumerate() {
-        if let Some(ref action) = decision {
+        if world.beings.hot.states[i] != BeingState::Awake {
+            continue;
+        }
+
+        // Build the action to execute: either newly scored or locked from previous tick.
+        let action_to_execute: ScoredAction = if let Some(ref new_action) = decision {
+            // New decision: store it and set the lock duration.
+            world.beings.hot.pending_action[i] = new_action.action as u8;
+            world.beings.hot.action_target_pos[i] = new_action.target_pos;
+            let lock = match new_action.action {
+                Action::Wander => 40,
+                Action::Build | Action::Craft => 120,
+                Action::Flee => 5,
+                Action::SeekFood => 60,
+                Action::SeekShelter => 80,
+                Action::Explore => 50,
+                _ => 30,
+            };
+            world.beings.hot.action_lock_ticks[i] = lock;
+            ScoredAction {
+                action: new_action.action,
+                score: new_action.score,
+                target_being: new_action.target_being,
+                target_pos: new_action.target_pos,
+                runner_up_action: new_action.runner_up_action,
+                runner_up_score: new_action.runner_up_score,
+                causal_contrib: new_action.causal_contrib,
+                relationship_contrib: new_action.relationship_contrib,
+                signal_contrib: new_action.signal_contrib,
+            }
+        } else {
+            // Locked action: decrement counter and re-use stored action/target.
+            if world.beings.hot.action_lock_ticks[i] > 0 {
+                world.beings.hot.action_lock_ticks[i] -= 1;
+            }
+            ScoredAction {
+                action: Action::from_u8(world.beings.hot.pending_action[i]),
+                score: 0.0,
+                target_being: None,
+                target_pos: world.beings.hot.action_target_pos[i],
+                runner_up_action: 0,
+                runner_up_score: 0.0,
+                causal_contrib: 0.0,
+                relationship_contrib: 0.0,
+                signal_contrib: 0.0,
+            }
+        };
+
+        let action = &action_to_execute;
+        if true {
             // Snapshot needs before execution for Hebbian update
             let needs_before = world.beings.hot.needs[i];
 

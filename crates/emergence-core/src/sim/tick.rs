@@ -281,9 +281,22 @@ pub fn tick(world: &mut World) {
         let y = (pos[1] as u32).min(world.signals.height - 1);
         let danger = world.signals.read(SignalChannel::Danger, x, y);
 
+        // Hero bypass: bold or devoted humans resist the initial panic trigger
+        let is_hero = if world.beings.hot.creature_type[i] == CreatureType::Human as u8 {
+            let boldness = world.beings.hot.personalities[i][TRAIT_BOLD];
+            let belonging = world.beings.hot.needs[i][NEED_BELONGING];
+            boldness > 0.8 || (boldness > 0.5 && belonging > 0.7)
+        } else {
+            false // Fauna always flee
+        };
+
         if danger > 0.85 || world.beings.hot.flee_ticks[i] > 0 {
             // Trigger or continue flee state
             if danger > 0.85 && world.beings.hot.flee_ticks[i] == 0 {
+                if is_hero {
+                    // Hero stands ground — skip the panic trigger entirely
+                    continue;
+                }
                 world.beings.hot.flee_ticks[i] = 15; // 15 ticks of fleeing
 
                 // Drop all carried items

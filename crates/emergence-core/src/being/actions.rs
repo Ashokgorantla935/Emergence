@@ -287,7 +287,13 @@ pub fn score_actions(
         
         if warmth < 0.6 || safety < 0.6 {
             if has_stone {
-                q_values[Action::Build as usize] += 50.0;
+                let cell_idx_build = (cy as usize) * (terrain.width as usize) + (cx as usize);
+                let tile_blocked = terrain.structure[cell_idx_build] != 0 || terrain.water[cell_idx_build];
+                let boost = if tile_blocked { 0.0 } else { 50.0 };
+                q_values[Action::Build as usize] += boost;
+                if boost == 0.0 {
+                    q_values[Action::PickUpStone as usize] += 20.0; // seek new land instead
+                }
             } else {
                 q_values[Action::PickUpStone as usize] += 50.0;
             }
@@ -787,6 +793,31 @@ pub fn score_actions(
                     target_pos = Some(pos);
                     // tool_quality speeds up building
                     score *= 1.0 + beings.hot.tool_quality[being_index];
+                    // Block building on occupied or water tiles
+                    let cell_idx = (cy as usize) * (terrain.width as usize) + (cx as usize);
+                    if terrain.structure[cell_idx] != 0 || terrain.water[cell_idx] {
+                        score = 0.0;
+                    } else {
+                        // Anti-spam: penalize building near existing structures (3-tile radius)
+                        let mut nearby_structure = false;
+                        let r = 3i32;
+                        'outer: for dy in -r..=r {
+                            for dx in -r..=r {
+                                let nx = cx as i32 + dx;
+                                let ny = cy as i32 + dy;
+                                if nx >= 0 && ny >= 0 && (nx as u32) < terrain.width && (ny as u32) < terrain.height {
+                                    let ni = (ny as u32 * terrain.width + nx as u32) as usize;
+                                    if terrain.structure[ni] != 0 {
+                                        nearby_structure = true;
+                                        break 'outer;
+                                    }
+                                }
+                            }
+                        }
+                        if nearby_structure {
+                            score *= 0.1;
+                        }
+                    }
                 }
             }
             Action::Craft => {

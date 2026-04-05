@@ -582,6 +582,10 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     let bx = cx.min(world.terrain.width - 1);
                     let by = cy.min(world.terrain.height - 1);
                     world.terrain.place_structure(bx, by, target_type, being_index as u32);
+                    // Clear flora footprint — chop trees to make space for construction
+                    world.resources.flora_stage[cidx] = 0;
+                    world.resources.flora_energy[cidx] = 0;
+                    world.resources.flora_hydration[cidx] = 0;
                     trigger_emotion(&mut world.beings, being_index, EMO_JOY, 0.3);
                     world.beings.hot.needs[being_index][NEED_PURPOSE] =
                         (world.beings.hot.needs[being_index][NEED_PURPOSE] + 0.1).min(1.0);
@@ -950,26 +954,28 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
             }
         }
     } else {
-        // Land being hit water boundary — SLIDE to prevent vibrating against scent gradients
+        // Land being hit water boundary — smart sliding along coastline
         world.beings.hot.velocities[being_index] = [0.0, 0.0];
-        
+
         let try_x = (pos[0] + nx * clamped_dist).clamp(0.0, world.terrain.width as f32 - 1.0);
         let try_y = (pos[1] + ny * clamped_dist).clamp(0.0, world.terrain.height as f32 - 1.0);
-        
-        let cx = pos[0] as u32;
-        let cy = pos[1] as u32;
+
         let can_x = !world.terrain.is_water_f(try_x, pos[1]);
         let can_y = !world.terrain.is_water_f(pos[0], try_y);
-        
+
         if can_x && !can_y {
+            // Slide along X axis
             world.beings.hot.positions[being_index][0] = try_x;
             world.beings.hot.velocities[being_index][0] = (nx * clamped_dist).clamp(-MAX_VEL, MAX_VEL);
         } else if can_y && !can_x {
+            // Slide along Y axis
             world.beings.hot.positions[being_index][1] = try_y;
             world.beings.hot.velocities[being_index][1] = (ny * clamped_dist).clamp(-MAX_VEL, MAX_VEL);
+        } else if can_x && can_y {
+            // Both axes clear — move X (arbitrary preference)
+            world.beings.hot.positions[being_index][0] = try_x;
         } else {
-            // Completely trapped in concave corner (or bay). Bounce away!
-            // Use tick and being_index for pseudo-random deterministic jitter to simulate frustration.
+            // Completely trapped in concave corner — deterministic jitter escape
             let jitter_x = ((world.tick.wrapping_mul(being_index as u32) % 100) as f32 / 50.0) - 1.0;
             let jitter_y = (((world.tick + 1).wrapping_mul(being_index as u32) % 100) as f32 / 50.0) - 1.0;
             let esc_x = (pos[0] + jitter_x * 0.5).clamp(0.0, world.terrain.width as f32 - 1.0);

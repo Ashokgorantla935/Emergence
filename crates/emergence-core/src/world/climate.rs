@@ -94,6 +94,12 @@ pub struct Climate {
     pub global_temperature: f32,
     /// Sea level rise derived from global_temperature. Each 1.0 of temperature = +0.01 offset.
     pub water_level_offset: f32,
+    /// Wind drift direction for weather noise field (eastward drift by default).
+    pub wind_dx: f32,
+    /// Wind drift direction for weather noise field (slight southward drift by default).
+    pub wind_dy: f32,
+    /// Seed for simplex noise cloud density field.
+    cloud_seed: u32,
     seasons_enabled: bool,
     day_night_enabled: bool,
     prev_season: Season,
@@ -110,6 +116,9 @@ impl Climate {
             active_weather: None,
             global_temperature: 0.0,
             water_level_offset: 0.0,
+            wind_dx: 0.3,
+            wind_dy: 0.1,
+            cloud_seed: 12345,
             seasons_enabled: config.seasons,
             day_night_enabled: config.day_night,
             prev_season: Season::Spring,
@@ -173,6 +182,15 @@ impl Climate {
                 self.active_weather = None;
             }
         }
+
+        // Slowly rotate wind direction for dynamic weather drift
+        let angle_delta: f32 = 0.0001;
+        let cos_a = angle_delta.cos();
+        let sin_a = angle_delta.sin();
+        let new_dx = self.wind_dx * cos_a - self.wind_dy * sin_a;
+        let new_dy = self.wind_dx * sin_a + self.wind_dy * cos_a;
+        self.wind_dx = new_dx;
+        self.wind_dy = new_dy;
 
         // Stochastic weather rolls
         if self.active_weather.is_none() {
@@ -238,6 +256,54 @@ impl Climate {
         match self.season {
             Season::Winter => 0.00005,
             _ => 0.00005,
+        }
+    }
+
+    // ── Weather field (simplex noise) ─────────────────────────────────────────
+
+    /// Compute cloud density at a world cell for the current tick.
+    /// Returns a value in [0, 1]. Values > 0.6 indicate rain.
+    pub fn cloud_density(&self, x: f32, y: f32) -> f32 {
+        use noise::{NoiseFn, OpenSimplex};
+        let noise = OpenSimplex::new(self.cloud_seed);
+        let scale = 0.01_f64;
+        let t = self.tick as f64;
+        let nx = x as f64 * scale + self.wind_dx as f64 * t * 0.01;
+        let ny = y as f64 * scale + self.wind_dy as f64 * t * 0.01;
+        ((noise.get([nx, ny]) + 1.0) * 0.5) as f32
+    }
+
+    /// Returns true if the simplex noise weather field indicates rain at this cell.
+    pub fn is_raining_at(&self, x: f32, y: f32) -> bool {
+        self.cloud_density(x, y) > 0.6
+    }
+
+    /// Apply weather field effects to flora hydration.
+    /// Cells with cloud density > 0.6 receive +10 hydration.
+    /// Call every 10 ticks from tick.rs for efficiency.
+    pub fn tick_weather_field(
+        &self,
+        terrain: &super::terrain::Terrain,
+        resources: &mut super::resource::ResourceLayer,
+    ) {
+        use noise::{NoiseFn, OpenSimplex};
+        let noise = OpenSimplex::new(self.cloud_seed);
+        let scale = 0.01_f64;
+        let t = self.tick as f64;
+        let w = terrain.width as usize;
+        let h = terrain.height as usize;
+
+        for y in 0..h {
+            for x in 0..w {
+                let nx = x as f64 * scale + self.wind_dx as f64 * t * 0.01;
+                let ny = y as f64 * scale + self.wind_dy as f64 * t * 0.01;
+                let density = ((noise.get([nx, ny]) + 1.0) * 0.5) as f32;
+                if density > 0.6 {
+                    let idx = y * w + x;
+                    resources.flora_hydration[idx] =
+                        resources.flora_hydration[idx].saturating_add(10);
+                }
+            }
         }
     }
 

@@ -67,7 +67,12 @@ pub fn tick(world: &mut World) {
         world.resources.tick_flora(&world.terrain, world.tick);
     }
 
-    // 2c. Extraction tick — drain underground deposits every 30 ticks
+    // 2c. Weather field: rain boosts flora hydration (every 10 ticks)
+    if world.tick % 10 == 0 {
+        world.climate.tick_weather_field(&world.terrain, &mut world.resources);
+    }
+
+    // 2d. Extraction tick — drain underground deposits every 30 ticks
     if world.tick % 30 == 0 {
         world.terrain.tick_extraction();
     }
@@ -535,6 +540,11 @@ pub fn tick(world: &mut World) {
                 (world.beings.hot.needs[i][NEED_WARMTH] + 0.002).min(1.0);
             world.beings.hot.needs[i][NEED_SAFETY] =
                 (world.beings.hot.needs[i][NEED_SAFETY] + 0.001).min(1.0);
+        }
+        // Rain comfort penalty: outdoor beings in rain lose warmth, driving them toward shelter
+        if world.climate.is_raining_at(pos[0], pos[1]) && !world.terrain.shelter[cidx] {
+            world.beings.hot.needs[i][NEED_WARMTH] =
+                (world.beings.hot.needs[i][NEED_WARMTH] - 0.002).max(0.0);
         }
         // Purpose satisfaction for high-status beings with nearby observers
         let status = world.beings.derived_status(i);

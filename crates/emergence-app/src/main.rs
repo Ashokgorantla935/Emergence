@@ -10,7 +10,7 @@ use emergence_viewer::animation::AnimationManager;
 use emergence_viewer::audio::{AudioContext, BiomeAmbience, SoundEngine};
 use emergence_viewer::camera::Camera;
 use emergence_viewer::dashboard::Dashboard;
-use emergence_viewer::inspector::{Inspector, SettlementData, aggregate_settlement, show_settlement_panel};
+use emergence_viewer::inspector::{Inspector, SettlementData, aggregate_settlement, show_settlement_panel, load_tech_icons};
 use emergence_viewer::observation::kingdom::KingdomDetector;
 use emergence_viewer::observation::kingdom_panel::KingdomPanel;
 use emergence_viewer::observation::news_feed_system::NewsFeedSystem;
@@ -105,6 +105,7 @@ struct App {
     camera: Camera,
     inspector: Inspector,
     settlement_inspect: Option<SettlementData>,
+    tech_icons: Option<egui::TextureHandle>,
     dashboard: Dashboard,
 
     // Speed controls (replaces old TimeControls)
@@ -314,6 +315,7 @@ impl App {
             camera: Camera::new(256.0, 256.0),
             inspector: Inspector::new(),
             settlement_inspect: None,
+            tech_icons: None,
             dashboard: Dashboard::new(),
             speed: SpeedControls::new(),
             screen: ScreenState::LaunchOverlay,
@@ -1716,7 +1718,17 @@ impl ApplicationHandler for App {
 
                     // Settlement inspector panel (opens when clicking empty ground)
                     if let Some(ref data) = self.settlement_inspect {
-                        let still_open = show_settlement_panel(&self.egui_ctx, data);
+                        if self.tech_icons.is_none() {
+                            self.tech_icons = load_tech_icons(
+                                &self.egui_ctx,
+                                "assets/textures/tech_icons_spritesheet.png",
+                            );
+                        }
+                        let still_open = show_settlement_panel(
+                            &self.egui_ctx,
+                            data,
+                            self.tech_icons.as_ref(),
+                        );
                         if !still_open {
                             self.settlement_inspect = None;
                         }

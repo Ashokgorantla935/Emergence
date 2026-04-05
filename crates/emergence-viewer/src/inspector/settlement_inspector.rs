@@ -130,6 +130,16 @@ const TECH_DEFS: &[(&str, u32)] = &[
     ("Medicine",    TECH_MEDICINE),
 ];
 
+/// Icon position (col, row) in the 10x10 tech_icons_spritesheet for each tech.
+const TECH_ICON_POS: &[(usize, usize)] = &[
+    (0, 0), // Fishing
+    (1, 0), // Smelting
+    (2, 1), // Masonry
+    (3, 0), // Agriculture
+    (4, 1), // Weaving
+    (5, 1), // Medicine
+];
+
 fn structure_name(st: u8) -> &'static str {
     match st {
         1 => "Campfire",
@@ -151,9 +161,28 @@ fn structure_name(st: u8) -> &'static str {
 
 const TICKS_PER_YEAR: f32 = 28800.0;
 
+/// Load the tech icons spritesheet as an egui texture.
+/// Returns None if the file cannot be opened or decoded.
+pub fn load_tech_icons(ctx: &egui::Context, path: &str) -> Option<egui::TextureHandle> {
+    let img = image::open(path).ok()?;
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    let pixels: Vec<egui::Color32> = rgba
+        .pixels()
+        .map(|p| egui::Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3]))
+        .collect();
+    let color_image = egui::ColorImage { size: [w as usize, h as usize], pixels };
+    Some(ctx.load_texture("tech_icons", color_image, egui::TextureOptions::NEAREST))
+}
+
 /// Render the settlement inspector as a floating egui Window.
 /// Returns false if the panel was closed (user clicked X).
-pub fn show_settlement_panel(ctx: &egui::Context, data: &SettlementData) -> bool {
+/// Pass `tech_icons` for graphical tech rendering; falls back to text if None.
+pub fn show_settlement_panel(
+    ctx: &egui::Context,
+    data: &SettlementData,
+    tech_icons: Option<&egui::TextureHandle>,
+) -> bool {
     let mut open = true;
 
     egui::Window::new("Settlement")
@@ -183,14 +212,50 @@ pub fn show_settlement_panel(ctx: &egui::Context, data: &SettlementData) -> bool
 
             ui.separator();
             ui.heading(egui::RichText::new("Knowledge").strong());
-            for (name, bit) in TECH_DEFS {
-                let discovered = data.techs & bit != 0;
-                let (label, color) = if discovered {
-                    (format!("✓ {name}"), egui::Color32::from_rgb(80, 220, 80))
-                } else {
-                    (format!("✗ {name}"), egui::Color32::from_rgb(100, 100, 110))
-                };
-                ui.colored_label(color, label);
+
+            if let Some(tex) = tech_icons {
+                // Icon grid rendering
+                let icon_size = egui::vec2(24.0, 24.0);
+                const COLS: f32 = 10.0;
+                const ROWS: f32 = 10.0;
+                ui.horizontal_wrapped(|ui| {
+                    for (i, (name, bit)) in TECH_DEFS.iter().enumerate() {
+                        let discovered = data.techs & bit != 0;
+                        let (icon_col, icon_row) = TECH_ICON_POS[i];
+
+                        let u0 = icon_col as f32 / COLS;
+                        let v0 = icon_row as f32 / ROWS;
+                        let u1 = u0 + 1.0 / COLS;
+                        let v1 = v0 + 1.0 / ROWS;
+                        let uv = egui::Rect::from_min_max(egui::pos2(u0, v0), egui::pos2(u1, v1));
+
+                        let tint = if discovered {
+                            egui::Color32::WHITE
+                        } else {
+                            egui::Color32::from_rgba_premultiplied(60, 60, 60, 180)
+                        };
+
+                        let img = egui::Image::new(egui::load::SizedTexture::new(
+                            tex.id(),
+                            egui::vec2(icon_size.x, icon_size.y),
+                        ))
+                        .uv(uv)
+                        .tint(tint);
+
+                        ui.add(img).on_hover_text(*name);
+                    }
+                });
+            } else {
+                // Fallback: text labels
+                for (name, bit) in TECH_DEFS {
+                    let discovered = data.techs & bit != 0;
+                    let (label, color) = if discovered {
+                        (format!("✓ {name}"), egui::Color32::from_rgb(80, 220, 80))
+                    } else {
+                        (format!("✗ {name}"), egui::Color32::from_rgb(100, 100, 110))
+                    };
+                    ui.colored_label(color, label);
+                }
             }
 
             if !data.structures.is_empty() {

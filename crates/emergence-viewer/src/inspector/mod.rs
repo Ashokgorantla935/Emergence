@@ -1,5 +1,5 @@
 pub mod settlement_inspector;
-pub use settlement_inspector::{SettlementData, aggregate_settlement, show_settlement_panel};
+pub use settlement_inspector::{SettlementData, aggregate_settlement, show_settlement_panel, load_tech_icons};
 
 use emergence_core::being::data::{
     Beings, BeingState,

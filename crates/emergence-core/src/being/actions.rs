@@ -678,8 +678,12 @@ pub fn score_actions(
             }
             Action::SeekShelter => {
                 let shelter_pos = find_nearest_shelter(pos, radius, terrain);
-                target_pos = shelter_pos;
-                if target_pos.is_none() {
+                if let Some(mut t) = shelter_pos {
+                    // Jitter so they cluster AROUND the shelter organically
+                    t[0] += (rng.f32() - 0.5) * 1.5;
+                    t[1] += (rng.f32() - 0.5) * 1.5;
+                    target_pos = Some(t);
+                } else {
                     score *= 0.1; // no shelter nearby, heavily penalize
                 }
             }
@@ -689,13 +693,20 @@ pub fn score_actions(
                 // Flee AWAY from danger
                 if gx.abs() > 0.01 || gy.abs() > 0.01 {
                     target_pos = Some([pos[0] - gx * 10.0, pos[1] - gy * 10.0]);
+                } else {
+                    // Fallback to random blind run when spooked but gradient is flat
+                    let angle = rng.f32() * std::f32::consts::TAU;
+                    target_pos = Some([pos[0] + angle.cos() * 8.0, pos[1] + angle.sin() * 8.0]);
                 }
             }
             Action::Explore => {
                 // Use cached scent gradient, move AWAY (toward unexplored)
                 let [gx, gy] = local.gradients[CH_SCENT];
                 if gx.abs() > 0.01 || gy.abs() > 0.01 {
-                    target_pos = Some([pos[0] - gx * 8.0, pos[1] - gy * 8.0]);
+                    let mut t = [pos[0] - gx * 8.0, pos[1] - gy * 8.0];
+                    t[0] += (rng.f32() - 0.5) * 1.5;
+                    t[1] += (rng.f32() - 0.5) * 1.5;
+                    target_pos = Some(t);
                 } else {
                     // Random direction
                     let angle = rng.f32() * std::f32::consts::TAU;
@@ -709,20 +720,29 @@ pub fn score_actions(
                     if let Some(herd_pos) = find_nearest_same_species(
                         pos, being_index, beings.hot.creature_type[being_index], beings, &nearby
                     ) {
-                        target_pos = Some(herd_pos);
+                        let mut t = herd_pos;
+                        t[0] += (rng.f32() - 0.5) * 1.5;
+                        t[1] += (rng.f32() - 0.5) * 1.5;
+                        target_pos = Some(t);
                         score *= 1.5; // herding boost so it competes with wandering
                     } else {
                         // No same-species visible: follow comfort gradient or wander outward to find herd
                         let [gx, gy] = local.gradients[CH_COMFORT];
                         if gx.abs() > 0.01 || gy.abs() > 0.01 {
-                            target_pos = Some([pos[0] + gx * 3.0, pos[1] + gy * 3.0]);
+                            let mut t = [pos[0] + gx * 3.0, pos[1] + gy * 3.0];
+                            t[0] += (rng.f32() - 0.5) * 1.5;
+                            t[1] += (rng.f32() - 0.5) * 1.5;
+                            target_pos = Some(t);
                         }
                     }
                 } else {
                     // Humans and wolves: use cached comfort gradient
                     let [gx, gy] = local.gradients[CH_COMFORT];
                     if gx.abs() > 0.01 || gy.abs() > 0.01 {
-                        target_pos = Some([pos[0] + gx * 3.0, pos[1] + gy * 3.0]);
+                        let mut t = [pos[0] + gx * 3.0, pos[1] + gy * 3.0];
+                        t[0] += (rng.f32() - 0.5) * 1.5;
+                        t[1] += (rng.f32() - 0.5) * 1.5;
+                        target_pos = Some(t);
                     }
                 }
             }
@@ -1075,6 +1095,10 @@ fn apply_species_behavior(
                     let [gx, gy] = local.gradients[CH_DANGER];
                     if gx.abs() > 0.01 || gy.abs() > 0.01 {
                         *target_pos = Some([pos[0] - gx * 15.0, pos[1] - gy * 15.0]);
+                    } else {
+                        // Fallback to blind run
+                        let angle = rng.f32() * std::f32::consts::TAU;
+                        *target_pos = Some([pos[0] + angle.cos() * 12.0, pos[1] + angle.sin() * 12.0]);
                     }
                 }
                 // Direct predator in range: always flee at learned flee score

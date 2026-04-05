@@ -539,6 +539,50 @@ pub fn tick(world: &mut World) {
         }
     }
 
+    // 5f-1b. Spatial separation: gentle anti-piling for humans only
+    {
+        let count = world.beings.hot.count;
+        let tw = world.terrain.width as f32;
+        let th = world.terrain.height as f32;
+
+        for i in 0..count {
+            if world.beings.hot.states[i] != BeingState::Awake { continue; }
+            if world.beings.hot.creature_type[i] != 0 { continue; } // humans only
+
+            let pos_i = world.beings.hot.positions[i];
+            let mut push_x = 0.0f32;
+            let mut push_y = 0.0f32;
+            let mut neighbors = 0u32;
+
+            for j in 0..count {
+                if i == j { continue; }
+                if world.beings.hot.states[j] != BeingState::Awake { continue; }
+                if world.beings.hot.creature_type[j] != 0 { continue; } // humans only
+
+                let pos_j = world.beings.hot.positions[j];
+                let dx = pos_i[0] - pos_j[0];
+                let dy = pos_i[1] - pos_j[1];
+                let dist_sq = dx * dx + dy * dy;
+
+                if dist_sq < 0.16 && dist_sq > 0.0001 { // within 0.4 units
+                    let dist = dist_sq.sqrt();
+                    let strength = 0.02 * (0.4 - dist) / 0.4;
+                    push_x += dx / dist * strength;
+                    push_y += dy / dist * strength;
+                    neighbors += 1;
+                }
+            }
+
+            if neighbors > 0 {
+                let new_x = (pos_i[0] + push_x).clamp(0.0, tw - 1.0);
+                let new_y = (pos_i[1] + push_y).clamp(0.0, th - 1.0);
+                if !world.terrain.is_water_f(new_x, new_y) {
+                    world.beings.hot.positions[i] = [new_x, new_y];
+                }
+            }
+        }
+    }
+
     // 5f-2. Causal memory association window check for humans only (fauna skip)
     for i in 0..being_count {
         if world.beings.hot.states[i] == BeingState::Dead {

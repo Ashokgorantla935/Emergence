@@ -243,6 +243,20 @@ pub fn tick(world: &mut World) {
         });
     }
 
+    // 5e-pre. Enhanced fauna boids — update velocities and positions before action scoring
+    crate::being::fauna_boids::tick_fauna_boids(
+        &mut world.beings.hot,
+        &world.terrain,
+        &world.resources,
+    );
+    // Fauna breeding check (every 200 ticks)
+    if world.tick % 200 == 0 {
+        crate::being::fauna_boids::tick_fauna_breeding(
+            &mut world.beings.hot,
+            &world.terrain,
+        );
+    }
+
     // 5e. Score actions (parallel via rayon)
     let base_seed = world.rng.u64(..);
     let being_count = world.beings.hot.count;

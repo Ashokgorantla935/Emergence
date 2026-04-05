@@ -152,6 +152,7 @@ pub struct SaveFile {
     pub hunger_zero_ticks: Vec<u16>,
     pub warmth_zero_ticks: Vec<u16>,
     pub freeze_ticks: Vec<u16>,
+    pub flee_ticks: Vec<u8>,
     pub pending_action: Vec<u8>,
     pub pending_context: Vec<u16>,
     pub pending_tick: Vec<u32>,
@@ -323,6 +324,7 @@ impl SaveFile {
             hunger_zero_ticks: beings.hot.hunger_zero_ticks.clone(),
             warmth_zero_ticks: beings.hot.warmth_zero_ticks.clone(),
             freeze_ticks: beings.hot.freeze_ticks.clone(),
+            flee_ticks: beings.hot.flee_ticks.clone(),
             pending_action: beings.hot.pending_action.clone(),
             pending_context: beings.hot.pending_context.clone(),
             pending_tick: beings.hot.pending_tick.clone(),
@@ -423,6 +425,7 @@ impl SaveFile {
             flora_stage: vec![0u8; len],
             flora_hydration: vec![0u8; len],
             flora_energy: vec![0u16; len],
+            fire: vec![0u8; len],
         };
 
         // Reconstruct Climate
@@ -468,6 +471,7 @@ impl SaveFile {
             beings.hot.hunger_zero_ticks.push(self.hunger_zero_ticks[i]);
             beings.hot.warmth_zero_ticks.push(self.warmth_zero_ticks[i]);
             beings.hot.freeze_ticks.push(self.freeze_ticks[i]);
+            beings.hot.flee_ticks.push(if i < self.flee_ticks.len() { self.flee_ticks[i] } else { 0u8 });
             beings.hot.pending_action.push(self.pending_action[i]);
             beings.hot.pending_context.push(self.pending_context[i]);
             beings.hot.pending_tick.push(self.pending_tick[i]);

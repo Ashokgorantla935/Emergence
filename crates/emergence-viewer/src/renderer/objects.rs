@@ -549,8 +549,15 @@ fn rebuild_chunk_standalone(
 
             // Organic jitter so resources aren't mathematically locked to absolute cell grid-centers
             let hash = cell_hash(x, y);
-            let jitter_x = ((hash % 17) as f32 / 17.0 - 0.5) * 0.6;
-            let jitter_y = (((hash >> 4) % 17) as f32 / 17.0 - 0.5) * 0.6;
+
+            // Density thinning: only render ~40% of resource sprites so organic
+            // terrain patches show through the oversized wheat/stone carpets.
+            if hash % 10 > 3 {
+                continue;
+            }
+
+            let jitter_x = ((hash % 17) as f32 / 17.0 - 0.5) * 0.8;
+            let jitter_y = (((hash >> 4) % 17) as f32 / 17.0 - 0.5) * 0.8;
 
             instances.push(ObjectInstance {
                 position:   [x as f32 + 0.5 + jitter_x, y as f32 + 0.5 + jitter_y],

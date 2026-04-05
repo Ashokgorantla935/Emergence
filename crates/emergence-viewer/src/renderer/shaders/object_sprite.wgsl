@@ -86,6 +86,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let c = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
 
+    // Despill: discard AI-generated checkerboard background pixels
+    // Targets high-luminosity, low-saturation bands (grey/white grid + blurred edges)
+    let max_c = max(c.r, max(c.g, c.b));
+    let min_c = min(c.r, min(c.g, c.b));
+    let saturation = max_c - min_c;
+    if (max_c > 0.75 && saturation < 0.08) {
+        discard;
+    }
+
     // Pixel size in atlas UV space (atlas is 1024x1024)
     let px = 1.0 / 1024.0;
 

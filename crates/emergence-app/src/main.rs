@@ -1671,7 +1671,7 @@ impl ApplicationHandler for App {
                     .map(|w| {
                         let w = w.read().unwrap();
                         let pop = (0..w.beings.hot.count)
-                            .filter(|&i| w.beings.hot.states[i] != emergence_core::being::data::BeingState::Dead)
+                            .filter(|&i| w.beings.hot.states[i] != emergence_core::being::data::BeingState::Dead && w.beings.hot.creature_type[i] == emergence_core::being::data::CreatureType::Human as u8)
                             .count() as u32;
                         (w.tick, pop)
                     })
@@ -1777,6 +1777,15 @@ impl ApplicationHandler for App {
                 if let Some(jump) = self.minimap.jump_target.take() {
                     self.camera.position = jump;
                 }
+
+                // Render Top Bar (FPS, Population, Tick)
+                emergence_viewer::screen_state::TopBar::show(
+                    &self.egui_ctx,
+                    &mut self.speed,
+                    tick,
+                    population,
+                    &PerfStats { gpu_managed: false, fps: self.current_fps, tps: self.current_tps, mem_mb: 0.0 },
+                );
 
                 } // end if self.ui_visible
 

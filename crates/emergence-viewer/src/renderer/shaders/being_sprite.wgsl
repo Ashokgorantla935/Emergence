@@ -133,6 +133,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     var texel = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
 
+    // Despill: discard AI-generated checkerboard background pixels
+    let max_c = max(texel.r, max(texel.g, texel.b));
+    let min_c = min(texel.r, min(texel.g, texel.b));
+    let saturation = max_c - min_c;
+    if (max_c > 0.75 && saturation < 0.08) {
+        discard;
+    }
+
     let alpha = texel.a;
 
     // Pixel size in atlas UV space

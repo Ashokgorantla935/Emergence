@@ -388,9 +388,9 @@ pub fn score_actions(
         }
 
         // Build allowed action indices for Boltzmann selection
-        // Appease, BuildClean, and Farm are excluded from brain q_values (brain has 22 outputs); handled post-Boltzmann.
+        // Appease, BuildClean, Farm, and Assault are excluded from brain q_values (brain has 22 outputs); handled post-Boltzmann.
         let mut allowed_indices: Vec<u8> = Action::ALL.iter()
-            .filter(|&&a| a != Action::Appease && a != Action::BuildClean && a != Action::Farm)
+            .filter(|&&a| a != Action::Appease && a != Action::BuildClean && a != Action::Farm && a != Action::Assault)
             .map(|&a| a as u8)
             .collect();
 
@@ -2160,7 +2160,8 @@ mod tests {
         // Deposit food trail signal nearby
         signals.deposit(SignalChannel::FoodTrail, spawn_pos[0] as u32 + 3, spawn_pos[1] as u32, 3.0);
 
-        let result = score_actions(0, &beings, &terrain, &resources, &signals, &climate, &spatial, &mut rng);
+        let knowledge = crate::world::knowledge::KnowledgeGrid::new(64, 64);
+        let result = score_actions(0, &beings, &terrain, &resources, &signals, &climate, &spatial, &knowledge, &mut rng);
         assert_eq!(
             result.action,
             Action::SeekFood,
@@ -2201,7 +2202,8 @@ mod tests {
         // Deposit danger signal nearby
         signals.deposit(SignalChannel::Danger, spawn_pos[0] as u32 + 2, spawn_pos[1] as u32, 5.0);
 
-        let result = score_actions(0, &beings, &terrain, &resources, &signals, &climate, &spatial, &mut rng);
+        let knowledge = crate::world::knowledge::KnowledgeGrid::new(64, 64);
+        let result = score_actions(0, &beings, &terrain, &resources, &signals, &climate, &spatial, &knowledge, &mut rng);
         assert_eq!(
             result.action,
             Action::Flee,

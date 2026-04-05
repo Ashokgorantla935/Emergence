@@ -640,7 +640,7 @@ pub fn tick(world: &mut World) {
     // 7b. Geographic tech discovery (every 100 ticks) — humans only
     if world.tick % 100 == 0 {
         use crate::world::knowledge::{
-            TECH_AGRICULTURE, TECH_FISHING, TECH_MASONRY, TECH_SMELTING,
+            TECH_AGRICULTURE, TECH_FISHING, TECH_MASONRY, TECH_SMELTING, TECH_WEAVING, TECH_MEDICINE,
         };
         use crate::world::terrain::Biome;
         use crate::world::resource::FoodType;
@@ -696,6 +696,23 @@ pub fn tick(world: &mut World) {
                 && !world.knowledge.has_tech(x, y, TECH_AGRICULTURE)
             {
                 world.knowledge.deposit_tech(x, y, TECH_AGRICULTURE, 10);
+            }
+
+            // WEAVING: near grassland flora (hemp/flax simulation)
+            if matches!(world.terrain.biome[idx], Biome::Grassland) && world.resources.flora_stage[idx] >= 1 {
+                if !world.knowledge.has_tech(x, y, TECH_WEAVING) {
+                    world.knowledge.deposit_tech(x, y, TECH_WEAVING, 8);
+                }
+            }
+
+            // MEDICINE: near flora + extreme grief signal (desperate herbal experimentation)
+            if world.resources.flora_stage[idx] >= 2 {
+                let grief = world.signals.read(SignalChannel::Grief, x.min(world.signals.width - 1), y.min(world.signals.height - 1));
+                if grief > 0.5 {
+                    if !world.knowledge.has_tech(x, y, TECH_MEDICINE) {
+                        world.knowledge.deposit_tech(x, y, TECH_MEDICINE, 6);
+                    }
+                }
             }
         }
     }

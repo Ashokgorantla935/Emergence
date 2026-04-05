@@ -86,8 +86,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let c = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
 
-    // Magenta chroma-key discard (#FF00FF) — threshold for compression artifacts
-    if (c.r > 0.9 && c.g < 0.15 && c.b > 0.9) { discard; }
+    // Magenta chroma-key discard (#FF00FF). We use a wider tolerance 
+    // to catch anti-aliased light pink/white fringes from AI upscaling.
+    if (c.r > 0.75 && c.g < 0.45 && c.b > 0.75) { discard; }
     // Pixel size in atlas UV space (atlas is 1024x1024)
     let px = 1.0 / 1024.0;
 

@@ -2101,18 +2101,7 @@ impl ApplicationHandler for App {
                                 25 => Some(("Assaulting",    egui::Color32::from_rgb(220, 40,  40))),
                                 _  => None,
                             };
-                            // Also surface extreme emotional states even for mundane actions
-                            let entry = action_entry.or_else(|| {
-                                let grief = world.beings.hot.emotions[i][4];
-                                let fear  = world.beings.hot.emotions[i][0];
-                                if grief > 0.8 {
-                                    Some(("Grief",  egui::Color32::from_rgb(120, 140, 255)))
-                                } else if fear > 0.8 {
-                                    Some(("Terror", egui::Color32::from_rgb(255, 100, 50)))
-                                } else {
-                                    None
-                                }
-                            });
+                            let entry = action_entry;
                             let Some((text, color)) = entry else { continue };
                             let pos = world.beings.hot.positions[i];
                             self.toast_queue.push(text, pos, color);

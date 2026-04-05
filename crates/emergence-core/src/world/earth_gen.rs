@@ -159,17 +159,17 @@ pub fn classify_earth_biome(
         return Biome::Forest;
     }
     if subtropical_north || subtropical_south {
-        if moist < 0.30 {
+        if moist < 0.10 {
             return Biome::Desert;
         }
         return Biome::Grassland;
     }
     if equatorial {
-        if moist > 0.55 {
+        if moist > 0.65 {
             return Biome::Forest; // tropical rainforest
         }
-        if moist < 0.25 {
-            return Biome::Desert; // Sahara / Arabian band
+        if moist < 0.05 {
+            return Biome::Desert; // Sahara bounds
         }
         return Biome::Grassland; // savanna
     }

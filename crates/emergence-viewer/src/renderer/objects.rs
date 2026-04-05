@@ -103,21 +103,17 @@ const fn uv_190(col: u8, row: u8) -> [f32; 2] {
 }
 
 // Flora 190 spritesheet grid mapping (8x8):
-// Row 0: Temperate trees
-// Row 1: Snow/ice pines and conifers
-// Row 2: Cherry blossom / exotic trees
-// Row 3: Mushrooms and fungi
-// Row 4-5: Dark swamp / dead trees
-// Row 6: Bushes and shrubs
-// Row 7: Ground cover, round bushes, saplings
-const FLORA_190_TEMPERATE: &[[f32; 2]] = &[uv_190(0,0), uv_190(1,0), uv_190(2,0), uv_190(3,0), uv_190(4,0), uv_190(5,0), uv_190(6,0), uv_190(7,0)];
-const FLORA_190_SNOW: &[[f32; 2]] = &[uv_190(0,1), uv_190(1,1), uv_190(2,1), uv_190(3,1), uv_190(4,1), uv_190(5,1), uv_190(6,1), uv_190(7,1)];
-const FLORA_190_EXOTIC: &[[f32; 2]] = &[uv_190(0,2), uv_190(1,2), uv_190(2,2), uv_190(3,2)];
-const FLORA_190_FUNGI: &[[f32; 2]] = &[uv_190(0,3), uv_190(1,3), uv_190(2,3), uv_190(3,3), uv_190(4,3), uv_190(5,3)];
-const FLORA_190_SWAMP: &[[f32; 2]] = &[uv_190(0,4), uv_190(1,4), uv_190(2,4), uv_190(3,4)];
-const FLORA_190_DEAD: &[[f32; 2]] = &[uv_190(0,5), uv_190(1,5), uv_190(2,5), uv_190(3,5)];
-const FLORA_190_BUSH: &[[f32; 2]] = &[uv_190(0,6), uv_190(1,6), uv_190(2,6), uv_190(3,6), uv_190(4,6), uv_190(5,6)];
-const FLORA_190_GROUND: &[[f32; 2]] = &[uv_190(0,7), uv_190(1,7), uv_190(2,7), uv_190(3,7)];
+// We map them tightly to green variants based on coordinates
+// Row 0 has pure green trees mostly at indices 2-6
+const FLORA_190_TEMPERATE: &[[f32; 2]] = &[uv_190(2,0), uv_190(3,0), uv_190(4,0), uv_190(5,0), uv_190(6,0), uv_190(7,0)];
+const FLORA_190_SNOW: &[[f32; 2]] = &[uv_190(1,1), uv_190(2,1), uv_190(3,1), uv_190(5,1), uv_190(6,1)];
+const FLORA_190_EXOTIC: &[[f32; 2]] = &[uv_190(0,2), uv_190(1,2), uv_190(2,2)]; // Not used by default
+const FLORA_190_FUNGI: &[[f32; 2]] = &[uv_190(0,3), uv_190(1,3), uv_190(2,3), uv_190(4,3)]; 
+const FLORA_190_SWAMP: &[[f32; 2]] = &[uv_190(1,4), uv_190(2,4), uv_190(3,4)];
+const FLORA_190_DEAD: &[[f32; 2]] = &[uv_190(1,5), uv_190(2,5), uv_190(3,5)];
+// Bushes: use safer green rows
+const FLORA_190_BUSH: &[[f32; 2]] = &[uv_190(1,6), uv_190(3,6), uv_190(5,6)];
+const FLORA_190_GROUND: &[[f32; 2]] = &[uv_190(1,7), uv_190(2,7), uv_190(3,7)];
 
 // Architecture 190 grid (8x8):
 // Row 0: Huts, tents, basic shelters, caches, oilpump, farm

@@ -27,7 +27,7 @@ pub fn decay_needs(beings: &mut Beings, climate: &Climate) {
 
         // Thermodynamics: Emotional Entropy (Decay trauma so they don't flee forever)
         for emo_idx in 0..6 {
-            beings.hot.emotions[i][emo_idx] = (beings.hot.emotions[i][emo_idx] - 0.001).max(0.0);
+            beings.hot.emotions[i][emo_idx] = (beings.hot.emotions[i][emo_idx] - 0.05).max(0.0);
         }
 
         let ct = beings.hot.creature_type[i];

@@ -1538,6 +1538,41 @@ impl ApplicationHandler for App {
                     }
                 }
 
+                // Action particles: Hunt → combat sparks, Build → dust, Mourn → blue soul.
+                // Throttle: bucket by being index % 5 so each being fires once per 5 ticks.
+                // Viewport cull: skip beings outside camera view.
+                {
+                    let bucket = (world.tick % 5) as usize;
+                    let beings = &world.beings;
+                    let cx = self.camera.position[0];
+                    let cy = self.camera.position[1];
+                    let half_w = self.camera.zoom * self.camera.aspect * 0.5 + 4.0;
+                    let half_h = self.camera.zoom * 0.5 + 4.0;
+                    for i in (bucket..beings.hot.count).step_by(5) {
+                        use emergence_core::being::data::BeingState;
+                        if beings.hot.states[i] == BeingState::Dead {
+                            continue;
+                        }
+                        let pos = beings.hot.positions[i];
+                        // Viewport cull
+                        if (pos[0] - cx).abs() > half_w || (pos[1] - cy).abs() > half_h {
+                            continue;
+                        }
+                        let kind = match beings.hot.pending_action[i] {
+                            14 => Some(EmitterKind::ActionHunt),   // Hunt
+                            7  => Some(EmitterKind::ActionHunt),   // TakeFood (also combat)
+                            16 => Some(EmitterKind::ActionBuild),  // Build
+                            23 => Some(EmitterKind::ActionBuild),  // BuildClean
+                            11 => Some(EmitterKind::ActionMourn),  // Mourn
+                            18 => Some(EmitterKind::ActionMourn),  // Memorialize
+                            _  => None,
+                        };
+                        if let Some(k) = kind {
+                            ps.emit(k, pos, world.tick);
+                        }
+                    }
+                }
+
                 ps.update(&rs.queue);
             }
             self.profile_accum.particle_ms += particle_t.elapsed().as_secs_f32() * 1000.0;

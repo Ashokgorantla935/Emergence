@@ -897,8 +897,10 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
             } else {
                 world.beings.hot.velocities[being_index] = [vx, vy];
             }
+        } else {
+            // Fish hit land boundary — ZERO velocity to prevent ghosting
+            world.beings.hot.velocities[being_index] = [0.0, 0.0];
         }
-        // Fish stay in water — don't move to land
     } else if !is_water {
         let old_pos = world.beings.hot.positions[being_index];
         world.beings.hot.positions[being_index] = [new_x, new_y];
@@ -922,6 +924,9 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
                 }
             }
         }
+    } else {
+        // Land being hit water boundary — ZERO velocity to prevent ghosting
+        world.beings.hot.velocities[being_index] = [0.0, 0.0];
     }
 }
 

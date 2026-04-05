@@ -593,6 +593,36 @@ fn rebuild_chunk_standalone(
                     if terrain.build_progress[idx] < StructureType::OilPump.build_ticks() { a = 0.5; }
                     (UV_MW_DECOR_30, [0.15, 0.15, 0.15], 1.2, a) // dark industrial
                 }
+                StructureType::NomadTent => {
+                    let mut a = 1.0;
+                    if terrain.build_progress[idx] < StructureType::NomadTent.build_ticks() { a = 0.5; }
+                    (UV_LEAN_TO, [0.8, 0.6, 0.3], 1.2, a)
+                }
+                StructureType::WoodenHouse => {
+                    let mut a = 1.0;
+                    if terrain.build_progress[idx] < StructureType::WoodenHouse.build_ticks() { a = 0.5; }
+                    (UV_HUT, [0.7, 0.5, 0.3], 1.3, a)
+                }
+                StructureType::StoneHouse => {
+                    let mut a = 1.0;
+                    if terrain.build_progress[idx] < StructureType::StoneHouse.build_ticks() { a = 0.5; }
+                    (UV_MW_DECOR_30, [0.6, 0.6, 0.65], 1.3, a)
+                }
+                StructureType::Windmill => {
+                    let mut a = 1.0;
+                    if terrain.build_progress[idx] < StructureType::Windmill.build_ticks() { a = 0.5; }
+                    (UV_HUT, [0.9, 0.85, 0.7], 1.4, a)
+                }
+                StructureType::Keep => {
+                    let mut a = 1.0;
+                    if terrain.build_progress[idx] < StructureType::Keep.build_ticks() { a = 0.5; }
+                    (UV_MW_DECOR_30, [0.5, 0.5, 0.55], 1.4, a)
+                }
+                StructureType::Castle => {
+                    let mut a = 1.0;
+                    if terrain.build_progress[idx] < StructureType::Castle.build_ticks() { a = 0.5; }
+                    (UV_HUT, [0.8, 0.8, 0.9], 1.5, a)
+                }
                 StructureType::None => continue,
                 _ => (UV_MW_DECOR_30, [0.7, 0.7, 0.7], 1.0, 1.0),
             };

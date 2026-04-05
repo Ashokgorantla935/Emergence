@@ -51,6 +51,19 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
             }
         }
         Action::SeekFood => {
+            // Eat from communal stockpile if near home and hungry
+            if let Some(home) = world.beings.cold.home_settlement_pos[being_index] {
+                let hx = home[0].min(world.terrain.width - 1);
+                let hy = home[1].min(world.terrain.height - 1);
+                let hidx = (hy * world.terrain.width + hx) as usize;
+                let dist_home = ((pos[0] - hx as f32).powi(2) + (pos[1] - hy as f32).powi(2)).sqrt();
+                if dist_home < 3.0 && world.terrain.stockpile_food[hidx] > 0.1 {
+                    let eat = 0.2f32.min(world.terrain.stockpile_food[hidx]);
+                    world.terrain.stockpile_food[hidx] -= eat;
+                    world.beings.hot.needs[being_index][NEED_HUNGER] =
+                        (world.beings.hot.needs[being_index][NEED_HUNGER] + eat * 5.0).min(1.0);
+                }
+            }
             if let Some(target) = action.target_pos {
                 let dist = distance(pos, target);
                 if dist < 1.5 {
@@ -97,6 +110,17 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     world.beings.hot.needs[being_index][NEED_SAFETY] =
                         (world.beings.hot.needs[being_index][NEED_SAFETY] + 0.005).min(1.0);
                     trigger_emotion(&mut world.beings, being_index, EMO_CONTENTMENT, 0.05);
+                    // Deposit carried food into communal stockpile when arriving home
+                    if let Some(home) = world.beings.cold.home_settlement_pos[being_index] {
+                        let hx = home[0].min(world.terrain.width - 1);
+                        let hy = home[1].min(world.terrain.height - 1);
+                        let hidx = (hy * world.terrain.width + hx) as usize;
+                        let dist_home = ((pos[0] - hx as f32).powi(2) + (pos[1] - hy as f32).powi(2)).sqrt();
+                        if dist_home < 2.0 && world.beings.hot.carry[being_index][0] > 0.01 {
+                            world.terrain.stockpile_food[hidx] += world.beings.hot.carry[being_index][0];
+                            world.beings.hot.carry[being_index][0] = 0.0;
+                        }
+                    }
                 } else {
                     move_toward(world, being_index, target, speed);
                 }
@@ -791,6 +815,55 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     }
                 }
             }
+        }
+        Action::Farm => {
+            // Progress farming on current tile — 30-tick build transforms grassland to FarmField.
+            use crate::world::resource::FoodType;
+            let cx = pos[0] as u32;
+            let cy = pos[1] as u32;
+            let cidx = (cy.min(world.terrain.height - 1) * world.terrain.width
+                + cx.min(world.terrain.width - 1)) as usize;
+
+            if cidx < world.terrain.structure.len()
+                && world.terrain.structure[cidx] == 0
+                && !world.terrain.water[cidx]
+            {
+                world.terrain.build_progress[cidx] += 1;
+                if world.terrain.build_progress[cidx] >= 30 {
+                    // Transform to FarmField
+                    world.terrain.structure[cidx] = StructureType::FarmField as u8;
+                    world.terrain.build_progress[cidx] = 30;
+                    world.terrain.structure_age[cidx] = 0;
+                    world.terrain.builder_id[cidx] = being_index as u32;
+
+                    // Massive food boost
+                    world.resources.food_capacity[cidx] = 50.0;
+                    world.resources.regrowth_rate[cidx] = 0.5;
+                    world.resources.food_type[cidx] = FoodType::Grain;
+                    world.resources.food[cidx] = 50.0; // start fully stocked
+
+                    // Clear flora
+                    world.resources.flora_stage[cidx] = 0;
+                    world.resources.flora_energy[cidx] = 0;
+                    world.resources.flora_hydration[cidx] = 0;
+
+                    trigger_emotion(&mut world.beings, being_index, EMO_JOY, 0.4);
+                    world.beings.hot.needs[being_index][NEED_PURPOSE] =
+                        (world.beings.hot.needs[being_index][NEED_PURPOSE] + 0.15).min(1.0);
+
+                    world.events.push(Event {
+                        tick: world.tick,
+                        actor_id: being_index as u32,
+                        target_id: StructureType::FarmField as u32,
+                        event_type: EventType::BuildingComplete,
+                        location: [cx as f32, cy as f32],
+                        cause: crate::sim::world_state::EventCause::None,
+                    });
+                }
+            }
+        }
+        Action::Assault => {
+            // Wave 27: Assault execution implemented in Wave 27 spec.
         }
         Action::BuildClean => {
             // Clean energy infrastructure: deposits massive Comfort signal, no Toxin.

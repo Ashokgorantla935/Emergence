@@ -4,6 +4,7 @@ use super::data::*;
 use super::projection::projection_bonus;
 use crate::sim::spatial::SpatialIndex;
 use crate::world::climate::Climate;
+use crate::world::knowledge::KnowledgeGrid;
 use crate::world::resource::ResourceLayer;
 use crate::world::signal::{SignalChannel, SignalGrid};
 use crate::world::terrain::{Biome, Terrain};
@@ -45,10 +46,12 @@ pub enum Action {
     PickUpStone = 21,    // pick up stone near mountain
     Appease = 22,        // tribute economy: transfer food to threatening being to buy safety
     BuildClean = 23,     // build clean energy infrastructure — no Toxin, high cooperation benefit
+    Farm = 24,           // terraform grassland to FarmField — requires TECH_AGRICULTURE near home
+    Assault = 25,        // bold warriors march on enemy territory and strike
 }
 
 impl Action {
-    pub const ALL: [Action; 24] = [
+    pub const ALL: [Action; 26] = [
         Action::Wander,
         Action::SeekFood,
         Action::SeekShelter,
@@ -73,6 +76,8 @@ impl Action {
         Action::PickUpStone,
         Action::Appease,
         Action::BuildClean,
+        Action::Farm,
+        Action::Assault,
     ];
 
     pub fn from_u8(v: u8) -> Self {
@@ -100,6 +105,8 @@ impl Action {
             21 => Action::PickUpStone,
             22 => Action::Appease,
             23 => Action::BuildClean,
+            24 => Action::Farm,
+            25 => Action::Assault,
             _ => Action::Wander,
         }
     }
@@ -166,6 +173,7 @@ pub fn score_actions(
     signals: &SignalGrid,
     climate: &Climate,
     spatial: &SpatialIndex,
+    knowledge: &KnowledgeGrid,
     rng: &mut fastrand::Rng,
 ) -> ScoredAction {
     let pos = beings.hot.positions[being_index];
@@ -328,6 +336,15 @@ pub fn score_actions(
             }
         }
 
+        // ── Full inventory: return home to deposit into communal stockpile ──────
+        let carry_cap = beings.carry_capacity(being_index);
+        if beings.hot.carry[being_index][0] > 0.8 * carry_cap
+            && beings.cold.home_settlement_pos[being_index].is_some()
+        {
+            q_values[Action::SeekFood as usize] *= 0.1; // suppress further foraging
+            q_values[Action::SeekShelter as usize] += 80.0; // strong pull home to deposit
+        }
+
         // ── Global famine pressure: exponential aggression when food signal is very low ──────
         let food_signal = local.values[CH_FOOD];
         let global_food_scarcity = if food_signal < 0.05 {
@@ -371,9 +388,9 @@ pub fn score_actions(
         }
 
         // Build allowed action indices for Boltzmann selection
-        // Appease and BuildClean are excluded from brain q_values (brain has 22 outputs); handled post-Boltzmann.
+        // Appease, BuildClean, and Farm are excluded from brain q_values (brain has 22 outputs); handled post-Boltzmann.
         let mut allowed_indices: Vec<u8> = Action::ALL.iter()
-            .filter(|&&a| a != Action::Appease && a != Action::BuildClean)
+            .filter(|&&a| a != Action::Appease && a != Action::BuildClean && a != Action::Farm)
             .map(|&a| a as u8)
             .collect();
 
@@ -534,6 +551,10 @@ pub fn score_actions(
             Action::Appease => {}
             // BuildClean is handled via post-Boltzmann override; unreachable during Boltzmann.
             Action::BuildClean => {}
+            // Farm is handled via post-Boltzmann override; unreachable during Boltzmann.
+            Action::Farm => {}
+            // Assault is handled via post-Boltzmann override (Wave 27); unreachable during Boltzmann.
+            Action::Assault => {}
         }
 
         // ── Appease override: evaluate post-Boltzmann ─────────────────────────
@@ -607,6 +628,61 @@ pub fn score_actions(
                         relationship_contrib: 0.0,
                         signal_contrib,
                     };
+                }
+            }
+        }
+
+        // ── Farm override: humans with TECH_AGRICULTURE terraform nearby grassland ─
+        {
+            use crate::world::knowledge::TECH_AGRICULTURE;
+            let kcx = cx.min(knowledge.width - 1);
+            let kcy = cy.min(knowledge.height - 1);
+            if knowledge.has_tech(kcx, kcy, TECH_AGRICULTURE) {
+                if let Some(home) = beings.cold.home_settlement_pos[being_index] {
+                    let dist_home = ((pos[0] - home[0] as f32).powi(2)
+                        + (pos[1] - home[1] as f32).powi(2))
+                        .sqrt();
+                    if dist_home <= 20.0 {
+                        let cell_idx = (cy.min(terrain.height - 1) * terrain.width
+                            + cx.min(terrain.width - 1)) as usize;
+                        let on_grassland = cell_idx < terrain.biome.len()
+                            && terrain.biome[cell_idx] == Biome::Grassland;
+                        let no_structure = cell_idx < terrain.structure.len()
+                            && terrain.structure[cell_idx] == 0;
+                        if on_grassland && no_structure {
+                            let food_sec = needs[NEED_FOOD_SECURITY];
+                            let farm_score = (1.0 - food_sec) * 2.0 + 1.0;
+                            if farm_score > chosen_q {
+                                let signal_levels = local.values;
+                                let biome = terrain.biome_at(cx, cy);
+                                let nearby_count = nearby.len().min(255) as u8;
+                                let context_hash = compute_context_hash(
+                                    biome,
+                                    signal_levels,
+                                    nearby_count,
+                                    climate.day_phase(),
+                                );
+                                let causal = beings.cold.causal_memories[being_index]
+                                    .score_for_action(Action::Farm as u8, context_hash);
+                                let signal_contrib = local
+                                    .values
+                                    .iter()
+                                    .map(|v| v.abs())
+                                    .fold(0.0f32, f32::max);
+                                return ScoredAction {
+                                    action: Action::Farm,
+                                    score: farm_score,
+                                    target_being: None,
+                                    target_pos: Some(pos),
+                                    runner_up_action: chosen_action as u8,
+                                    runner_up_score: chosen_q,
+                                    causal_contrib: causal.abs(),
+                                    relationship_contrib: 0.0,
+                                    signal_contrib,
+                                };
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -957,6 +1033,14 @@ pub fn score_actions(
             }
             Action::BuildClean => {
                 // Fauna never build clean energy. Humans handled via post-Boltzmann override.
+                score = 0.0;
+            }
+            Action::Farm => {
+                // Fauna never farm. Humans handled via post-Boltzmann override.
+                score = 0.0;
+            }
+            Action::Assault => {
+                // Fauna never assault. Humans handled via post-Boltzmann override (Wave 27).
                 score = 0.0;
             }
         }
@@ -1610,6 +1694,12 @@ fn logistic_need_score(action: Action, needs: &[f32; MAX_NEEDS]) -> f32 {
 
         // Clean energy: purpose and belonging driven, moderate urgency
         Action::BuildClean => logistic(purpose_urgency, 6.0, 0.5) * 0.6,
+
+        // Agriculture: food-security driven
+        Action::Farm => logistic(1.0 - needs[NEED_FOOD_SECURITY], 6.0, 0.5) * 0.8,
+
+        // Assault: handled via post-Boltzmann override (Wave 27)
+        Action::Assault => 0.0,
     }
 }
 

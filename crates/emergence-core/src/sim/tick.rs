@@ -393,6 +393,7 @@ pub fn tick(world: &mut World) {
                 &world.signals,
                 &world.climate,
                 &world.spatial,
+                &world.knowledge,
                 &mut rng,
             ))
         })
@@ -412,6 +413,7 @@ pub fn tick(world: &mut World) {
             let lock = match new_action.action {
                 Action::Wander => 40,
                 Action::Build | Action::Craft => 120,
+                Action::Farm => 60, // committed to farming
                 Action::Flee => 5,
                 Action::SeekFood => 60,
                 Action::SeekShelter => 80,

@@ -94,18 +94,40 @@ fn biome_base_color(biome_id: u32) -> vec4<f32> {
     }
 }
 
-// Per-cell brightness variation using cell coords (stable, not per-pixel).
-// Uses integer bitwise hashing (Wang-style) to avoid f32 sin() precision loss
-// at large world coordinates (>2048). sin-based hashes collapse at large inputs
-// because GPU f32 argument reduction loses precision, making all cells uniform.
-fn cell_brightness(world_pos: vec2<f32>) -> f32 {
-    let p = vec2<u32>(u32(i32(floor(world_pos.x))), u32(i32(floor(world_pos.y))));
+// Smooth organic pixel-fractal noise without f32 sin() precision loss at large coords.
+// Uses Wang hashing at integer grid vertices perfectly smoothly interpolating.
+fn hash(p: vec2<u32>) -> f32 {
     var h: u32 = p.x * 2654435761u ^ p.y * 2246822519u;
     h = (h >> 16u) ^ h;
     h = h * 2654435761u;
     h = (h >> 16u) ^ h;
-    let hf = f32(h & 0xFFFFu) / 65535.0;
-    return 0.97 + hf * 0.06; // [0.97, 1.03] — +/- 3% per cell
+    return f32(h & 0xFFFFu) / 65535.0;
+}
+
+fn organic_noise(p: vec2<f32>) -> f32 {
+    let pi = vec2<u32>(u32(i32(floor(p.x))), u32(i32(floor(p.y))));
+    let pf = fract(p);
+    
+    // Smoothstep interpolation
+    let u = pf * pf * (3.0 - 2.0 * pf);
+    
+    let a = hash(pi + vec2<u32>(0u, 0u));
+    let b = hash(pi + vec2<u32>(1u, 0u));
+    let c = hash(pi + vec2<u32>(0u, 1u));
+    let d = hash(pi + vec2<u32>(1u, 1u));
+    
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+fn cell_brightness(world_pos: vec2<f32>) -> f32 {
+    // Large organic swoops mixed with micro-organic details
+    let n1 = organic_noise(world_pos * 0.4);
+    let n2 = organic_noise(world_pos * 1.5);
+    let combined = n1 * 0.7 + n2 * 0.3;
+    
+    // Instead of jumping by 6% abruptly per square grid block,
+    // this flows organically across pixels: [-0.03, +0.03].
+    return 0.94 + combined * 0.12; 
 }
 
 // Water depth color based on elevation (water threshold ~0.25-0.30 in terrain gen).
@@ -407,10 +429,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Blend LOD 0 → LOD 1 when zoom in [0, 1)
     if (zoom < 1.0) {
         let blended = mix(color_lod0, color_lod1, zoom);
-        // Use LOD 0 structure detail in first half, LOD 1 in second half
-        let struct_lod = select(1u, 0u, zoom < 0.5);
-        let with_struct = apply_structure(blended, structure_id, in.build_progress, in.world_pos, t, struct_lod);
-        return apply_illumination(with_struct, illumination, comfort);
+        return apply_illumination(blended, illumination, comfort);
     }
 
     // ── LOD 2: Close zoom — LOD 1 + shore foam + forest canopy ───────────
@@ -453,7 +472,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Blend LOD 1 → LOD 2 when zoom in [1, 2]
     let blend_12 = zoom - 1.0;
     let blended = mix(color_lod1, color_lod2, blend_12);
-    let struct_lod = select(1u, 2u, blend_12 >= 0.5);
-    let with_struct = apply_structure(blended, structure_id, in.build_progress, in.world_pos, t, struct_lod);
-    return apply_illumination(with_struct, illumination, comfort);
+    return apply_illumination(blended, illumination, comfort);
 }

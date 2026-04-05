@@ -159,13 +159,16 @@ impl TerrainRenderer {
         terrain: &Terrain,
         cam_x: f32, cam_y: f32, cam_zoom: f32, cam_aspect: f32,
     ) {
-        if (self.last_cam_x - cam_x).abs() < 1.0 && 
+        let all_clean = !self.visible_chunks.is_empty() &&
+            self.visible_chunks.iter().all(|k| {
+                self.chunks.get(k).map_or(false, |c| !c.is_dirty)
+            });
+        if (self.last_cam_x - cam_x).abs() < 1.0 &&
            (self.last_cam_y - cam_y).abs() < 1.0 &&
-           (self.last_cam_zoom - cam_zoom).abs() < 1.0 && 
+           (self.last_cam_zoom - cam_zoom).abs() < 1.0 &&
            (self.last_cam_aspect - cam_aspect).abs() < 0.01 &&
-           !self.visible_chunks.is_empty() && 
-           self.chunks.get(&self.visible_chunks[0]).map_or(false, |c| !c.is_dirty) {
-            // Nothing to do if viewport didn't change and visible chunks aren't dirty
+           all_clean {
+            // Nothing to do if viewport didn't change and all visible chunks are clean
             return;
         }
         
@@ -189,7 +192,7 @@ impl TerrainRenderer {
 
         // Calculate overlapping chunks (div_euclid handles negative coords correctly)
         let cx_min = (x_min as i32).div_euclid(CHUNK_SIZE as i32);
-        let cx_max = (x_max as i32).div_euclid(CHUNK_SIZE as i32);
+        let cx_max = ((x_max.saturating_sub(1)) as i32).div_euclid(CHUNK_SIZE as i32);
         let cy_min = (y_min as i32).div_euclid(CHUNK_SIZE as i32);
         let cy_max = (y_max as i32).div_euclid(CHUNK_SIZE as i32);
 
@@ -302,13 +305,15 @@ impl TerrainRenderer {
         }
 
         // Evict off-screen chunks to prevent memory leaks when panning
+        let center_x = (cx_min as f32 + cx_max as f32) / 2.0;
+        let center_y = (cy_min as f32 + cy_max as f32) / 2.0;
         self.chunks.retain(|&key, _| {
             // Keep chunk if it is visible or within a small margin (e.g., 2 chunks)
-            let dx = (key.0 - (cx_min as i32 + cx_max as i32) / 2).abs();
-            let dy = (key.1 - (cy_min as i32 + cy_max as i32) / 2).abs();
-            let margin = 2;
-            let bounds_x = (cx_max as i32 - cx_min as i32) / 2 + margin;
-            let bounds_y = (cy_max as i32 - cy_min as i32) / 2 + margin;
+            let dx = (key.0 as f32 - center_x).abs();
+            let dy = (key.1 as f32 - center_y).abs();
+            let margin = 2.0_f32;
+            let bounds_x = (cx_max as f32 - cx_min as f32) / 2.0 + margin;
+            let bounds_y = (cy_max as f32 - cy_min as f32) / 2.0 + margin;
             dx <= bounds_x && dy <= bounds_y
         });
     }

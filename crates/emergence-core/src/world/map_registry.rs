@@ -281,17 +281,17 @@ fn real_earth() -> MapDefinition {
     MapDefinition {
         id: "real_earth",
         name: "Real Earth 4K",
-        description: "Real Earth heightmap upsampled to 4096×2048. Continents, poles, latitude biomes. Civilizations begin at historical river valleys.",
+        description: "Procedural Earth at native 4096×2048. Continents, poles, latitude biomes. Civilizations begin at historical river valleys.",
         size: MapSize::Colossal,
         difficulty_rating: 4,
         elevation_source: ElevationSource::Baked {
-            data: map_assets::earth::ELEVATION_256,
-            width: 256,
-            height: 256,
+            data: map_assets::earth::ELEVATION_4096,
+            width: 4096,
+            height: 2048,
         },
         biome_rules: BiomeRules::LatitudeDriven { equator_y: 0.5 },
         water_placement: WaterPlacement::BakedMask {
-            data: map_assets::earth::WATER_256,
+            data: map_assets::earth::WATER_MASK_4096,
         },
         spawn_points: vec![
             SpawnPoint { name: "Fertile Crescent", center: (2624.0, 675.0),  radius: 160.0, fertility: 2.0 },
@@ -425,9 +425,9 @@ mod tests {
         let def = get(MapId::RealEarth);
         match def.elevation_source {
             ElevationSource::Baked { data, width, height } => {
-                assert_eq!(width, 256);
-                assert_eq!(height, 256);
-                assert_eq!(data.len(), 65536, "real earth elevation must be 256*256 bytes");
+                assert_eq!(width, 4096);
+                assert_eq!(height, 2048);
+                assert_eq!(data.len(), 4096 * 2048, "real earth elevation must be 4096*2048 bytes");
             }
             _ => panic!("RealEarth should have Baked elevation source"),
         }
@@ -438,7 +438,7 @@ mod tests {
         let def = get(MapId::RealEarth);
         match def.water_placement {
             WaterPlacement::BakedMask { data } => {
-                assert_eq!(data.len(), 8192, "real earth water mask must be 256*256/8 = 8192 bytes");
+                assert_eq!(data.len(), 4096 * 2048 / 8, "real earth water mask must be 4096*2048/8 bytes");
             }
             _ => panic!("RealEarth should have BakedMask water placement"),
         }

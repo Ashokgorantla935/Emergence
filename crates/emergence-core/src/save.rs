@@ -158,6 +158,7 @@ pub struct SaveFile {
     pub pending_needs: Vec<[f32; 16]>,
     pub tool_quality: Vec<f32>,         // renamed from combat_modifier
     pub signal_style: Vec<u8>,          // cultural fingerprint
+    pub cultural_frequency: Vec<f32>,   // continuous tribal identity [0.0, 1.0]
     pub states: Vec<u8>,
     pub creature_type: Vec<u8>,
     pub fauna_params: Vec<[f32; 6]>,
@@ -323,6 +324,7 @@ impl SaveFile {
             pending_needs: beings.hot.pending_needs.clone(),
             tool_quality: beings.hot.tool_quality.clone(),
             signal_style: beings.hot.signal_style.clone(),
+            cultural_frequency: beings.hot.cultural_frequency.clone(),
             states: beings.hot.states.iter().map(|s| *s as u8).collect(),
             creature_type: beings.hot.creature_type.clone(),
             fauna_params: beings.hot.fauna_params.clone(),
@@ -462,6 +464,9 @@ impl SaveFile {
             beings.hot.pending_needs.push(self.pending_needs[i]);
             beings.hot.tool_quality.push(self.tool_quality[i]);
             beings.hot.signal_style.push(self.signal_style[i]);
+            beings.hot.cultural_frequency.push(
+                if i < self.cultural_frequency.len() { self.cultural_frequency[i] } else { fastrand::f32() }
+            );
             beings.hot.states.push(being_state_from_u8(self.states[i]));
             beings.hot.creature_type.push(self.creature_type[i]);
             beings.hot.fauna_params.push(

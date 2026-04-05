@@ -179,6 +179,7 @@ pub struct BeingsHot {
     pub pending_needs: Vec<[f32; MAX_NEEDS]>,
     pub tool_quality: Vec<f32>,   // renamed from combat_modifier; 0=bare hands, 1=excellent tool
     pub signal_style: Vec<u8>,    // cultural fingerprint: personality_hash % 8
+    pub cultural_frequency: Vec<f32>,  // continuous tribal identity [0.0, 1.0]
     pub personalities: Vec<[f32; 5]>,
     pub states: Vec<BeingState>,
     pub creature_type: Vec<u8>,   // 0=Human. See CreatureType enum. 1 byte per being.
@@ -282,6 +283,7 @@ impl Beings {
                 pending_needs: Vec::new(),
                 tool_quality: Vec::new(),
                 signal_style: Vec::new(),
+                cultural_frequency: Vec::new(),
                 personalities: Vec::new(),
                 states: Vec::new(),
                 creature_type: Vec::new(),
@@ -336,6 +338,7 @@ impl Beings {
         // Derive signal_style from personality hash (deterministic, computed once at spawn)
         let style = personality_to_style(&personality);
         self.hot.signal_style.push(style);
+        self.hot.cultural_frequency.push(fastrand::f32()); // random for new wanderers; override to 0.0 for fauna, or to inherited value for births
         self.hot.personalities.push(personality);
         self.hot.states.push(BeingState::Awake);
         self.hot.creature_type.push(CreatureType::Human as u8); // default to Human; override after spawn for fauna

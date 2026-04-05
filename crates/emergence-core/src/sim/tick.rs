@@ -1024,6 +1024,11 @@ fn process_births(world: &mut World) {
             world.beings.cold.last_birth_tick[pb] = tick;
         }
         let idx = world.beings.spawn(pos, personality, lifespan, parents);
+        // Inherit cultural frequency: average of parents + tiny mutation (±0.01 range)
+        let freq_a = if pa < world.beings.hot.cultural_frequency.len() { world.beings.hot.cultural_frequency[pa] } else { 0.5 };
+        let freq_b = if pb < world.beings.hot.cultural_frequency.len() { world.beings.hot.cultural_frequency[pb] } else { 0.5 };
+        let mutation = (world.rng.f32() - 0.5) * 0.02;
+        world.beings.hot.cultural_frequency[idx] = ((freq_a + freq_b) / 2.0 + mutation).clamp(0.0, 1.0);
         world.beings.cold.genotypes[idx] = child_genotype;
         // Initialize brain with inherited Q-baselines seeded into output biases
         world.beings.hot.brain_weights[idx] = init_human_brain_with_genotype(

@@ -11,11 +11,14 @@ pub enum SignalChannel {
     Anger = 5,
     Scent = 6,
     Crime = 7,
+    Fertilization = 8,   // chemical agriculture: boosts flora regrowth near settlements
+    CultureFreq = 9,     // wave warfare: encodes cultural identity frequency
+    CultureStrength = 10, // wave warfare: encodes cultural signal amplitude
     // Toxin moved to ClimateGrid (downsampled) to avoid Metal's 128MB storage buffer limit.
 }
 
 impl SignalChannel {
-    pub const COUNT: usize = 8;
+    pub const COUNT: usize = 11;
 
     pub fn from_index(i: usize) -> Option<Self> {
         match i {
@@ -27,6 +30,9 @@ impl SignalChannel {
             5 => Some(Self::Anger),
             6 => Some(Self::Scent),
             7 => Some(Self::Crime),
+            8 => Some(Self::Fertilization),
+            9 => Some(Self::CultureFreq),
+            10 => Some(Self::CultureStrength),
             _ => None,
         }
     }
@@ -37,8 +43,8 @@ pub struct SignalGrid {
     pub height: u32,
     pub channels: Vec<Vec<f32>>,
     pub wrap_horizontal: bool,
-    decay_factors: [f32; 8],
-    diffusion_rates: [f32; 8],
+    decay_factors: [f32; 11],
+    diffusion_rates: [f32; 11],
     scratch: Vec<f32>, // reusable scratch buffer for single-threaded path (kept for tests)
     /// Per-channel scratch buffers for parallel diffusion (one per channel).
     par_scratch: Vec<Vec<f32>>,
@@ -68,6 +74,9 @@ impl SignalGrid {
             0.9965,     // Anger: half-life 200
             0.9931,     // Scent: half-life 100
             0.9931,     // Crime: half-life 100
+            0.9965,     // Fertilization: half-life 200 (settles near settlements)
+            0.9931,     // CultureFreq: half-life 100
+            0.9931,     // CultureStrength: half-life 100
             // Toxin moved to ClimateGrid
         ];
 
@@ -80,6 +89,9 @@ impl SignalGrid {
             0.12,     // Anger: fast
             0.06,     // Scent: moderate
             0.12,     // Crime: fast
+            0.04,     // Fertilization: slow (concentrates near farm sites)
+            0.06,     // CultureFreq: moderate
+            0.08,     // CultureStrength: moderate
             // Toxin moved to ClimateGrid
         ];
 

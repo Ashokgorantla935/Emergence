@@ -65,6 +65,24 @@ pub fn tick(world: &mut World) {
     // 2b. Flora cellular automata (every 60 ticks)
     if world.tick % 60 == 0 {
         world.resources.tick_flora(&world.terrain, world.tick);
+
+        // Chemical agriculture: fertilization signal boosts food regrowth
+        let tw = world.terrain.width as usize;
+        let th = world.terrain.height as usize;
+        for y in 0..th {
+            for x in 0..tw {
+                let idx = y * tw + x;
+                let sx = (x as u32).min(world.signals.width - 1);
+                let sy = (y as u32).min(world.signals.height - 1);
+                let fert = world.signals.read(SignalChannel::Fertilization, sx, sy);
+                if fert > 0.3 {
+                    let boost = (fert * 10.0).min(5.0);
+                    world.resources.food[idx] = (world.resources.food[idx]
+                        + world.resources.regrowth_rate[idx] * boost)
+                        .min(world.resources.food_capacity[idx] * 3.0);
+                }
+            }
+        }
     }
 
     // 2c. Weather field: rain boosts flora hydration (every 10 ticks)
@@ -80,6 +98,47 @@ pub fn tick(world: &mut World) {
     // 2e. Fire cellular automaton — every tick when active
     if world.resources.has_active_fire() {
         world.resources.tick_fire(&mut world.terrain, &mut world.signals, world.tick);
+    }
+
+    // 2f. Territory expansion CA (every 100 ticks) — Wave 27
+    if world.tick % 100 == 0 {
+        let tw = world.terrain.width as usize;
+        let th = world.terrain.height as usize;
+        let mut claims: Vec<(usize, u32)> = Vec::new();
+
+        for y in 0..th {
+            for x in 0..tw {
+                let idx = y * tw + x;
+                if world.terrain.territory[idx] != 0 { continue; }
+                if world.terrain.water[idx] { continue; }
+
+                let neighbors = [
+                    (x.wrapping_sub(1), y),
+                    (x + 1, y),
+                    (x, y.wrapping_sub(1)),
+                    (x, y + 1),
+                ];
+                for (nx, ny) in neighbors {
+                    if nx < tw && ny < th {
+                        let nidx = ny * tw + nx;
+                        let tribe = world.terrain.territory[nidx];
+                        if tribe != 0 {
+                            let hash = nx.wrapping_mul(2654435761)
+                                ^ ny.wrapping_mul(2246822519)
+                                ^ (world.tick as usize);
+                            if hash % 100 < 10 {
+                                claims.push((idx, tribe));
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for (idx, tribe) in claims {
+            world.terrain.territory[idx] = tribe;
+        }
     }
 
     // 3. Signal tick — reaction every tick, diffusion staggered: 1 channel per tick.
@@ -413,7 +472,8 @@ pub fn tick(world: &mut World) {
             let lock = match new_action.action {
                 Action::Wander => 40,
                 Action::Build | Action::Craft => 120,
-                Action::Farm => 60, // committed to farming
+                Action::Farm => 60,
+                Action::Assault => 100, // committed to war march
                 Action::Flee => 5,
                 Action::SeekFood => 60,
                 Action::SeekShelter => 80,
@@ -721,6 +781,75 @@ pub fn tick(world: &mut World) {
 
     // 5g. Deposit emotion signals
     deposit_emotion_signals(&world.beings, &mut world.signals);
+
+    // 5h-1. Chemical agriculture: beings deposit Fertilization near home
+    if world.tick % 10 == 0 {
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] != BeingState::Awake { continue; }
+            if world.beings.hot.creature_type[i] != 0 { continue; }
+
+            let pos = world.beings.hot.positions[i];
+            let sx = (pos[0] as u32).min(world.signals.width - 1);
+            let sy = (pos[1] as u32).min(world.signals.height - 1);
+
+            if let Some(home) = world.beings.cold.home_settlement_pos[i] {
+                let dist = ((pos[0] - home[0] as f32).powi(2) + (pos[1] - home[1] as f32).powi(2)).sqrt();
+                if dist < 10.0 {
+                    world.signals.deposit(SignalChannel::Fertilization, sx, sy, 0.05);
+                }
+            }
+        }
+    }
+
+    // 5h-2. Cultural wave emission: each human radiates cultural identity
+    if world.tick % 5 == 0 {
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] != BeingState::Awake { continue; }
+            if world.beings.hot.creature_type[i] != 0 { continue; }
+
+            let pos = world.beings.hot.positions[i];
+            let sx = (pos[0] as u32).min(world.signals.width - 1);
+            let sy = (pos[1] as u32).min(world.signals.height - 1);
+
+            world.signals.deposit(SignalChannel::CultureStrength, sx, sy, 0.1);
+            let freq = world.beings.hot.cultural_frequency[i];
+            world.signals.deposit(SignalChannel::CultureFreq, sx, sy, freq * 0.1);
+        }
+    }
+
+    // 5h-3. Wave interference warfare: cultural dissonance at borders spikes Danger
+    if world.tick % 20 == 0 {
+        let sw = world.signals.width as usize;
+        let sh = world.signals.height as usize;
+        let mut danger_deposits: Vec<(u32, u32, f32)> = Vec::new();
+
+        for y in 1..(sh - 1) {
+            for x in 1..(sw - 1) {
+                let idx = y * sw + x;
+                let strength = world.signals.channels[SignalChannel::CultureStrength as usize][idx];
+                if strength < 0.2 { continue; }
+                let freq = world.signals.channels[SignalChannel::CultureFreq as usize][idx];
+
+                let neighbors = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)];
+                for (nx, ny) in neighbors {
+                    let nidx = ny * sw + nx;
+                    let n_strength = world.signals.channels[SignalChannel::CultureStrength as usize][nidx];
+                    let n_freq = world.signals.channels[SignalChannel::CultureFreq as usize][nidx];
+
+                    if n_strength > 0.2 {
+                        let dissonance = (freq - n_freq).abs();
+                        if dissonance > 0.1 {
+                            danger_deposits.push((x as u32, y as u32, dissonance * 2.0));
+                        }
+                    }
+                }
+            }
+        }
+
+        for (x, y, amount) in danger_deposits {
+            world.signals.deposit(SignalChannel::Danger, x, y, amount);
+        }
+    }
 
     // 6. Birth checks (Phase 6: no_reproduction law)
     if !world.laws.no_reproduction {

@@ -247,6 +247,20 @@ impl ResourceLayer {
         const SAPLING_TO_ADULT: u16 = 800;
         const ADULT_TO_ELDER: u16 = 2000;
 
+        // Thermodynamic deforestation: heavy foot traffic crushes flora
+        for idx in 0..len {
+            if self.flora_stage[idx] == 0 { continue; }
+            if terrain.trample[idx] > 100 {
+                let hash = idx.wrapping_mul(2654435761) ^ (world_tick as usize);
+                if hash % 100 < 15 {
+                    self.flora_energy[idx] = self.flora_energy[idx].saturating_sub(200);
+                    if self.flora_energy[idx] == 0 && self.flora_stage[idx] > 0 {
+                        self.flora_stage[idx] -= 1;
+                    }
+                }
+            }
+        }
+
         for idx in 0..len {
             let stage = self.flora_stage[idx];
             if stage == 0 { continue; }

@@ -309,30 +309,24 @@ fn body_build_index(beings: &Beings, i: usize) -> u32 {
 }
 
 /// Atlas UV for a fauna sprite.
-/// Mapped directly to generator.rs procedural output:
-///   Hawk:   (12, 0)
-///   Deer:   (12, 4)
-///   Wolf:   (12, 8)
-///   Bear:   (12, 12)
-///   Rabbit: (12, 16)
-///   Fish:   (12, 20)
-///   Snake:  (12, 24)
+/// fauna_spritesheet.png: 8 cols × 6 rows. Each species occupies one full row (8 frames).
+///   Row 0: small quadrupeds — Wolf, Deer, Rabbit
+///   Row 1: large quadrupeds — Bear
+///   Row 2: birds            — Hawk
+///   Row 3: aquatic          — Fish
+///   Row 4: reptiles         — Snake
+///   Row 5: (unused)
 fn fauna_atlas_uv(ct: CreatureType, frame: u8) -> [f32; 2] {
-    // fauna_spritesheet.png: 8 cols × 6 rows.
-    // Row 0: Hawk(0-3), Deer(4-7)
-    // Row 1: Wolf(0-3), Bear(4-7)
-    // Row 2: Rabbit(0-3), Fish(4-7)
-    // Row 3: Snake(0-3)
-    let (col_base, row): (u32, u32) = match ct {
-        CreatureType::Hawk   => (0, 0),
-        CreatureType::Deer   => (4, 0),
-        CreatureType::Wolf   => (0, 1),
-        CreatureType::Bear   => (4, 1),
-        CreatureType::Rabbit => (0, 2),
-        CreatureType::Fish   => (4, 2),
-        CreatureType::Snake  => (0, 3),
-        CreatureType::Human  => (0, 0),  // fallback
+    let row: u32 = match ct {
+        CreatureType::Wolf   => 0,
+        CreatureType::Deer   => 0,
+        CreatureType::Rabbit => 0,
+        CreatureType::Bear   => 1,
+        CreatureType::Hawk   => 2,
+        CreatureType::Fish   => 3,
+        CreatureType::Snake  => 4,
+        CreatureType::Human  => 0,  // fallback
     };
-    let col = col_base + (frame as u32 % 4);
+    let col = frame as u32 % 8;
     [col as f32 * FAUNA_CELL_U, row as f32 * FAUNA_CELL_V]
 }

@@ -133,12 +133,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     var texel = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
 
-    // Chroma-key discard for AI-generated fauna sprites
-    let lum = dot(texel.rgb, vec3<f32>(0.299, 0.587, 0.114));
-    if (lum > 0.85 && texel.a > 0.9) {
-        discard;
-    }
-
     let alpha = texel.a;
 
     // Pixel size in atlas UV space

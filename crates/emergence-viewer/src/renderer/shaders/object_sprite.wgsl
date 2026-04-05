@@ -42,18 +42,19 @@ struct InstanceInput {
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    @location(0) uv:         vec2<f32>,
-    @location(1) tint:       vec3<f32>,
-    @location(2) alpha:      f32,
-    @location(3) atlas_uv:   vec2<f32>,   // cell top-left for outline clamping
-    @location(4) atlas_size: vec2<f32>,   // cell size for outline clamping
+    @location(0) uv:          vec2<f32>,
+    @location(1) tint:        vec3<f32>,
+    @location(2) alpha:       f32,
+    @location(3) atlas_uv:    vec2<f32>,   // cell top-left for outline clamping
+    @location(4) atlas_size:  vec2<f32>,   // cell size for outline clamping
+    @location(5) screen_size: f32,
 };
 
 @vertex
 fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
-    let screen_size = max(inst.size * camera.pixels_per_unit, 6.0);
-    let final_size  = screen_size / camera.pixels_per_unit;
+    let screen_size = inst.size * camera.pixels_per_unit;
+    let final_size  = inst.size;  // native world-space size, no inflation
     var world_pos   = inst.world_pos;
 
     // Tree wind sway: only for sprites in atlas row 21 (decor tree/bush).
@@ -73,13 +74,16 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     out.uv        = inst.atlas_uv + (vertex.vertex_pos + 0.5) * inst.atlas_size;
     out.tint      = inst.tint;
     out.alpha     = inst.alpha;
-    out.atlas_uv  = inst.atlas_uv;
-    out.atlas_size = inst.atlas_size;
+    out.atlas_uv   = inst.atlas_uv;
+    out.atlas_size  = inst.atlas_size;
+    out.screen_size = screen_size;
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    if (in.screen_size < 2.0) { discard; }
+
     let c = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
 
     // Pixel size in atlas UV space (atlas is 1024x1024)

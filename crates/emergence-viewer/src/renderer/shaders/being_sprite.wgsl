@@ -58,6 +58,7 @@ struct VertexOutput {
     @location(6) local_u:      f32,   // vertex U in [0,1]: 0=left, 1=right
     @location(7) atlas_uv:     vec2<f32>,  // passed through for outline sampling
     @location(8) atlas_size:   vec2<f32>,  // passed through for outline sampling
+    @location(9) screen_size:  f32,
 };
 
 // ── Vertex shader ────────────────────────────────────────────────────────────
@@ -66,9 +67,8 @@ struct VertexOutput {
 fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
 
-    // 8px minimum — smaller beings feel more numerous (WorldBox aesthetic)
-    let screen_size = max(instance.size * camera.pixels_per_unit, 8.0);
-    let final_size  = screen_size / camera.pixels_per_unit;
+    let screen_size = instance.size * camera.pixels_per_unit;
+    let final_size  = instance.size;  // native world-space size, no inflation
 
     // Walking bob: only when bob_flip != 0 (moving).
     // bob_flip encodes: sign = facing direction, magnitude = phase (game_tick * 0.18 + id * 0.72).
@@ -109,6 +109,7 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     // vertex_pos.y = -0.5 at bottom, +0.5 at top → local_v 1.0 at bottom, 0.0 at top
     out.local_v      = 0.5 - vertex.vertex_pos.y;
     out.local_u      = local_uv.x;
+    out.screen_size  = screen_size;
     return out;
 }
 
@@ -127,6 +128,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let final_rgb = in.emotion_tint * in.brightness;
         return vec4<f32>(final_rgb, in.alpha);
     }
+
+    if (in.screen_size < 2.0) { discard; }
 
     var texel = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
     let alpha = texel.a;

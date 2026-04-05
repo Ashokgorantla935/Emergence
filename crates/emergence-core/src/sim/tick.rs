@@ -370,6 +370,16 @@ pub fn tick(world: &mut World) {
             &world.terrain,
         );
     }
+    
+    // Human breeding check (every 300 ticks)
+    if world.tick % 300 == 0 {
+        crate::being::lifecycle::tick_human_breeding(
+            &mut world.beings,
+            &world.terrain,
+            &mut world.rng,
+            world.tick,
+        );
+    }
 
     // 5e-pre2a. Danger flee override — highest priority survival behavior
     for i in 0..world.beings.hot.count {

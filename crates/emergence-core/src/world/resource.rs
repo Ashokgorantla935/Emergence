@@ -86,7 +86,7 @@ impl ResourceLayer {
                     } else {
                         let ft = match biome {
                             Biome::Forest => FoodType::Berries,
-                            Biome::Grassland => FoodType::Grain,
+                            Biome::Grassland => FoodType::Berries,
                             Biome::Mountain => FoodType::Stone,
                             _ => {
                                 if base_cap > 0.0 {

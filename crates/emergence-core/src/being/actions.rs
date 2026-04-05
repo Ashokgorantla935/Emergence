@@ -325,22 +325,27 @@ pub fn score_actions(
         let currently_building = beings.hot.pending_action[being_index] == Action::Build as u8;
 
         if warmth < 0.6 || safety < 0.6 || currently_building {
-            if has_stone {
-                let cell_idx_build = (cy as usize) * (terrain.width as usize) + (cx as usize);
-                let tile_blocked = terrain.structure[cell_idx_build] != 0 || terrain.water[cell_idx_build];
-                let boost = if tile_blocked && !currently_building { 0.0 } else { 50.0 };
-                q_values[Action::Build as usize] += boost;
-                
-                // Persistence lock: if they started building, force them to finish to prevent ghost structures!
-                if currently_building && boost > 0.0 {
-                    q_values[Action::Build as usize] += 1000.0;
-                }
+            let cell_idx_build = (cy as usize) * (terrain.width as usize) + (cx as usize);
+            // Allow building on empty ground or dirt paths
+            let current_struct = terrain.structure[cell_idx_build];
+            let tile_blocked = current_struct != 0 && current_struct != crate::world::terrain::StructureType::DirtPath as u8 || terrain.water[cell_idx_build];
+            
+            let boost = if tile_blocked && !currently_building { 0.0 } else { 50.0 };
+            
+            // Allow building without stone since campfires and nomad tents cost 0.
+            q_values[Action::Build as usize] += boost;
+            
+            // Persistence lock: if they started building, force them to finish to prevent ghost structures!
+            if currently_building && boost > 0.0 {
+                q_values[Action::Build as usize] += 1000.0;
+            }
 
-                if boost == 0.0 {
-                    q_values[Action::PickUpStone as usize] += 20.0; // seek new land instead
-                }
-            } else {
-                q_values[Action::PickUpStone as usize] += 50.0;
+            if boost == 0.0 {
+                // If they can't build here, seek stone or move instead
+                q_values[Action::PickUpStone as usize] += 20.0;
+            } else if !has_stone {
+                // If they want to build advanced things, they should pickup stone eventually
+                q_values[Action::PickUpStone as usize] += 5.0;
             }
         }
 

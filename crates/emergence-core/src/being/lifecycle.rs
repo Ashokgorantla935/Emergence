@@ -382,3 +382,94 @@ mod tests {
         );
     }
 }
+
+pub fn tick_human_breeding(beings: &mut Beings, terrain: &crate::world::terrain::Terrain, rng: &mut fastrand::Rng, world_tick: u32) {
+    let mut spawns = Vec::new();
+    
+    // Only breed if total alive humans is less than 10,000 for safety
+    let mut human_count = 0;
+    for &i in &beings.hot.human_indices {
+        if beings.hot.states[i] != BeingState::Dead {
+            human_count += 1;
+        }
+    }
+    if human_count > 10000 { return; }
+    
+    for &i in &beings.hot.human_indices {
+        if beings.hot.states[i] == BeingState::Dead { continue; }
+        
+        // Basic conditions for reproduction: adult phase, fully fed, comfortable, connected
+        if beings.life_phase(i) != LifePhase::Adult { continue; }
+        if beings.hot.needs[i][crate::being::data::NEED_HUNGER] < 0.8 { continue; }
+        if beings.hot.needs[i][crate::being::data::NEED_WARMTH] < 0.6 { continue; }
+        if beings.hot.needs[i][crate::being::data::NEED_BELONGING] < 0.5 { continue; }
+        
+        // Cooldown: 1 in-game year = ~28800 ticks, but let's say 4000 ticks for quick gameplay tuning
+        if world_tick.saturating_sub(beings.cold.last_birth_tick[i]) < 4000 { continue; }
+        
+        // Need another adult human nearby with whom they have a bond
+        let pos = beings.hot.positions[i];
+        let mut partner = None;
+        for &j in &beings.hot.human_indices {
+            if i == j || beings.hot.states[j] == BeingState::Dead { continue; }
+            if beings.life_phase(j) != LifePhase::Adult { continue; }
+            if world_tick.saturating_sub(beings.cold.last_birth_tick[j]) < 4000 { continue; }
+            
+            let pos2 = beings.hot.positions[j];
+            let dx = pos[0] - pos2[0];
+            let dy = pos[1] - pos2[1];
+            if dx*dx + dy*dy < 16.0 {
+                // Must have trust relationship
+                if let Some(imp) = beings.cold.relationships[i].find(j as u32) {
+                    if imp.trust > 0.4 {
+                        partner = Some(j);
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if let Some(p) = partner {
+            // Initiate spawn!
+            let jitter_x = (rng.f32() - 0.5) * 2.0;
+            let jitter_y = (rng.f32() - 0.5) * 2.0;
+            spawns.push((
+                i,
+                p,
+                [(pos[0] + jitter_x).clamp(0.0, terrain.width as f32 - 1.0),
+                 (pos[1] + jitter_y).clamp(0.0, terrain.height as f32 - 1.0)]
+            ));
+            
+            // Apply cooldowns so they don't spawn 100 babies
+            beings.cold.last_birth_tick[i] = world_tick;
+            beings.cold.last_birth_tick[p] = world_tick;
+        }
+    }
+    
+    // Process the spawns
+    for (p1, p2, child_pos) in spawns {
+        // Average lifespan and traits plus noise
+        let life1 = beings.hot.lifespans[p1];
+        let life2 = beings.hot.lifespans[p2];
+        let child_life = ((life1 + life2) / 2) as f32 * (1.0 + (rng.f32() - 0.5) * 0.1);
+        
+        let child_personality = generate_personality(
+            beings.hot.personalities[p1],
+            beings.hot.personalities[p2],
+            rng
+        );
+        let child_geno = blend_child_genotype(beings, p1, p2, rng);
+        
+        let child_idx = beings.spawn(child_pos, child_personality, child_life as u32, [p1 as u32, p2 as u32]);
+        beings.cold.genotypes[child_idx] = child_geno;
+        beings.hot.cultural_frequency[child_idx] = beings.hot.cultural_frequency[p1]; // Inherit culture
+        
+        // Init brain for human
+        beings.hot.brain_weights[child_idx] = crate::being::data::init_human_brain(rng);
+        beings.hot.human_indices.push(child_idx);
+        
+        // Give base name
+        let new_name = crate::being::names::generate_name(rng);
+        beings.cold.names[child_idx] = new_name;
+    }
+}

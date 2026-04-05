@@ -465,6 +465,7 @@ impl App {
         }
 
         self.inspector = Inspector::new();
+        self.settlement_inspect = None;
         self.dashboard = Dashboard::new();
         self.speed = SpeedControls::new(); // reset to 1x
         self.onboarding = OnboardingTooltip::new();
@@ -530,6 +531,7 @@ impl App {
                 self.camera.position = [w as f32 / 2.0, h as f32 / 2.0];
 
                 self.inspector = Inspector::new();
+                self.settlement_inspect = None;
                 self.dashboard = Dashboard::new();
                 self.speed = SpeedControls::new();
                 self.screen = ScreenState::Playing;
@@ -784,6 +786,9 @@ impl ApplicationHandler for App {
                                         self.inspector.selected_being = None;
                                         self.inspector.follow = false;
                                     }
+                                }
+                                if key == KeyCode::Escape {
+                                    self.settlement_inspect = None;
                                 }
                             }
                             ScreenState::PauseMenu => {
@@ -1708,6 +1713,14 @@ impl ApplicationHandler for App {
 
                     // Floating inspector smart card (only when being selected)
                     self.inspector.ui_floating(&self.egui_ctx, &world.beings, &world.events, world.tick);
+
+                    // Settlement inspector panel (opens when clicking empty ground)
+                    if let Some(ref data) = self.settlement_inspect {
+                        let still_open = show_settlement_panel(&self.egui_ctx, data);
+                        if !still_open {
+                            self.settlement_inspect = None;
+                        }
+                    }
 
                     // Floating world panels (togglable via hotkeys L / K)
                     let mut viewer_laws = engine_laws_to_viewer(&world.laws);
@@ -2768,18 +2781,29 @@ impl ApplicationHandler for App {
                     // LOD 2 dots are drawn at 2.0-5.0 px/unit; full sprites above 5.0 (handled in update).
                     let being_pixels_per_unit = rs.surface_config.height as f32 / self.camera.zoom;
                     if let Some(ref being_r) = self.being_renderer {
-                        if being_r.instance_count > 0 && being_pixels_per_unit > 0.5 {
+                        let has_beings = (being_r.human_instance_count > 0 || being_r.fauna_instance_count > 0)
+                            && being_pixels_per_unit > 0.5;
+                        if has_beings {
                             render_pass.set_pipeline(&rs.sprite_pipeline);
                             render_pass.set_bind_group(0, &rs.camera_bind_group, &[]);
-                            render_pass.set_bind_group(1, &rs.entity_bind_group, &[]);
                             render_pass.set_bind_group(2, &rs.being_time_bind_group, &[]);
                             render_pass.set_vertex_buffer(0, being_r.vertex_buffer.slice(..));
-                            render_pass.set_vertex_buffer(1, being_r.instance_buffer.slice(..));
                             render_pass.set_index_buffer(
                                 being_r.index_buffer.slice(..),
                                 wgpu::IndexFormat::Uint16,
                             );
-                            render_pass.draw_indexed(0..6, 0, 0..being_r.instance_count);
+                            // Pass 1: Humans — entities.png spritesheet
+                            if being_r.human_instance_count > 0 {
+                                render_pass.set_bind_group(1, &rs.entity_bind_group, &[]);
+                                render_pass.set_vertex_buffer(1, being_r.human_instance_buffer.slice(..));
+                                render_pass.draw_indexed(0..6, 0, 0..being_r.human_instance_count);
+                            }
+                            // Pass 2: Fauna — procedural atlas (32x32 grid)
+                            if being_r.fauna_instance_count > 0 {
+                                render_pass.set_bind_group(1, &rs.atlas.bind_group, &[]);
+                                render_pass.set_vertex_buffer(1, being_r.fauna_instance_buffer.slice(..));
+                                render_pass.draw_indexed(0..6, 0, 0..being_r.fauna_instance_count);
+                            }
                         }
                     }
 

@@ -329,7 +329,7 @@ pub fn score_actions(
                 || (yi + 1 < h && terrain.biome[(yi + 1) * w + xi] == Biome::Water)
         };
         if is_on_water || near_water {
-            q_values[Action::Explore as usize] += 200.0;
+            q_values[Action::Cluster as usize] += 200.0;
             q_values[Action::Bond as usize] = 0.0;
             q_values[Action::CreateMark as usize] = 0.0;
             q_values[Action::Memorialize as usize] = 0.0;
@@ -901,7 +901,7 @@ pub fn score_actions(
                 || (yi > 0 && terrain.biome[(yi - 1) * w + xi] == Biome::Water)
                 || (yi + 1 < h_size && terrain.biome[(yi + 1) * w + xi] == Biome::Water)
         };
-        if (on_water_h || near_water_h) && action == Action::Explore {
+        if (on_water_h || near_water_h) && action == Action::Cluster {
             score += 200.0;
         }
         if (on_water_h || near_water_h)

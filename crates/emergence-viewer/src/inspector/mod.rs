@@ -1,3 +1,6 @@
+pub mod settlement_inspector;
+pub use settlement_inspector::{SettlementData, aggregate_settlement, show_settlement_panel};
+
 use emergence_core::being::data::{
     Beings, BeingState,
     BEING_TRAIT_BRAVE, BEING_TRAIT_COWARD, BEING_TRAIT_STRONG, BEING_TRAIT_BUILDER,

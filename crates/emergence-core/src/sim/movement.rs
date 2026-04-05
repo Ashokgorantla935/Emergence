@@ -925,8 +925,13 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
             }
         }
     } else {
-        // Land being hit water boundary — ZERO velocity to prevent ghosting
-        world.beings.hot.velocities[being_index] = [0.0, 0.0];
+        // Land being hit water boundary — BOUNCE to prevent infinite sticking
+        world.beings.hot.velocities[being_index] = [-nx * 0.5, -ny * 0.5];
+        let bounce_x = (pos[0] - nx * 0.5).clamp(0.0, world.terrain.width as f32 - 1.0);
+        let bounce_y = (pos[1] - ny * 0.5).clamp(0.0, world.terrain.height as f32 - 1.0);
+        if !world.terrain.is_water(bounce_x as u32, bounce_y as u32) {
+            world.beings.hot.positions[being_index] = [bounce_x, bounce_y];
+        }
     }
 }
 

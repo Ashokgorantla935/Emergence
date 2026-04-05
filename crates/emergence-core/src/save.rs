@@ -194,6 +194,8 @@ pub struct SaveFile {
     pub dominant_style: Vec<u8>,
     pub cache_food: Vec<f32>,
     pub cache_stone: Vec<f32>,
+    pub oil_deposit: Vec<u16>,
+    pub iron_vein: Vec<u16>,
 
     // World Laws (Phase 6)
     pub laws: WorldLaws,
@@ -353,6 +355,8 @@ impl SaveFile {
             dominant_style: world.terrain.dominant_style.clone(),
             cache_food: world.terrain.cache_food.clone(),
             cache_stone: world.terrain.cache_stone.clone(),
+            oil_deposit: world.terrain.oil_deposit.clone(),
+            iron_vein: world.terrain.iron_vein.clone(),
 
             // World Laws
             laws: world.laws.clone(),
@@ -394,6 +398,8 @@ impl SaveFile {
             cache_food: if self.cache_food.len() == len { self.cache_food.clone() } else { vec![0.0f32; len] },
             cache_stone: if self.cache_stone.len() == len { self.cache_stone.clone() } else { vec![0.0f32; len] },
             trample: vec![0u8; len],
+            oil_deposit: if self.oil_deposit.len() == len { self.oil_deposit.clone() } else { vec![0u16; len] },
+            iron_vein: if self.iron_vein.len() == len { self.iron_vein.clone() } else { vec![0u16; len] },
         };
 
         // Reconstruct ResourceLayer
@@ -402,6 +408,9 @@ impl SaveFile {
             food_capacity: self.food_capacity.clone(),
             food_type: self.food_type.iter().map(|&ft| food_type_from_u8(ft)).collect(),
             regrowth_rate: self.regrowth_rate.clone(),
+            flora_stage: vec![0u8; len],
+            flora_hydration: vec![0u8; len],
+            flora_energy: vec![0u16; len],
         };
 
         // Reconstruct Climate

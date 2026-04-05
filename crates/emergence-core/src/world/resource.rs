@@ -1,6 +1,14 @@
 use super::climate::Season;
 use super::terrain::{Biome, Terrain};
 
+fn cell_hash(x: usize, y: usize) -> usize {
+    let mut h = x.wrapping_mul(2654435761) ^ y.wrapping_mul(2246822519);
+    h = (h >> 16) ^ h;
+    h = h.wrapping_mul(2654435761);
+    h = (h >> 16) ^ h;
+    h
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum FoodType {
@@ -18,6 +26,9 @@ pub struct ResourceLayer {
     pub food_capacity: Vec<f32>,
     pub food_type: Vec<FoodType>,
     pub regrowth_rate: Vec<f32>,
+    pub flora_stage: Vec<u8>,      // 0=None, 1=Sapling, 2=Adult, 3=Elder
+    pub flora_hydration: Vec<u8>,  // 0-255 water saturation
+    pub flora_energy: Vec<u16>,    // accumulates → threshold triggers stage up
 }
 
 impl ResourceLayer {
@@ -27,6 +38,10 @@ impl ResourceLayer {
         let mut food_capacity = Vec::with_capacity(len);
         let mut food_type = Vec::with_capacity(len);
         let mut regrowth_rate = Vec::with_capacity(len);
+
+        let mut flora_stage = Vec::with_capacity(len);
+        let mut flora_hydration = Vec::with_capacity(len);
+        let mut flora_energy = Vec::with_capacity(len);
 
         let w = terrain.width;
         let h = terrain.height;
@@ -94,6 +109,26 @@ impl ResourceLayer {
                 food.push(cap); // start at capacity
                 food_type.push(ft);
                 regrowth_rate.push(rg);
+
+                // Flora initialization
+                let (fs, fh) = if is_water {
+                    (0u8, 0u8)
+                } else {
+                    match biome {
+                        Biome::Forest => (2, 128),
+                        Biome::Grassland => {
+                            if cell_hash(x as usize, y as usize) % 100 < 30 {
+                                (1, 64)
+                            } else {
+                                (0, 0)
+                            }
+                        }
+                        _ => (0, 0),
+                    }
+                };
+                flora_stage.push(fs);
+                flora_hydration.push(fh);
+                flora_energy.push(0u16);
             }
         }
 
@@ -102,6 +137,9 @@ impl ResourceLayer {
             food_capacity,
             food_type,
             regrowth_rate,
+            flora_stage,
+            flora_hydration,
+            flora_energy,
         }
     }
 
@@ -193,6 +231,90 @@ impl ResourceLayer {
     pub fn deposit(&mut self, x: u32, y: u32, width: u32, amount: f32) {
         let idx = (y * width + x) as usize;
         self.food[idx] = (self.food[idx] + amount).min(self.food_capacity[idx] * 1.5);
+    }
+
+    /// Flora cellular automata — runs every 60 ticks.
+    /// Growth: energy accumulates from hydration. Threshold → stage up.
+    /// Reproduction: Adult/Elder trees spread saplings to empty neighbor cells.
+    /// Hydration: trees consume hydration each tick. Rain replenishes externally.
+    pub fn tick_flora(&mut self, terrain: &Terrain, world_tick: u32) {
+        let w = terrain.width as usize;
+        let h = terrain.height as usize;
+        let len = w * h;
+
+        const SAPLING_TO_ADULT: u16 = 800;
+        const ADULT_TO_ELDER: u16 = 2000;
+
+        for idx in 0..len {
+            let stage = self.flora_stage[idx];
+            if stage == 0 { continue; }
+
+            // Consume hydration
+            self.flora_hydration[idx] = self.flora_hydration[idx].saturating_sub(1);
+
+            // Accumulate energy from hydration
+            let hydration = self.flora_hydration[idx];
+            self.flora_energy[idx] = self.flora_energy[idx].saturating_add((hydration as u16) / 10 + 1);
+
+            // Stage transitions
+            let energy = self.flora_energy[idx];
+            match stage {
+                1 => {
+                    if energy >= SAPLING_TO_ADULT {
+                        self.flora_stage[idx] = 2;
+                        self.flora_energy[idx] = 0;
+                    }
+                }
+                2 => {
+                    if energy >= ADULT_TO_ELDER {
+                        self.flora_stage[idx] = 3;
+                        self.flora_energy[idx] = 0;
+                    }
+                }
+                _ => {}
+            }
+
+            // Reproduction: Adult (2) and Elder (3) can spread
+            if stage >= 2 {
+                let x = idx % w;
+                let y = idx / w;
+                if (cell_hash(x, y) ^ (world_tick as usize)) % 100 < 5 {
+                    let neighbors: [(isize, isize); 8] = [
+                        (-1,-1), (0,-1), (1,-1),
+                        (-1, 0),         (1, 0),
+                        (-1, 1), (0, 1), (1, 1),
+                    ];
+                    let ni = cell_hash(x.wrapping_add(world_tick as usize), y) % 8;
+                    let (dx, dy) = neighbors[ni];
+                    let nx = x as isize + dx;
+                    let ny = y as isize + dy;
+                    if nx >= 0 && ny >= 0 && (nx as usize) < w && (ny as usize) < h {
+                        let nidx = (ny as usize) * w + (nx as usize);
+                        if self.flora_stage[nidx] == 0
+                            && !terrain.water[nidx]
+                            && matches!(terrain.biome[nidx], Biome::Grassland | Biome::Forest | Biome::Wetland)
+                        {
+                            self.flora_stage[nidx] = 1;
+                            self.flora_hydration[nidx] = 64;
+                            self.flora_energy[nidx] = 0;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Scale food capacity with flora stage (trees produce more food as they grow)
+        for idx in 0..len {
+            let stage = self.flora_stage[idx];
+            if stage > 0 && self.food_type[idx] == FoodType::Berries {
+                self.food_capacity[idx] = match stage {
+                    1 => 3.0,
+                    2 => 8.0,
+                    3 => 12.0,
+                    _ => 0.0,
+                };
+            }
+        }
     }
 }
 

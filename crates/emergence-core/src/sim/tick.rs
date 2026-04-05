@@ -262,6 +262,28 @@ pub fn tick(world: &mut World) {
         );
     }
 
+    // 5e-pre2. Comfort gradient climbing: critically cold humans seek shelter
+    for i in 0..world.beings.hot.count {
+        if world.beings.hot.states[i] != BeingState::Awake { continue; }
+        if world.beings.hot.creature_type[i] != 0 { continue; } // humans only
+
+        let warmth = world.beings.hot.needs[i][NEED_WARMTH];
+        if warmth < 0.25 {
+            let pos = world.beings.hot.positions[i];
+            let (gx, gy) = world.signals.gradient(SignalChannel::Comfort, pos[0], pos[1], 8.0);
+            let mag = (gx * gx + gy * gy).sqrt();
+            if mag > 0.01 {
+                let speed = 0.4;
+                world.beings.hot.velocities[i] = [gx / mag * speed, gy / mag * speed];
+                let new_x = (pos[0] + world.beings.hot.velocities[i][0])
+                    .clamp(0.0, (world.terrain.width - 1) as f32);
+                let new_y = (pos[1] + world.beings.hot.velocities[i][1])
+                    .clamp(0.0, (world.terrain.height - 1) as f32);
+                world.beings.hot.positions[i] = [new_x, new_y];
+            }
+        }
+    }
+
     // 5e. Score actions (parallel via rayon)
     let base_seed = world.rng.u64(..);
     let being_count = world.beings.hot.count;
@@ -718,6 +740,35 @@ pub fn tick(world: &mut World) {
                     let sy = y.min(world.signals.height - 1);
                     world.signals.deposit(SignalChannel::Comfort, sx, sy, (food / cap) * 0.15);
                 }
+            }
+        }
+    }
+
+    // Structure comfort/warmth emissions (every 20 ticks)
+    if world.tick % 20 == 0 {
+        use crate::world::terrain::StructureType;
+        let tw = world.terrain.width;
+        let th = world.terrain.height;
+        for y in 0..th {
+            for x in 0..tw {
+                let idx = (y * tw + x) as usize;
+                let s = world.terrain.structure[idx];
+                if s == 0 { continue; }
+                let st = StructureType::from_u8(s);
+                let needed_ticks = st.build_ticks();
+                if needed_ticks > 0 && world.terrain.build_progress[idx] < needed_ticks { continue; }
+
+                let comfort_amt = match st {
+                    StructureType::Campfire => 0.8,
+                    StructureType::Hut => 0.4,
+                    StructureType::LeanTo => 0.2,
+                    StructureType::Forge => 0.3,
+                    _ => continue,
+                };
+
+                let sx = x.min(world.signals.width - 1);
+                let sy = y.min(world.signals.height - 1);
+                world.signals.deposit(SignalChannel::Comfort, sx, sy, comfort_amt);
             }
         }
     }

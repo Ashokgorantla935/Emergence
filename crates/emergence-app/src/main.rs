@@ -2772,20 +2772,27 @@ impl ApplicationHandler for App {
                         }
                     }
 
-                    // World objects (resources + structures) — chunk-based, viewport culled
+                    // World objects — multi-pass: resources / flora / buildings
                     if let Some(ref obj_r) = self.object_renderer {
                         render_pass.set_pipeline(&rs.object_pipeline);
                         render_pass.set_bind_group(0, &rs.camera_bind_group, &[]);
-                        render_pass.set_bind_group(1, &rs.atlas.bind_group, &[]);
                         render_pass.set_bind_group(2, &rs.object_time_bind_group, &[]);
                         render_pass.set_vertex_buffer(0, obj_r.vertex_buffer.slice(..));
                         render_pass.set_index_buffer(
                             obj_r.index_buffer.slice(..),
                             wgpu::IndexFormat::Uint16,
                         );
+                        // Pass 1: Resources (existing atlas)
+                        render_pass.set_bind_group(1, &rs.atlas.bind_group, &[]);
                         obj_r.draw(&mut render_pass);
                         // Carry indicators: tiny sprites above beings holding items (same pipeline)
                         obj_r.draw_carry_indicators(&mut render_pass);
+                        // Pass 2: Flora (new flora_spritesheet)
+                        render_pass.set_bind_group(1, &rs.flora_bind_group, &[]);
+                        obj_r.draw_flora(&mut render_pass);
+                        // Pass 3: Buildings (new building_spritesheet)
+                        render_pass.set_bind_group(1, &rs.building_bind_group, &[]);
+                        obj_r.draw_buildings(&mut render_pass);
                     }
 
                     // Beings (sprites)
@@ -2810,9 +2817,9 @@ impl ApplicationHandler for App {
                                 render_pass.set_vertex_buffer(1, being_r.human_instance_buffer.slice(..));
                                 render_pass.draw_indexed(0..6, 0, 0..being_r.human_instance_count);
                             }
-                            // Pass 2: Fauna — procedural atlas (32x32 grid)
+                            // Pass 2: Fauna — fauna_spritesheet (8x6 grid)
                             if being_r.fauna_instance_count > 0 {
-                                render_pass.set_bind_group(1, &rs.atlas.bind_group, &[]);
+                                render_pass.set_bind_group(1, &rs.fauna_bind_group, &[]);
                                 render_pass.set_vertex_buffer(1, being_r.fauna_instance_buffer.slice(..));
                                 render_pass.draw_indexed(0..6, 0, 0..being_r.fauna_instance_count);
                             }

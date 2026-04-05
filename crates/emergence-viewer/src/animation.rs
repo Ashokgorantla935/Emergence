@@ -4,12 +4,13 @@
 use emergence_core::being::actions::Action;
 use emergence_core::being::data::{BeingState, Beings, CreatureType};
 
-/// Cell size in the shared terrain atlas (32x32 grid).
-const ATLAS_CELL: f32 = 1.0 / 32.0;
 /// Cell size in the entity spritesheet (1 / 4)
 const ENTITY_CELL_U: f32 = 1.0 / 4.0;
 /// Cell size in the entity spritesheet vertical (1 / 96)
 const ENTITY_CELL_V: f32 = 1.0 / 96.0;
+/// Cell size in the fauna spritesheet (8 cols × 6 rows).
+const FAUNA_CELL_U: f32 = 1.0 / 8.0;
+const FAUNA_CELL_V: f32 = 1.0 / 6.0;
 
 /// 10 animation states (matches atlas row layout).
 #[repr(u8)]
@@ -317,16 +318,21 @@ fn body_build_index(beings: &Beings, i: usize) -> u32 {
 ///   Fish:   (12, 20)
 ///   Snake:  (12, 24)
 fn fauna_atlas_uv(ct: CreatureType, frame: u8) -> [f32; 2] {
-    let (atlas_row, col_base): (u32, u32) = match ct {
-        CreatureType::Hawk   => (12, 0),
-        CreatureType::Deer   => (12, 4),
-        CreatureType::Wolf   => (12, 8),
-        CreatureType::Bear   => (12, 12),
-        CreatureType::Rabbit => (12, 16),
-        CreatureType::Fish   => (12, 20),
-        CreatureType::Snake  => (12, 24),
-        CreatureType::Human  => (12, 0),  // fallback
+    // fauna_spritesheet.png: 8 cols × 6 rows.
+    // Row 0: Hawk(0-3), Deer(4-7)
+    // Row 1: Wolf(0-3), Bear(4-7)
+    // Row 2: Rabbit(0-3), Fish(4-7)
+    // Row 3: Snake(0-3)
+    let (col_base, row): (u32, u32) = match ct {
+        CreatureType::Hawk   => (0, 0),
+        CreatureType::Deer   => (4, 0),
+        CreatureType::Wolf   => (0, 1),
+        CreatureType::Bear   => (4, 1),
+        CreatureType::Rabbit => (0, 2),
+        CreatureType::Fish   => (4, 2),
+        CreatureType::Snake  => (0, 3),
+        CreatureType::Human  => (0, 0),  // fallback
     };
-    let atlas_col = col_base + (frame as u32 % 4);
-    [atlas_col as f32 * ATLAS_CELL, atlas_row as f32 * ATLAS_CELL]
+    let col = col_base + (frame as u32 % 4);
+    [col as f32 * FAUNA_CELL_U, row as f32 * FAUNA_CELL_V]
 }

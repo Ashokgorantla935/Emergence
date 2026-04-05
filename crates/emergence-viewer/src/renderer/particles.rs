@@ -88,6 +88,10 @@ pub enum EmitterKind {
     // Juice effects
     PlopDust,      // white→grey dust puff on god-tool spawn (spec exact)
     TalkBubble,    // single emoji sprite above being head (60-tick lifetime)
+    // Action particles — emitted while beings perform key actions
+    ActionHunt,    // red sparkle + white clash burst (combat)
+    ActionBuild,   // grey/brown dust rising (construction)
+    ActionMourn,   // slow blue soul rising vertically (grief ritual)
 }
 
 pub struct ParticleSystem {
@@ -378,6 +382,61 @@ impl ParticleSystem {
                     max_lifetime: 60.0,
                     size:         0.4,
                     sprite_uv,
+                    alive:        true,
+                });
+            }
+            EmitterKind::ActionHunt => {
+                // Red sparkle burst + white clash — 2-3 particles
+                for i in 0..3usize {
+                    let angle = (i as f32) * std::f32::consts::TAU / 3.0 + fastrand::f32() * 1.0;
+                    let speed = 0.3 + fastrand::f32() * 0.4;
+                    // Alternate red sparkle and white clash
+                    let (sprite_uv, color) = if i % 2 == 0 {
+                        (UV_SPARKLE, [0.95, 0.15, 0.1, 1.0_f32]) // vivid red
+                    } else {
+                        (UV_CLASH, [1.0, 1.0, 1.0, 0.9_f32]) // white clash
+                    };
+                    self.spawn(Particle {
+                        position:     origin,
+                        velocity:     [angle.cos() * speed, angle.sin() * speed],
+                        color,
+                        lifetime:     14.0,
+                        max_lifetime: 14.0,
+                        size:         0.22,
+                        sprite_uv,
+                        alive:        true,
+                    });
+                }
+            }
+            EmitterKind::ActionBuild => {
+                // Grey/brown dust rising — 1-2 particles
+                let count = 1 + (fastrand::f32() * 1.5) as usize; // 1 or 2
+                for _ in 0..count {
+                    let vx = (fastrand::f32() - 0.5) * 0.2;
+                    let vy = -(0.12 + fastrand::f32() * 0.1); // rise slowly
+                    let grey = 0.55 + fastrand::f32() * 0.25; // brownish grey
+                    self.spawn(Particle {
+                        position:     [origin[0], origin[1] - 0.3],
+                        velocity:     [vx, vy],
+                        color:        [grey, grey * 0.85, grey * 0.65, 0.75],
+                        lifetime:     22.0,
+                        max_lifetime: 22.0,
+                        size:         0.25,
+                        sprite_uv:    UV_SPARKLE,
+                        alive:        true,
+                    });
+                }
+            }
+            EmitterKind::ActionMourn => {
+                // Single slow-rising blue soul sprite
+                self.spawn(Particle {
+                    position:     [origin[0], origin[1] - 0.8],
+                    velocity:     [(fastrand::f32() - 0.5) * 0.06, -0.12],
+                    color:        [0.25, 0.45, 1.0, 0.85],
+                    lifetime:     70.0,
+                    max_lifetime: 70.0,
+                    size:         0.32,
+                    sprite_uv:    UV_SOUL,
                     alive:        true,
                 });
             }

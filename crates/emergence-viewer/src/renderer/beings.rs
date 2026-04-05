@@ -37,11 +37,15 @@ const ENTITY_CELL_U: f32 = 1.0 / 4.0;
 const ENTITY_CELL_V: f32 = 1.0 / 96.0;
 
 pub struct BeingRenderer {
-    pub vertex_buffer:    wgpu::Buffer,
-    pub index_buffer:     wgpu::Buffer,
-    pub instance_buffer:  wgpu::Buffer,
-    pub instance_count:   u32,
-    pub max_beings:       u32,
+    pub vertex_buffer:          wgpu::Buffer,
+    pub index_buffer:           wgpu::Buffer,
+    /// Instance buffer for human beings — bound with entities.png texture.
+    pub human_instance_buffer:  wgpu::Buffer,
+    pub human_instance_count:   u32,
+    /// Instance buffer for fauna beings — bound with procedural atlas texture.
+    pub fauna_instance_buffer:  wgpu::Buffer,
+    pub fauna_instance_count:   u32,
+    pub max_beings:             u32,
     /// Previous-frame positions for interpolation — one per being slot.
     prev_positions: Vec<[f32; 2]>,
 }
@@ -69,9 +73,16 @@ impl BeingRenderer {
             usage:    wgpu::BufferUsages::INDEX,
         });
 
-        let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label:              Some("Being Instances"),
-            size:               (max_beings as u64) * std::mem::size_of::<BeingInstance>() as u64,
+        let instance_bytes = (max_beings as u64) * std::mem::size_of::<BeingInstance>() as u64;
+        let human_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label:              Some("Human Being Instances"),
+            size:               instance_bytes,
+            usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let fauna_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label:              Some("Fauna Being Instances"),
+            size:               instance_bytes,
             usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -79,8 +90,10 @@ impl BeingRenderer {
         BeingRenderer {
             vertex_buffer,
             index_buffer,
-            instance_buffer,
-            instance_count: 0,
+            human_instance_buffer,
+            human_instance_count: 0,
+            fauna_instance_buffer,
+            fauna_instance_count: 0,
             max_beings,
             prev_positions: Vec::new(),
         }
@@ -116,7 +129,8 @@ impl BeingRenderer {
             self.prev_positions.resize(beings.hot.count, [0.0, 0.0]);
         }
 
-        let mut instances = Vec::with_capacity(beings.hot.alive_count);
+        let mut human_instances: Vec<BeingInstance> = Vec::with_capacity(beings.hot.alive_count / 2);
+        let mut fauna_instances: Vec<BeingInstance> = Vec::with_capacity(beings.hot.alive_count / 2);
 
         for i in 0..beings.hot.count {
             if beings.hot.states[i] == BeingState::Dead {
@@ -209,7 +223,7 @@ impl BeingRenderer {
                 continue;
             }
 
-            instances.push(BeingInstance {
+            let inst = BeingInstance {
                 position,
                 atlas_uv,
                 atlas_size,
@@ -219,7 +233,12 @@ impl BeingRenderer {
                 brightness,
                 alpha,
                 bob_flip,
-            });
+            };
+            if is_human {
+                human_instances.push(inst);
+            } else {
+                fauna_instances.push(inst);
+            }
         }
 
         // Snapshot current positions as "previous" for next frame
@@ -229,17 +248,17 @@ impl BeingRenderer {
             }
         }
 
-        // Y-sort: lower Y (screen bottom) renders on top of higher Y (screen top)
-        // sort_unstable_by is significantly faster than sort_by for float components
-        instances.sort_unstable_by(|a, b| a.position[1].partial_cmp(&b.position[1]).unwrap_or(std::cmp::Ordering::Equal));
+        // Y-sort each list independently (lower Y renders on top)
+        human_instances.sort_unstable_by(|a, b| a.position[1].partial_cmp(&b.position[1]).unwrap_or(std::cmp::Ordering::Equal));
+        fauna_instances.sort_unstable_by(|a, b| a.position[1].partial_cmp(&b.position[1]).unwrap_or(std::cmp::Ordering::Equal));
 
-        self.instance_count = instances.len() as u32;
-        if !instances.is_empty() {
-            queue.write_buffer(
-                &self.instance_buffer,
-                0,
-                bytemuck::cast_slice(&instances),
-            );
+        self.human_instance_count = human_instances.len() as u32;
+        self.fauna_instance_count = fauna_instances.len() as u32;
+        if !human_instances.is_empty() {
+            queue.write_buffer(&self.human_instance_buffer, 0, bytemuck::cast_slice(&human_instances));
+        }
+        if !fauna_instances.is_empty() {
+            queue.write_buffer(&self.fauna_instance_buffer, 0, bytemuck::cast_slice(&fauna_instances));
         }
     }
 }

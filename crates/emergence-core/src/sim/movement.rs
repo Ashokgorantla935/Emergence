@@ -928,7 +928,7 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     let jpos = world.beings.hot.positions[j];
                     let dx = jpos[0] - pos[0];
                     let dy = jpos[1] - pos[1];
-                    if dx * dx + dy * dy < 1.0 {
+                    if dx * dx + dy * dy < 2.0 {
                         let my_home = world.beings.cold.home_settlement_pos[being_index];
                         let their_home = world.beings.cold.home_settlement_pos[j];
                         if my_home != their_home {

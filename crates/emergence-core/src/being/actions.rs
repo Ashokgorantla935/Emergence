@@ -687,6 +687,83 @@ pub fn score_actions(
             }
         }
 
+        // ── Post-Boltzmann: Assault override for bold warriors ──────────────────
+        // Triggers when bold human detects enemy territory near home + high danger signal.
+        {
+            let boldness = beings.hot.personalities[being_index][TRAIT_BOLD];
+            if boldness > 0.6 {
+                if let Some(home) = beings.cold.home_settlement_pos[being_index] {
+                    let hx = home[0] as usize;
+                    let hy = home[1] as usize;
+                    let tw = terrain.width as usize;
+
+                    let home_territory = if hx < tw && hy < terrain.height as usize {
+                        terrain.territory[hy * tw + hx]
+                    } else {
+                        0
+                    };
+
+                    if home_territory > 0 {
+                        let mut enemy_pos: Option<[f32; 2]> = None;
+                        let r = 10usize;
+                        'scan: for dy in 0..(r * 2) {
+                            for dx in 0..(r * 2) {
+                                let nx = (hx + dx).saturating_sub(r);
+                                let ny = (hy + dy).saturating_sub(r);
+                                if nx < tw && ny < terrain.height as usize {
+                                    let nidx = ny * tw + nx;
+                                    let t = terrain.territory[nidx];
+                                    if t != 0 && t != home_territory {
+                                        enemy_pos = Some([nx as f32, ny as f32]);
+                                        break 'scan;
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some(ep) = enemy_pos {
+                            let sx = (pos[0] as u32).min(signals.width - 1);
+                            let sy = (pos[1] as u32).min(signals.height - 1);
+                            let danger = signals.read(SignalChannel::Danger, sx, sy);
+
+                            if danger > 0.3 {
+                                let assault_score = boldness * 3.0;
+                                if assault_score > chosen_q {
+                                    let signal_levels = local.values;
+                                    let biome = terrain.biome_at(cx, cy);
+                                    let nearby_count = nearby.len().min(255) as u8;
+                                    let context_hash = compute_context_hash(
+                                        biome,
+                                        signal_levels,
+                                        nearby_count,
+                                        climate.day_phase(),
+                                    );
+                                    let causal = beings.cold.causal_memories[being_index]
+                                        .score_for_action(Action::Assault as u8, context_hash);
+                                    let signal_contrib = local
+                                        .values
+                                        .iter()
+                                        .map(|v| v.abs())
+                                        .fold(0.0f32, f32::max);
+                                    return ScoredAction {
+                                        action: Action::Assault,
+                                        score: assault_score,
+                                        target_being: None,
+                                        target_pos: Some(ep),
+                                        runner_up_action: chosen_action as u8,
+                                        runner_up_score: chosen_q,
+                                        causal_contrib: causal.abs(),
+                                        relationship_contrib: 0.0,
+                                        signal_contrib,
+                                    };
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Compute context hash for causal memory record
         let signal_levels = local.values;
         let biome = terrain.biome_at(cx, cy);

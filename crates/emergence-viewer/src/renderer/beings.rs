@@ -29,8 +29,6 @@ pub struct BeingInstance {
 }
 // 64 bytes. 11,500 instances = 736KB.
 
-/// Cell size in the shared terrain atlas (32x32 grid), used by fauna.
-const ATLAS_CELL: f32 = 1.0 / 32.0;
 /// Cell width in the entity spritesheet (1/4 columns).
 const ENTITY_CELL_U: f32 = 1.0 / 4.0;
 /// Cell height in the combined 12-NPC spritesheet (12 npcs * 8 rows = 1/96).
@@ -141,8 +139,9 @@ impl BeingRenderer {
 
             let atlas_uv = anim.atlas_uv(beings, i);
             let is_human = beings.hot.creature_type[i] == CreatureType::Human as u8;
-            let cell_u = if is_human { ENTITY_CELL_U } else { ATLAS_CELL };
-            let cell_v = if is_human { ENTITY_CELL_V } else { ATLAS_CELL };
+            // Fauna uses the new fauna_spritesheet (8 cols × 6 rows).
+            let cell_u = if is_human { ENTITY_CELL_U } else { 1.0 / 8.0 };
+            let cell_v = if is_human { ENTITY_CELL_V } else { 1.0 / 6.0 };
             let atlas_size = [cell_u, cell_v];
 
             let (emotion_tint, mut size) = state_color_and_size(

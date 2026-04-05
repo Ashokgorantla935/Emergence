@@ -89,6 +89,11 @@ pub struct RenderState {
     /// Bound to slot 1 of the terrain pipeline instead of the procedural atlas.
     /// Falls back to atlas bind group if the PNG is missing.
     pub terrain_bind_group: wgpu::BindGroup,
+    /// New asset spritesheet bind groups (Wave 16 multi-pass pipeline).
+    pub flora_bind_group: wgpu::BindGroup,
+    pub building_bind_group: wgpu::BindGroup,
+    pub fauna_bind_group: wgpu::BindGroup,
+    pub item_bind_group: wgpu::BindGroup,
     /// V1: World objects (resources + structures) — single instanced draw call.
     pub object_pipeline: wgpu::RenderPipeline,
     /// V2: Unified particle system — single instanced draw call for ALL particles.
@@ -274,6 +279,32 @@ impl RenderState {
                 ],
             })
         };
+
+        // ── Wave 16: New asset spritesheets ────────────────────────────────
+        let flora_bind_group = Self::load_png_bind_group(
+            &device, &queue,
+            include_bytes!("../../../../assets/textures/flora_spritesheet.png"),
+            &atlas.bind_group_layout,
+            "Flora Spritesheet",
+        );
+        let building_bind_group = Self::load_png_bind_group(
+            &device, &queue,
+            include_bytes!("../../../../assets/textures/building_spritesheet.png"),
+            &atlas.bind_group_layout,
+            "Building Spritesheet",
+        );
+        let fauna_bind_group = Self::load_png_bind_group(
+            &device, &queue,
+            include_bytes!("../../../../assets/textures/fauna_spritesheet.png"),
+            &atlas.bind_group_layout,
+            "Fauna Spritesheet",
+        );
+        let item_bind_group = Self::load_png_bind_group(
+            &device, &queue,
+            include_bytes!("../../../../assets/textures/item_spritesheet.png"),
+            &atlas.bind_group_layout,
+            "Item Spritesheet",
+        );
 
         // ── Camera uniform buffer (extended) ──────────────────────────────
         let default_ext_cam = ExtCameraUniform {
@@ -910,6 +941,10 @@ impl RenderState {
             atlas,
             entity_bind_group,
             terrain_bind_group,
+            flora_bind_group,
+            building_bind_group,
+            fauna_bind_group,
+            item_bind_group,
             object_pipeline,
             particle_pipeline,
             postprocess,
@@ -917,6 +952,62 @@ impl RenderState {
             memetic_compute: None,
             climate_compute: None,
         }
+    }
+
+    /// Load a PNG from raw bytes and create a wgpu bind group using the given layout.
+    /// The layout must expect (binding 0: texture, binding 1: sampler).
+    fn load_png_bind_group(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        png_bytes: &[u8],
+        layout: &wgpu::BindGroupLayout,
+        label: &str,
+    ) -> wgpu::BindGroup {
+        let img = image::load_from_memory(png_bytes)
+            .unwrap_or_else(|_| panic!("Failed to load {}", label))
+            .to_rgba8();
+        let (w, h) = img.dimensions();
+        let pixels = img.into_raw();
+        let texture = device.create_texture_with_data(
+            queue,
+            &wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            bytemuck::cast_slice(&pixels),
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some(&format!("{} Sampler", label)),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("{} BG", label)),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        })
     }
 
     /// Rebuild the signal compute pipeline for the actual world dimensions.

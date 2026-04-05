@@ -33,6 +33,13 @@ pub enum StructureType {
     Factory = 11,      // produces advanced goods like automobiles
     Automobile = 12,   // built vehicle for fast transport
     OilPump = 13,      // extracts oil from lowland deposits
+    // Progressive architecture (tech-gated)
+    NomadTent = 14,    // basic shelter, no tech required
+    WoodenHouse = 15,  // requires TECH_AGRICULTURE knowledge
+    StoneHouse = 16,   // requires TECH_MASONRY
+    Windmill = 17,     // requires TECH_AGRICULTURE + TECH_MASONRY
+    Keep = 18,         // requires TECH_MASONRY + TECH_SMELTING
+    Castle = 19,       // requires TECH_MASONRY + TECH_SMELTING + TECH_ENGINEERING
 }
 
 impl StructureType {
@@ -52,6 +59,12 @@ impl StructureType {
             StructureType::Factory => 300,
             StructureType::Automobile => 400,
             StructureType::OilPump => 120,
+            StructureType::NomadTent => 20,
+            StructureType::WoodenHouse => 60,
+            StructureType::StoneHouse => 100,
+            StructureType::Windmill => 80,
+            StructureType::Keep => 150,
+            StructureType::Castle => 300,
         }
     }
 
@@ -70,6 +83,12 @@ impl StructureType {
             11 => StructureType::Factory,
             12 => StructureType::Automobile,
             13 => StructureType::OilPump,
+            14 => StructureType::NomadTent,
+            15 => StructureType::WoodenHouse,
+            16 => StructureType::StoneHouse,
+            17 => StructureType::Windmill,
+            18 => StructureType::Keep,
+            19 => StructureType::Castle,
             _ => StructureType::None,
         }
     }
@@ -361,8 +380,18 @@ impl Terrain {
             self.seasonal_movement_cost[idx] = f32::MAX;
             self.movement_cost[idx] = f32::MAX;
         }
-        // Hut/LeanTo/Campfire: mark as shelter
-        if matches!(stype, StructureType::Hut | StructureType::LeanTo | StructureType::Campfire) {
+        // Shelter structures
+        if matches!(
+            stype,
+            StructureType::Hut
+                | StructureType::LeanTo
+                | StructureType::Campfire
+                | StructureType::NomadTent
+                | StructureType::WoodenHouse
+                | StructureType::StoneHouse
+                | StructureType::Keep
+                | StructureType::Castle
+        ) {
             self.shelter[idx] = true;
         }
     }
@@ -419,7 +448,17 @@ impl Terrain {
                 self.structure_age[idx] = 0;
                 self.build_progress[idx] = 0;
                 // Un-shelter if was shelter
-                if matches!(st, StructureType::Hut | StructureType::LeanTo | StructureType::Campfire) {
+                if matches!(
+                    st,
+                    StructureType::Hut
+                        | StructureType::LeanTo
+                        | StructureType::Campfire
+                        | StructureType::NomadTent
+                        | StructureType::WoodenHouse
+                        | StructureType::StoneHouse
+                        | StructureType::Keep
+                        | StructureType::Castle
+                ) {
                     self.shelter[idx] = false;
                 }
                 // Reset trample counter on path decay

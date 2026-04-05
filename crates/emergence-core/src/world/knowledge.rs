@@ -9,6 +9,7 @@ pub const TECH_MASONRY: u32     = 1 << 2; // Discovered near stone + hut
 pub const TECH_AGRICULTURE: u32 = 1 << 3; // Discovered near flora_stage >= 2 + grain
 pub const TECH_WEAVING: u32     = 1 << 4; // Discovered near forest + settlement
 pub const TECH_MEDICINE: u32    = 1 << 5; // Discovered near wetland + elder being
+pub const TECH_ENGINEERING: u32 = 1 << 6; // Discovered near castle + forge + stone road
 
 pub struct KnowledgeGrid {
     pub width: u32,

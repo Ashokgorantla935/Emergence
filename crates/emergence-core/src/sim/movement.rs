@@ -529,11 +529,30 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                 + cx.min(world.terrain.width - 1)) as usize;
 
             if world.terrain.structure[cidx] == 0 && !world.terrain.is_water(cx.min(world.terrain.width - 1), cy.min(world.terrain.height - 1)) {
-                // Determine target structure type based on context
-                // Default: Campfire (cheapest, 10 ticks). If enough stone, choose Hut.
-                let target_type = if world.beings.hot.carry[being_index][1] >= 0.5 {
+                // Determine target structure type based on available techs + stone carried
+                let kcx = cx.min(world.knowledge.width - 1);
+                let kcy = cy.min(world.knowledge.height - 1);
+                let has_masonry = world.knowledge.has_tech(kcx, kcy, crate::world::knowledge::TECH_MASONRY);
+                let has_smelting = world.knowledge.has_tech(kcx, kcy, crate::world::knowledge::TECH_SMELTING);
+                let has_agriculture = world.knowledge.has_tech(kcx, kcy, crate::world::knowledge::TECH_AGRICULTURE);
+                let has_engineering = world.knowledge.has_tech(kcx, kcy, crate::world::knowledge::TECH_ENGINEERING);
+                let stone_carry = world.beings.hot.carry[being_index][1];
+
+                let target_type = if has_masonry && has_smelting && has_engineering && stone_carry >= 3.0 {
+                    StructureType::Castle
+                } else if has_masonry && has_smelting && stone_carry >= 2.0 {
+                    StructureType::Keep
+                } else if has_masonry && has_agriculture && stone_carry >= 1.0 {
+                    StructureType::Windmill
+                } else if has_masonry && stone_carry >= 1.0 {
+                    StructureType::StoneHouse
+                } else if has_agriculture && stone_carry >= 0.5 {
+                    StructureType::WoodenHouse
+                } else if stone_carry >= 0.1 {
+                    StructureType::NomadTent
+                } else if stone_carry >= 0.5 {
                     StructureType::Hut
-                } else if world.beings.hot.carry[being_index][1] >= 0.3 {
+                } else if stone_carry >= 0.3 {
                     StructureType::LeanTo
                 } else {
                     StructureType::Campfire
@@ -550,6 +569,12 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                         StructureType::Campfire => 0.1,
                         StructureType::LeanTo => 0.2,
                         StructureType::Hut => 0.4,
+                        StructureType::NomadTent => 0.0,
+                        StructureType::WoodenHouse => 1.0,
+                        StructureType::StoneHouse => 3.0,
+                        StructureType::Windmill => 2.0,
+                        StructureType::Keep => 5.0,
+                        StructureType::Castle => 10.0,
                         _ => 0.1,
                     };
                     let consumed = stone_cost.min(world.beings.hot.carry[being_index][1]);

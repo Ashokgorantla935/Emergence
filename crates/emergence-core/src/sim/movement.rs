@@ -154,6 +154,14 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     {
                         let carrier = world.beings.cold.meme_slots[being_index];
                         memes::try_transmit(&carrier, &mut world.beings.cold.meme_slots[target_idx], &mut world.rng);
+
+                        // Cultural frequency convergence: talking causes slight drift toward each other
+                        let other_freq = world.beings.hot.cultural_frequency[target_idx];
+                        let my_freq = world.beings.hot.cultural_frequency[being_index];
+                        world.beings.hot.cultural_frequency[being_index] =
+                            (my_freq + (other_freq - my_freq) * 0.01).clamp(0.0, 1.0);
+                        world.beings.hot.cultural_frequency[target_idx] =
+                            (other_freq + (my_freq - other_freq) * 0.01).clamp(0.0, 1.0);
                     }
                 } else {
                     move_toward(world, being_index, target_pos, speed);
@@ -202,51 +210,72 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
         }
         Action::ShareFood => {
             if let Some(target_idx) = action.target_being {
-                let share_amount = 0.2_f32.min(world.beings.hot.carry[being_index][0]);
-                if share_amount > 0.01 {
-                    world.beings.hot.carry[being_index][0] -= share_amount;
-                    world.beings.hot.carry[target_idx][0] =
-                        (world.beings.hot.carry[target_idx][0] + share_amount)
-                            .min(world.beings.carry_capacity(target_idx));
+                // Cultural divergence gate: tribe members share generously; strangers may anger
+                let divergence = (world.beings.hot.cultural_frequency[being_index]
+                    - world.beings.hot.cultural_frequency[target_idx]).abs();
 
-                    // Update relationships
-                    let imp = world.beings.cold.relationships[target_idx]
-                        .get_or_create(being_index as u32, tick);
-                    imp.warmth = (imp.warmth + 0.05).min(1.0);
-                    imp.trust = (imp.trust + 0.03).min(1.0);
-                    imp.debt = (imp.debt + share_amount).min(1.0);
-                    imp.last_interaction = tick;
+                if divergence > 0.80 {
+                    // Xenophobic response: sharing with a cultural stranger triggers anger
+                    world.beings.hot.emotions[being_index][EMO_ANGER] =
+                        (world.beings.hot.emotions[being_index][EMO_ANGER] + 0.3).min(1.0);
+                    world.beings.hot.emotions[target_idx][EMO_ANGER] =
+                        (world.beings.hot.emotions[target_idx][EMO_ANGER] + 0.2).min(1.0);
+                    // Skip the share — being will choose a different action next tick
+                } else {
+                    let share_amount = 0.2_f32.min(world.beings.hot.carry[being_index][0]);
+                    if share_amount > 0.01 {
+                        // Family/tribe boost: close cultural match gets extra joy
+                        if divergence < 0.05 {
+                            world.beings.hot.emotions[being_index][EMO_JOY] =
+                                (world.beings.hot.emotions[being_index][EMO_JOY] + 0.1).min(1.0);
+                            world.beings.hot.emotions[target_idx][EMO_JOY] =
+                                (world.beings.hot.emotions[target_idx][EMO_JOY] + 0.1).min(1.0);
+                        }
 
-                    trigger_emotion(&mut world.beings, being_index, EMO_JOY, 0.15);
-                    world.beings.hot.needs[being_index][NEED_PURPOSE] =
-                        (world.beings.hot.needs[being_index][NEED_PURPOSE] + 0.03).min(1.0);
+                        world.beings.hot.carry[being_index][0] -= share_amount;
+                        world.beings.hot.carry[target_idx][0] =
+                            (world.beings.hot.carry[target_idx][0] + share_amount)
+                                .min(world.beings.carry_capacity(target_idx));
 
-                    // Witnessing
-                    let radius = world.beings.perception_radius(being_index, world.climate.light_level());
-                    process_witnessing(
-                        &mut world.beings, &world.spatial, being_index, target_idx,
-                        Action::ShareFood, radius, tick,
-                    );
+                        // Update relationships
+                        let imp = world.beings.cold.relationships[target_idx]
+                            .get_or_create(being_index as u32, tick);
+                        imp.warmth = (imp.warmth + 0.05).min(1.0);
+                        imp.trust = (imp.trust + 0.03).min(1.0);
+                        imp.debt = (imp.debt + share_amount).min(1.0);
+                        imp.last_interaction = tick;
 
-                    let trust = world.beings.cold.relationships[target_idx]
-                        .find(being_index as u32)
-                        .map(|imp| imp.trust)
-                        .unwrap_or(0.0);
-                    world.events.push(Event {
-                        tick,
-                        actor_id: being_index as u32,
-                        target_id: target_idx as u32,
-                        event_type: EventType::SharedFood,
-                        location: pos,
-                        cause: crate::sim::world_state::EventCause::RelationshipTrust { trust },
-                    });
+                        trigger_emotion(&mut world.beings, being_index, EMO_JOY, 0.15);
+                        world.beings.hot.needs[being_index][NEED_PURPOSE] =
+                            (world.beings.hot.needs[being_index][NEED_PURPOSE] + 0.03).min(1.0);
 
-                    // Meme transmission: humans only. Clone carrier slots to avoid double-borrow.
-                    if world.beings.hot.creature_type[being_index] == CreatureType::Human as u8
-                        && world.beings.hot.creature_type[target_idx] == CreatureType::Human as u8
-                    {
-                        let carrier = world.beings.cold.meme_slots[being_index];
-                        memes::try_transmit(&carrier, &mut world.beings.cold.meme_slots[target_idx], &mut world.rng);
+                        // Witnessing
+                        let radius = world.beings.perception_radius(being_index, world.climate.light_level());
+                        process_witnessing(
+                            &mut world.beings, &world.spatial, being_index, target_idx,
+                            Action::ShareFood, radius, tick,
+                        );
+
+                        let trust = world.beings.cold.relationships[target_idx]
+                            .find(being_index as u32)
+                            .map(|imp| imp.trust)
+                            .unwrap_or(0.0);
+                        world.events.push(Event {
+                            tick,
+                            actor_id: being_index as u32,
+                            target_id: target_idx as u32,
+                            event_type: EventType::SharedFood,
+                            location: pos,
+                            cause: crate::sim::world_state::EventCause::RelationshipTrust { trust },
+                        });
+
+                        // Meme transmission: humans only. Clone carrier slots to avoid double-borrow.
+                        if world.beings.hot.creature_type[being_index] == CreatureType::Human as u8
+                            && world.beings.hot.creature_type[target_idx] == CreatureType::Human as u8
+                        {
+                            let carrier = world.beings.cold.meme_slots[being_index];
+                            memes::try_transmit(&carrier, &mut world.beings.cold.meme_slots[target_idx], &mut world.rng);
+                        }
                     }
                 }
             }

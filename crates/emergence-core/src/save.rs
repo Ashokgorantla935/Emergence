@@ -198,6 +198,8 @@ pub struct SaveFile {
     pub cache_stone: Vec<f32>,
     pub oil_deposit: Vec<u16>,
     pub iron_vein: Vec<u16>,
+    pub stockpile_food: Vec<f32>,
+    pub territory: Vec<u32>,
 
     // World Laws (Phase 6)
     pub laws: WorldLaws,
@@ -366,6 +368,8 @@ impl SaveFile {
             cache_stone: world.terrain.cache_stone.clone(),
             oil_deposit: world.terrain.oil_deposit.clone(),
             iron_vein: world.terrain.iron_vein.clone(),
+            stockpile_food: world.terrain.stockpile_food.clone(),
+            territory: world.terrain.territory.clone(),
 
             // World Laws
             laws: world.laws.clone(),
@@ -414,6 +418,8 @@ impl SaveFile {
             trample: vec![0u8; len],
             oil_deposit: if self.oil_deposit.len() == len { self.oil_deposit.clone() } else { vec![0u16; len] },
             iron_vein: if self.iron_vein.len() == len { self.iron_vein.clone() } else { vec![0u16; len] },
+            stockpile_food: if self.stockpile_food.len() == len { self.stockpile_food.clone() } else { vec![0.0f32; len] },
+            territory: if self.territory.len() == len { self.territory.clone() } else { vec![0u32; len] },
         };
 
         // Reconstruct ResourceLayer

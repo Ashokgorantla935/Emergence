@@ -136,6 +136,10 @@ pub struct Terrain {
     pub oil_deposit: Vec<u16>,
     /// Underground iron vein — finite, drained by Mine structures. 0 = exhausted.
     pub iron_vein: Vec<u16>,
+    /// Communal food stockpile per cell. Beings deposit carried food at home and eat from it.
+    pub stockpile_food: Vec<f32>,
+    /// Territory ownership — tribe/settlement ID claiming each cell. 0 = unclaimed.
+    pub territory: Vec<u32>,
 }
 
 impl Terrain {
@@ -300,6 +304,8 @@ impl Terrain {
             trample: vec![0u8; len],
             oil_deposit,
             iron_vein,
+            stockpile_food: vec![0.0f32; len],
+            territory: vec![0u32; len],
         }
     }
 

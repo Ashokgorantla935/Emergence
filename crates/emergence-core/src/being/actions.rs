@@ -912,24 +912,13 @@ pub fn score_actions(
                     if terrain.structure[cell_idx] != 0 || terrain.water[cell_idx] {
                         score = 0.0;
                     } else {
-                        // Anti-spam: penalize building near existing structures (3-tile radius)
-                        let mut nearby_structure = false;
-                        let r = 3i32;
-                        'outer: for dy in -r..=r {
-                            for dx in -r..=r {
-                                let nx = cx as i32 + dx;
-                                let ny = cy as i32 + dy;
-                                if nx >= 0 && ny >= 0 && (nx as u32) < terrain.width && (ny as u32) < terrain.height {
-                                    let ni = (ny as u32 * terrain.width + nx as u32) as usize;
-                                    if terrain.structure[ni] != 0 {
-                                        nearby_structure = true;
-                                        break 'outer;
-                                    }
-                                }
-                            }
-                        }
-                        if nearby_structure {
-                            score *= 0.1;
+                        // Build score is a function of unmet needs — satisfied humans don't build
+                        let unmet_warmth = (1.0 - beings.hot.needs[being_index][NEED_WARMTH]).max(0.0);
+                        let unmet_safety = (1.0 - beings.hot.needs[being_index][NEED_SAFETY]).max(0.0);
+                        if unmet_warmth < 0.2 && unmet_safety < 0.2 {
+                            score = 0.0; // already warm and safe — no need to build
+                        } else {
+                            score *= (unmet_warmth + unmet_safety) * beings.hot.carry[being_index][1].max(0.01);
                         }
                     }
                 }

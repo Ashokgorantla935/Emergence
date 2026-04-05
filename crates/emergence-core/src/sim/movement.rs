@@ -608,10 +608,12 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     world.terrain.place_structure(bx, by, target_type, being_index as u32);
                     // Bond builder to this location as home settlement
                     world.beings.cold.home_settlement_pos[being_index] = Some([bx, by]);
-                    // Clear flora footprint — chop trees to make space for construction
-                    world.resources.flora_stage[cidx] = 0;
-                    world.resources.flora_energy[cidx] = 0;
-                    world.resources.flora_hydration[cidx] = 0;
+                    // Claim territory for builder's tribe (Wave 27)
+                    if let Some(home) = world.beings.cold.home_settlement_pos[being_index] {
+                        let tribe = home[1] as u32 * world.terrain.width + home[0] as u32 + 1;
+                        world.terrain.territory[cidx] = tribe;
+                    }
+                    // Flora degradation from construction traffic handled by thermodynamic deforestation in tick_flora
                     trigger_emotion(&mut world.beings, being_index, EMO_JOY, 0.3);
                     world.beings.hot.needs[being_index][NEED_PURPOSE] =
                         (world.beings.hot.needs[being_index][NEED_PURPOSE] + 0.1).min(1.0);
@@ -862,9 +864,6 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                 }
             }
         }
-        Action::Assault => {
-            // Wave 27: Assault execution implemented in Wave 27 spec.
-        }
         Action::BuildClean => {
             // Clean energy infrastructure: deposits massive Comfort signal, no Toxin.
             // Consumes stone. Places SignalBeacon structure type.
@@ -912,6 +911,33 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                         location: [bx as f32, by as f32],
                         cause: crate::sim::world_state::EventCause::None,
                     });
+                }
+            }
+        }
+        Action::Assault => {
+            if let Some(target) = action.target_pos {
+                move_toward(world, being_index, target, speed * 1.5); // march speed
+
+                // Combat: damage nearby enemy beings
+                let count = world.beings.hot.count;
+                for j in 0..count {
+                    if j == being_index { continue; }
+                    if world.beings.hot.states[j] != BeingState::Awake { continue; }
+                    if world.beings.hot.creature_type[j] != 0 { continue; }
+
+                    let jpos = world.beings.hot.positions[j];
+                    let dx = jpos[0] - pos[0];
+                    let dy = jpos[1] - pos[1];
+                    if dx * dx + dy * dy < 1.0 {
+                        let my_home = world.beings.cold.home_settlement_pos[being_index];
+                        let their_home = world.beings.cold.home_settlement_pos[j];
+                        if my_home != their_home {
+                            world.beings.hot.needs[j][NEED_SAFETY] =
+                                (world.beings.hot.needs[j][NEED_SAFETY] - 0.15).max(0.0);
+                            world.beings.hot.emotions[j][0] =
+                                (world.beings.hot.emotions[j][0] + 0.3).min(1.0); // fear
+                        }
+                    }
                 }
             }
         }

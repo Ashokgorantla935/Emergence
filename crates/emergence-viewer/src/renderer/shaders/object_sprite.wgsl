@@ -100,10 +100,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let uv_s = clamp(in.uv + vec2<f32>( 0.0,  px), cell_min, cell_max);
         let uv_e = clamp(in.uv + vec2<f32>( px,  0.0), cell_min, cell_max);
         let uv_w = clamp(in.uv + vec2<f32>(-px,  0.0), cell_min, cell_max);
-        let n = textureSampleLevel(sprite_atlas, atlas_sampler, uv_n, 0.0).a;
-        let s = textureSampleLevel(sprite_atlas, atlas_sampler, uv_s, 0.0).a;
-        let e = textureSampleLevel(sprite_atlas, atlas_sampler, uv_e, 0.0).a;
-        let w = textureSampleLevel(sprite_atlas, atlas_sampler, uv_w, 0.0).a;
+
+        let sn = textureSampleLevel(sprite_atlas, atlas_sampler, uv_n, 0.0);
+        let ss = textureSampleLevel(sprite_atlas, atlas_sampler, uv_s, 0.0);
+        let se = textureSampleLevel(sprite_atlas, atlas_sampler, uv_e, 0.0);
+        let sw = textureSampleLevel(sprite_atlas, atlas_sampler, uv_w, 0.0);
+
+        let n = select(0.0, 1.0, sn.a > 0.5 && !(sn.r > 0.75 && sn.g < 0.45 && sn.b > 0.75));
+        let s = select(0.0, 1.0, ss.a > 0.5 && !(ss.r > 0.75 && ss.g < 0.45 && ss.b > 0.75));
+        let e = select(0.0, 1.0, se.a > 0.5 && !(se.r > 0.75 && se.g < 0.45 && se.b > 0.75));
+        let w = select(0.0, 1.0, sw.a > 0.5 && !(sw.r > 0.75 && sw.g < 0.45 && sw.b > 0.75));
+
         if (n > 0.5 || s > 0.5 || e > 0.5 || w > 0.5) {
             return vec4<f32>(0.05, 0.03, 0.02, 0.9);
         }

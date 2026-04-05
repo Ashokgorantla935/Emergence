@@ -42,27 +42,28 @@ pub enum SimSpeed {
 
 impl SimSpeed {
     pub fn ticks_per_frame(self) -> u32 {
+        // Assuming ~60 frames per real second, where 1 tick = 1 game minute (60 ticks/s = 1 hr/s).
         match self {
             SimSpeed::Paused => 0,
-            SimSpeed::Speed1x => 1,
-            SimSpeed::Speed2x => 2,
-            SimSpeed::Speed5x => 5,
-            SimSpeed::Speed10x => 10,
-            SimSpeed::Speed50x => 50,
-            SimSpeed::Speed100x => 100,
-            SimSpeed::Speed200x => 200,
-            SimSpeed::Speed500x => 500,
+            SimSpeed::Speed1x   => 1,    // 1 hr/s
+            SimSpeed::Speed2x   => 3,    // 3 hrs/s
+            SimSpeed::Speed5x   => 24,   // 1 day/s
+            SimSpeed::Speed10x  => 168,  // 1 week/s
+            SimSpeed::Speed50x  => 720,  // 1 month/s
+            SimSpeed::Speed100x => 1440, // 2 months/s
+            SimSpeed::Speed200x => 4320, // 6 months/s
+            SimSpeed::Speed500x => 8640, // 1 year/s
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            SimSpeed::Paused => "||",
-            SimSpeed::Speed1x => "1x",
-            SimSpeed::Speed2x => "2x",
-            SimSpeed::Speed5x => "5x",
-            SimSpeed::Speed10x => "10x",
-            SimSpeed::Speed50x => "50x",
+            SimSpeed::Paused    => "|| Pause",
+            SimSpeed::Speed1x   => "1x (1hr/s)",
+            SimSpeed::Speed2x   => "2x (3hr/s)",
+            SimSpeed::Speed5x   => "5x (1dy/s)",
+            SimSpeed::Speed10x  => "10x(1wk/s)",
+            SimSpeed::Speed50x  => "50x(1mo/s)",
             SimSpeed::Speed100x => "100x",
             SimSpeed::Speed200x => "200x",
             SimSpeed::Speed500x => "500x",
@@ -451,18 +452,23 @@ impl ScenarioSelectUi {
                         );
                         ui.add_space(10.0);
 
-                        // Population slider
+                        // Population slider and entry
                         ui.horizontal(|ui| {
                             ui.label(egui::RichText::new("Population:").size(12.0));
-                            let mut pop = self.population as f32;
+                            let mut pop = self.population;
+                            ui.add(
+                                egui::DragValue::new(&mut pop)
+                                    .range(1..=100000)
+                                    .speed(1.0)
+                            );
+                            let mut pop_f = pop as f32;
                             if ui.add_sized(
-                                [280.0, 20.0],
-                                egui::Slider::new(&mut pop, 1.0..=50.0)
-                                    .step_by(1.0)
-                                    .fixed_decimals(0),
+                                [220.0, 20.0],
+                                egui::Slider::new(&mut pop_f, 1.0..=50.0).show_value(false)
                             ).changed() {
-                                self.population = pop as u32;
+                                pop = pop_f as u32;
                             }
+                            self.population = pop;
                         });
                         ui.add_space(8.0);
 

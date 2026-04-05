@@ -558,7 +558,10 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
             let cidx = (cy.min(world.terrain.height - 1) * world.terrain.width
                 + cx.min(world.terrain.width - 1)) as usize;
 
-            if world.terrain.structure[cidx] == 0 && !world.terrain.is_water(cx.min(world.terrain.width - 1), cy.min(world.terrain.height - 1)) {
+            let current_struct = world.terrain.structure[cidx];
+            if (current_struct == 0 || current_struct == StructureType::DirtPath as u8) 
+                && !world.terrain.is_water(cx.min(world.terrain.width - 1), cy.min(world.terrain.height - 1)) 
+            {
                 // Determine target structure type based on available techs + stone carried
                 let kcx = cx.min(world.knowledge.width - 1);
                 let kcy = cy.min(world.knowledge.height - 1);
@@ -568,7 +571,9 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                 let has_engineering = world.knowledge.has_tech(kcx, kcy, crate::world::knowledge::TECH_ENGINEERING);
                 let stone_carry = world.beings.hot.carry[being_index][1];
 
-                let target_type = if has_masonry && has_smelting && has_engineering && stone_carry >= 3.0 {
+                let target_type = if current_struct == StructureType::DirtPath as u8 && has_masonry && stone_carry >= 0.2 {
+                    StructureType::StoneRoad
+                } else if has_masonry && has_smelting && has_engineering && stone_carry >= 3.0 {
                     StructureType::Castle
                 } else if has_masonry && has_smelting && stone_carry >= 2.0 {
                     StructureType::Keep
@@ -600,6 +605,7 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                         StructureType::LeanTo => 0.2,
                         StructureType::Hut => 0.4,
                         StructureType::NomadTent => 0.0,
+                        StructureType::StoneRoad => 0.2, // Road costs 0.2
                         StructureType::WoodenHouse => 1.0,
                         StructureType::StoneHouse => 3.0,
                         StructureType::Windmill => 2.0,

@@ -322,12 +322,20 @@ pub fn score_actions(
         let warmth = beings.hot.needs[being_index][crate::being::data::NEED_WARMTH];
         let has_stone = beings.hot.carry[being_index][1] >= 0.1;
         
-        if warmth < 0.6 || safety < 0.6 {
+        let currently_building = beings.hot.pending_action[being_index] == Action::Build as u8;
+
+        if warmth < 0.6 || safety < 0.6 || currently_building {
             if has_stone {
                 let cell_idx_build = (cy as usize) * (terrain.width as usize) + (cx as usize);
                 let tile_blocked = terrain.structure[cell_idx_build] != 0 || terrain.water[cell_idx_build];
-                let boost = if tile_blocked { 0.0 } else { 50.0 };
+                let boost = if tile_blocked && !currently_building { 0.0 } else { 50.0 };
                 q_values[Action::Build as usize] += boost;
+                
+                // Persistence lock: if they started building, force them to finish to prevent ghost structures!
+                if currently_building && boost > 0.0 {
+                    q_values[Action::Build as usize] += 1000.0;
+                }
+
                 if boost == 0.0 {
                     q_values[Action::PickUpStone as usize] += 20.0; // seek new land instead
                 }
@@ -414,12 +422,13 @@ pub fn score_actions(
             q_values[Action::SeekShelter as usize] += grief * 50.0;
         }
 
-        // Build allowed action indices for Boltzmann selection
-        // Appease, BuildClean, Farm, and Assault are excluded from brain q_values (brain has 22 outputs); handled post-Boltzmann.
-        let mut allowed_indices: Vec<u8> = Action::ALL.iter()
+        // ACTION MASKING: Restrict to species-specific allowed actions.
+        let allowed_actions = Action::allowed_actions(beings.hot.creature_type[being_index]);
+        let mut allowed_indices: Vec<u8> = allowed_actions.iter()
             .filter(|&&a| a != Action::Appease && a != Action::BuildClean && a != Action::Farm && a != Action::Assault)
             .map(|&a| a as u8)
             .collect();
+
 
         // ACTION MASKING: Humans may only Hunt when they have a legitimate reason.
         // Evaluated every tick; fauna are unaffected (they exit via the heuristic path below).

@@ -68,8 +68,9 @@ pub fn check_and_award_traits(beings: &mut Beings, idx: usize, _tick: u32) {
     let age = beings.hot.ages[idx];
     let traits = &mut beings.cold.traits[idx];
 
-    // Elder: > 72000 ticks (~2.5 years at 28800 ticks/year)
-    if age > 72000 {
+    // Elder: > 85% of individual lifespan (dynamic threshold)
+    let elder_threshold = (beings.hot.lifespans[idx] as f32 * 0.85) as u32;
+    if age > elder_threshold {
         *traits |= BEING_TRAIT_ELDER;
     }
 

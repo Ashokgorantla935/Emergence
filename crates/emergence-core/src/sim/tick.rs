@@ -1328,8 +1328,8 @@ fn process_births(world: &mut World) {
             continue;
         }
 
-        // Birth cooldown: 400 ticks (~50s at 8t/s) per parent
-        if i < world.beings.cold.last_birth_tick.len() && tick.saturating_sub(world.beings.cold.last_birth_tick[i]) < 400 {
+        // Birth cooldown: 14400 ticks (~6 months) per parent
+        if i < world.beings.cold.last_birth_tick.len() && tick.saturating_sub(world.beings.cold.last_birth_tick[i]) < 14400 {
             continue;
         }
 
@@ -1350,7 +1350,7 @@ fn process_births(world: &mut World) {
             }
 
             // Partner cooldown check
-            if partner < world.beings.cold.last_birth_tick.len() && tick.saturating_sub(world.beings.cold.last_birth_tick[partner]) < 400 {
+            if partner < world.beings.cold.last_birth_tick.len() && tick.saturating_sub(world.beings.cold.last_birth_tick[partner]) < 14400 {
                 continue;
             }
 
@@ -1385,7 +1385,7 @@ fn process_births(world: &mut World) {
             let avg_lifespan =
                 (world.beings.hot.lifespans[i] + world.beings.hot.lifespans[partner]) / 2;
             let noise = (world.rng.f32() - 0.5) * 0.2 * avg_lifespan as f32;
-            let child_lifespan = (avg_lifespan as f32 + noise).clamp(86000.0, 144000.0) as u32;
+            let child_lifespan = (avg_lifespan as f32 + noise).clamp(2_304_000.0, 2_880_000.0) as u32;
 
             let partner_pos = world.beings.hot.positions[partner];
             let birth_pos = [

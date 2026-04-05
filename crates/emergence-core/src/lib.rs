@@ -84,10 +84,8 @@ pub fn create_world(config: WorldConfig) -> World {
             generate_initial_personality(&mut rng)
         };
 
-        // Varied lifespan: 60-90 sim-year range (using tick scale: 1 sim-year ≈ 28800 ticks)
-        // Base 86400 (3 years) + 0–57600 (0-2 years) = 86400–144000 ticks ~ 3-5 sim-years
-        // We distribute 60-90% of max across beings for natural variety
-        let lifespan = 86400 + rng.u32(0..57601); // 3-5 sim-years
+        // Varied lifespan: 80-100 sim-year range (using tick scale: 1 sim-year ≈ 28800 ticks)
+        let lifespan = 2_304_000 + rng.u32(0..576_001); // 80-100 years (28800 ticks/year)
         let idx = beings.spawn([x, y], personality, lifespan, [u32::MAX, u32::MAX]);
         beings.cold.names[idx] = generate_name(&mut rng);
         // Starting ages: mix of children, young adults, adults (0..~50% of lifespan).
@@ -178,14 +176,14 @@ pub fn spawn_fauna(beings: &mut Beings, terrain: &Terrain, rng: &mut fastrand::R
             return;
         }
         let lifespan_base: u32 = match creature_type {
-            CreatureType::Wolf => 43200,   // ~1.5 game-years
-            CreatureType::Bear => 57600,   // ~2 game-years
-            CreatureType::Deer => 43200,
-            CreatureType::Rabbit => 28800, // ~1 game-year
-            CreatureType::Fish => 28800,
-            CreatureType::Hawk => 43200,
-            CreatureType::Snake => 57600,
-            CreatureType::Human => 86000,
+            CreatureType::Wolf => 432_000,   // ~15 game-years
+            CreatureType::Bear => 576_000,   // ~20 game-years
+            CreatureType::Deer => 432_000,   // ~15 game-years
+            CreatureType::Rabbit => 432_000, // ~15 game-years
+            CreatureType::Fish => 432_000,   // ~15 game-years
+            CreatureType::Hawk => 432_000,   // ~15 game-years
+            CreatureType::Snake => 576_000,  // ~20 game-years
+            CreatureType::Human => 2_304_000, // ~80 years
         };
         for _ in 0..count {
             let base = cells[rng.usize(..cells.len())];

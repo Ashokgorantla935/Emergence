@@ -448,9 +448,26 @@ impl Terrain {
                 continue;
             }
             self.structure_age[idx] += 1;
-            if self.structure_age[idx] >= 5000 {
+            let st = StructureType::from_u8(self.structure[idx]);
+            let max_age: u32 = match st {
+                // Basic shelters / paths: 5 years (144_000 ticks)
+                StructureType::Campfire | StructureType::LeanTo | StructureType::Hut
+                | StructureType::NomadTent | StructureType::ResourceCache
+                | StructureType::DirtPath => 144_000,
+                // Farm fields / signal beacons: 10 years
+                StructureType::FarmField | StructureType::SignalBeacon => 288_000,
+                // Intermediate wood / machinery: 20 years
+                StructureType::WoodenHouse | StructureType::Windmill | StructureType::Wall
+                | StructureType::Automobile => 576_000,
+                // Advanced stone / industrial: 100 years (effectively permanent)
+                StructureType::StoneHouse | StructureType::Keep | StructureType::Castle
+                | StructureType::Factory | StructureType::Mine | StructureType::Forge
+                | StructureType::StoneRoad | StructureType::OilPump => 2_880_000,
+                // Default: 5 years
+                _ => 144_000,
+            };
+            if self.structure_age[idx] >= max_age {
                 // Structure decayed — remove it
-                let st = StructureType::from_u8(self.structure[idx]);
                 destroyed.push((idx, st));
                 self.structure[idx] = 0;
                 self.builder_id[idx] = 0;

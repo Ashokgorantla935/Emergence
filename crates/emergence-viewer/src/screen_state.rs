@@ -455,7 +455,8 @@ impl ScenarioSelectUi {
                         ui.horizontal(|ui| {
                             ui.label(egui::RichText::new("Population:").size(12.0));
                             let mut pop = self.population as f32;
-                            if ui.add(
+                            if ui.add_sized(
+                                [280.0, 20.0],
                                 egui::Slider::new(&mut pop, 1.0..=50.0)
                                     .step_by(1.0)
                                     .fixed_decimals(0),

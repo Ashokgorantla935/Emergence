@@ -29,8 +29,11 @@ struct TerrainVertex {
 
 /// Non-power-of-two hash — avoids the visible grid pattern from linear multipliers.
 fn cell_hash(x: usize, y: usize) -> usize {
-    let h = x.wrapping_mul(2654435761) ^ y.wrapping_mul(2246822519);
-    (h >> 16) ^ h
+    let mut h = x.wrapping_mul(2654435761) ^ y.wrapping_mul(2246822519);
+    h = (h >> 16) ^ h;        // Round 1
+    h = h.wrapping_mul(2654435761); // Extra mixing
+    h = (h >> 16) ^ h;        // Round 2
+    h
 }
 
 // Atlas tile UV origins (col, row) → [f32; 2] UV top-left in the Sunnyside tileset.

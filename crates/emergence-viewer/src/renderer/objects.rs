@@ -276,7 +276,6 @@ impl ChunkedObjectRenderer {
     ) {
         self.frame_tick = self.frame_tick.wrapping_add(1);
 
-        let ppu_changed = (self.pixels_per_unit - pixels_per_unit).abs() > 1.0;
         self.pixels_per_unit = pixels_per_unit;
 
         self.last_cam_x = cam_x;
@@ -308,7 +307,7 @@ impl ChunkedObjectRenderer {
         // Mark only VISIBLE chunks dirty periodically for resource regrowth / campfire animation.
         // Previously mark_all_dirty() touched every chunk on the map — on 2048² maps that's
         // 1024 chunks, most off-screen, causing massive GPU buffer rebuild overhead.
-        if self.frame_tick % 120 == 0 || ppu_changed {
+        if self.frame_tick % 120 == 0 {
             let grid_w = self.chunk_grid_w;
             for cy in cy_min..cy_max {
                 for cx in cx_min..cx_max {
@@ -543,8 +542,18 @@ fn rebuild_chunk_standalone(
                 FoodType::None => continue,
             };
 
+            // LOD Culling: skip tiny resources when zoomed far out
+            if pixels_per_unit < 6.0 && size < 2.5 {
+                continue;
+            }
+
+            // Organic jitter so resources aren't mathematically locked to absolute cell grid-centers
+            let hash = cell_hash(x, y);
+            let jitter_x = ((hash % 17) as f32 / 17.0 - 0.5) * 0.6;
+            let jitter_y = (((hash >> 4) % 17) as f32 / 17.0 - 0.5) * 0.6;
+
             instances.push(ObjectInstance {
-                position:   [x as f32 + 0.5, y as f32 + 0.5],
+                position:   [x as f32 + 0.5 + jitter_x, y as f32 + 0.5 + jitter_y],
                 atlas_uv,
                 atlas_size: [ATLAS_CELL, ATLAS_CELL],
                 tint,
@@ -615,8 +624,9 @@ fn rebuild_chunk_standalone(
                     continue;
                 }
 
-                let jitter_x = ((hash >> (4 + seed * 3)) % 5) as f32 * 0.05 - 0.10;
-                let jitter_y = ((hash >> (10 + seed * 3)) % 5) as f32 * 0.05 - 0.10;
+                // Natural, highly variable jitter for an organic clustered look
+                let jitter_x = ((hash >> (4 + seed * 3)) % 13) as f32 * 0.05 - 0.30;
+                let jitter_y = ((hash >> (10 + seed * 3)) % 13) as f32 * 0.05 - 0.30;
 
                 let (atlas_uv, tint, size) = match biome {
                     Biome::Forest => {

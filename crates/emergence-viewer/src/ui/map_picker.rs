@@ -206,9 +206,10 @@ fn draw_map_card(
         );
     }
 
-    // Map name
+    // Map name — clip to card bounds to prevent long names from overflowing
     let text_y = rect.min.y + 8.0 + THUMB_DISPLAY + 6.0;
-    painter.text(
+    let clipped = painter.with_clip_rect(rect);
+    clipped.text(
         egui::pos2(rect.center().x, text_y),
         egui::Align2::CENTER_TOP,
         def.name,

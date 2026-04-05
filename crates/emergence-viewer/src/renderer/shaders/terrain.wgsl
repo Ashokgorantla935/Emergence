@@ -387,7 +387,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var color_lod1: vec4<f32>;
     if (is_water) {
         let depth_color = water_depth_color(in.elevation);
-        let pulse = sin(t * 2.0 + in.world_pos.x * 0.5) * 0.03;
+        let pulse = sin(t * 2.0 + fract(in.world_pos.x * 0.5) * 6.283185) * 0.03;
         color_lod1 = vec4<f32>(
             clamp(depth_color.r + pulse,        0.0, 1.0),
             clamp(depth_color.g + pulse,        0.0, 1.0),
@@ -444,8 +444,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         );
         // Multi-layer canopy foliage for forests (procedural only)
         if (biome_id == 2u) {
-            let sway = sin(t * 1.5 + in.world_pos.x * 0.5) * 0.05;
-            let canopy_darkness = 0.15 + (sin(in.world_pos.x * 3.0 + t + sway) * cos(in.world_pos.y * 3.0)) * 0.05;
+            let sway = sin(t * 1.5 + fract(in.world_pos.x * 0.5) * 6.283185) * 0.05;
+            let canopy_darkness = 0.15 + (sin(fract(in.world_pos.x * 3.0) * 6.283185 + t + sway) * cos(fract(in.world_pos.y * 3.0) * 6.283185)) * 0.05;
             color_lod2 = mix(color_lod2, vec4<f32>(0.1, 0.3, 0.1, 1.0), canopy_darkness);
         }
     }

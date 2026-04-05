@@ -307,7 +307,7 @@ pub fn tick(world: &mut World) {
             let (gx, gy) = world.signals.gradient(SignalChannel::Danger, pos[0], pos[1], 6.0);
             let mag = (gx * gx + gy * gy).sqrt();
             if mag > 0.01 {
-                let speed = 0.6; // full flee speed
+                let speed = 0.3; // full flee speed
                 world.beings.hot.velocities[i] = [-gx / mag * speed, -gy / mag * speed];
                 let new_x = (pos[0] + world.beings.hot.velocities[i][0])
                     .clamp(0.0, (world.terrain.width - 1) as f32);
@@ -329,7 +329,7 @@ pub fn tick(world: &mut World) {
             let (gx, gy) = world.signals.gradient(SignalChannel::Comfort, pos[0], pos[1], 8.0);
             let mag = (gx * gx + gy * gy).sqrt();
             if mag > 0.01 {
-                let speed = 0.4;
+                let speed = 0.2;
                 world.beings.hot.velocities[i] = [gx / mag * speed, gy / mag * speed];
                 let new_x = (pos[0] + world.beings.hot.velocities[i][0])
                     .clamp(0.0, (world.terrain.width - 1) as f32);

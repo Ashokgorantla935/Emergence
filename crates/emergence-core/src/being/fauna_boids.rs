@@ -163,7 +163,7 @@ pub fn tick_fauna_boids(
 
         // Clamp to max speed
         let speed = (vx * vx + vy * vy).sqrt();
-        const MAX_SPEED: f32 = 0.5;
+        const MAX_SPEED: f32 = 0.25;
         let (nvx, nvy) = if speed > MAX_SPEED {
             (vx / speed * MAX_SPEED, vy / speed * MAX_SPEED)
         } else {

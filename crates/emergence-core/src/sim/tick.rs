@@ -315,12 +315,10 @@ pub fn tick(world: &mut World) {
                     if world.beings.hot.creature_type[i] == CreatureType::Human as u8
                         && world.beings.hot.creature_type[dead_idx] == CreatureType::Human as u8
                     {
-                        let hash_i = world.beings.cold.true_memetic_hash[i];
-                        let hash_d = world.beings.cold.true_memetic_hash[dead_idx];
-                        let divergence: u32 = hash_i.iter().zip(hash_d.iter())
-                            .map(|(&a, &b)| (a ^ b).count_ones())
-                            .sum();
-                        if divergence < 32 {
+                        let hash_i = &world.beings.cold.true_memetic_hash[i];
+                        let hash_d = &world.beings.cold.true_memetic_hash[dead_idx];
+                        let divergence = crate::being::memetics::memetic_divergence(hash_i, hash_d);
+                        if divergence < 500 {
                             for w in &mut world.beings.hot.brain_weights[i] {
                                 *w *= 0.99;
                             }
@@ -437,6 +435,12 @@ pub fn tick(world: &mut World) {
                 world.resources.food[cell_idx] = (world.resources.food[cell_idx] - 0.002).max(0.0);
             }
         }
+
+        // Axiom 16: Memetic contagion — cultural hash OR-blending in proximity
+        crate::being::memetics::tick_memetic_contagion(&mut world.beings, &world.spatial, world.tick);
+
+        // Axiom 28: Buddha state detection — transcendence check for ancient, bored beings
+        crate::being::memetics::tick_buddha_detection(&mut world.beings, world.tick);
     }
 
     // 5e-pre2a. Danger flee override — highest priority survival behavior

@@ -1071,6 +1071,10 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
         world.beings.hot.positions[being_index] = [new_x, new_y];
         let vx = (nx * clamped_dist).clamp(-MAX_VEL, MAX_VEL);
         let vy = (ny * clamped_dist).clamp(-MAX_VEL, MAX_VEL);
+
+        // Axiom 1: Kinetic caloric cost — movement drains energy proportional to distance
+        let kinetic_cost = clamped_dist * 0.001;
+        world.beings.hot.caloric_energy[being_index] = (world.beings.hot.caloric_energy[being_index] - kinetic_cost).max(0.0);
         // Teleport guard
         let dx = new_x - old_pos[0];
         let dy = new_y - old_pos[1];

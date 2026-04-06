@@ -353,8 +353,9 @@ impl ScenarioSelectUi {
                     // MAP SIZE section
                     ui.label(
                         egui::RichText::new("MAP SIZE")
-                            .size(12.0)
-                            .color(egui::Color32::from_gray(150)),
+                            .size(14.0)
+                            .strong()
+                            .color(egui::Color32::from_rgb(220, 200, 140)),
                     );
                     ui.add_space(8.0);
 
@@ -387,18 +388,18 @@ impl ScenarioSelectUi {
                                     ui.vertical_centered(|ui| {
                                         ui.label(
                                             egui::RichText::new(label)
-                                                .size(15.0)
+                                                .size(16.0)
                                                 .strong()
                                                 .color(if is_selected {
-                                                    egui::Color32::from_rgb(255, 200, 60)
+                                                    egui::Color32::from_rgb(255, 220, 80)
                                                 } else {
-                                                    egui::Color32::from_gray(200)
+                                                    egui::Color32::from_rgb(230, 220, 200)
                                                 }),
                                         );
                                         ui.label(
                                             egui::RichText::new(format!("{}x{}", size.0, size.1))
-                                                .size(11.0)
-                                                .color(egui::Color32::from_gray(120)),
+                                                .size(12.0)
+                                                .color(egui::Color32::from_gray(180)),
                                         );
                                     });
                                 });
@@ -413,8 +414,9 @@ impl ScenarioSelectUi {
                     // ISLAND DENSITY section
                     ui.label(
                         egui::RichText::new("ISLAND DENSITY")
-                            .size(12.0)
-                            .color(egui::Color32::from_gray(150)),
+                            .size(14.0)
+                            .strong()
+                            .color(egui::Color32::from_rgb(220, 200, 140)),
                     );
                     ui.add_space(8.0);
 

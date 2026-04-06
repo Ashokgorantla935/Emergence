@@ -530,8 +530,62 @@ impl ScenarioSelectUi {
                                 .corner_radius(egui::CornerRadius::same(10))
                                 .inner_margin(egui::Margin::symmetric(18, 14))
                                 .show(ui, |ui| {
-                                    ui.set_min_size(egui::vec2(140.0, 90.0));
+                                    ui.set_min_size(egui::vec2(160.0, 110.0));
                                     ui.vertical_centered(|ui| {
+                                        // Mini-map preview (painted geography)
+                                        let (preview_rect, _) = ui.allocate_exact_size(
+                                            egui::vec2(120.0, 50.0),
+                                            egui::Sense::hover(),
+                                        );
+                                        let p = ui.painter_at(preview_rect);
+                                        let ocean = egui::Color32::from_rgb(25, 55, 110);
+                                        let land = egui::Color32::from_rgb(60, 130, 50);
+                                        let sand = egui::Color32::from_rgb(170, 150, 80);
+                                        let snow = egui::Color32::from_rgb(220, 230, 240);
+                                        p.rect_filled(preview_rect, 4.0, ocean);
+                                        match preset_key {
+                                            "real_earth" => {
+                                                // Continents silhouette
+                                                let r = preview_rect;
+                                                let w = r.width();
+                                                let h = r.height();
+                                                // Americas
+                                                p.rect_filled(egui::Rect::from_min_size(r.min + egui::vec2(w*0.10, h*0.15), egui::vec2(w*0.12, h*0.55)), 2.0, land);
+                                                // Europe/Africa
+                                                p.rect_filled(egui::Rect::from_min_size(r.min + egui::vec2(w*0.42, h*0.10), egui::vec2(w*0.10, h*0.65)), 2.0, land);
+                                                // Asia
+                                                p.rect_filled(egui::Rect::from_min_size(r.min + egui::vec2(w*0.55, h*0.08), egui::vec2(w*0.25, h*0.45)), 2.0, land);
+                                                // Australia
+                                                p.rect_filled(egui::Rect::from_min_size(r.min + egui::vec2(w*0.72, h*0.60), egui::vec2(w*0.10, h*0.18)), 2.0, sand);
+                                                // Polar caps
+                                                p.rect_filled(egui::Rect::from_min_size(r.min, egui::vec2(w, h*0.06)), 1.0, snow);
+                                                p.rect_filled(egui::Rect::from_min_size(r.min + egui::vec2(0.0, h*0.94), egui::vec2(w, h*0.06)), 1.0, snow);
+                                            }
+                                            "pangaea" => {
+                                                // Single supercontinent blob
+                                                let r = preview_rect;
+                                                let cx = r.center();
+                                                p.circle_filled(cx, r.height() * 0.38, land);
+                                                p.circle_filled(cx + egui::vec2(r.width()*0.12, -r.height()*0.05), r.height()*0.25, land);
+                                                p.circle_filled(cx + egui::vec2(-r.width()*0.08, r.height()*0.10), r.height()*0.20, sand);
+                                            }
+                                            "archipelago" => {
+                                                // Scattered islands
+                                                let r = preview_rect;
+                                                let positions = [
+                                                    (0.15, 0.25), (0.30, 0.60), (0.45, 0.20), (0.55, 0.70),
+                                                    (0.70, 0.35), (0.85, 0.55), (0.25, 0.45), (0.60, 0.45),
+                                                    (0.40, 0.80), (0.75, 0.15), (0.50, 0.50), (0.20, 0.75),
+                                                ];
+                                                for (fx, fy) in positions {
+                                                    let center = r.min + egui::vec2(r.width() * fx, r.height() * fy);
+                                                    p.circle_filled(center, 3.5, land);
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                        ui.add_space(6.0);
+
                                         ui.label(
                                             egui::RichText::new(label)
                                                 .size(15.0)

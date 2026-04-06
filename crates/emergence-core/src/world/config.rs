@@ -29,7 +29,7 @@ impl WorldConfig {
         }
     }
 
-    /// Validate world size. 1024x1024 is the standard target. Up to 2048x2048 is supported.
+    /// Validate world size. 1024x1024 is the standard target. Up to 4096x4096 (God Realm) is supported.
     pub fn validate(&self) -> Result<(), &'static str> {
         let (w, h) = self.resolved_size();
         if w > 4096 || h > 4096 {

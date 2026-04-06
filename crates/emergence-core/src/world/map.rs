@@ -21,7 +21,9 @@ pub enum MapSize {
     Large,     // 512x512
     Epic,      // 1024x1024
     Huge,      // 2048x2048
+    Titan,     // 3072x3072
     Colossal,  // 4096x2048 (Earth aspect ratio)
+    GodRealm,  // 4096x4096
 }
 
 impl MapSize {
@@ -33,7 +35,9 @@ impl MapSize {
             MapSize::Large => (512, 512),
             MapSize::Epic => (1024, 1024),
             MapSize::Huge => (2048, 2048),
+            MapSize::Titan => (3072, 3072),
             MapSize::Colossal => (4096, 2048),
+            MapSize::GodRealm => (4096, 4096),
         }
     }
 }

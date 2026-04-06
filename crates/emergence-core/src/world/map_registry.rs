@@ -115,7 +115,7 @@ fn archipelago() -> MapDefinition {
         id: "archipelago",
         name: "Archipelago",
         description: "Scattered islands of varied sizes across a warm tropical sea.",
-        size: MapSize::Huge,
+        size: MapSize::Titan,
         difficulty_rating: 4,
         elevation_source: ElevationSource::Procedural {
             params: ProceduralParams {

@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use emergence_core::save::{self, AUTO_SAVE_INTERVAL};
 use emergence_core::scenario::{ScenarioConfig, ScenarioId};
+use emergence_core::world::map::{MapId, MapSelection};
 use emergence_core::sim::world_state::World;
 use emergence_core::world::signal::SignalChannel;
 use emergence_viewer::animation::AnimationManager;
@@ -147,10 +148,10 @@ struct App {
     pending_save_slot: Option<u8>,
     pending_new_game: bool,
     pending_quit: bool,
-    pending_scenario: Option<(ScenarioId, (u32, u32), u32, FaunaDensity, u32)>,
+    pending_scenario: Option<(ScenarioId, (u32, u32), u32, FaunaDensity, u32, Option<String>)>,
     // Last launched scenario — used by "Regenerate World" to restart with a new seed.
     // Box avoids storing a large Clone inline.
-    last_scenario: Option<Box<(ScenarioId, (u32, u32), u32, FaunaDensity, u32)>>,
+    last_scenario: Option<Box<(ScenarioId, (u32, u32), u32, FaunaDensity, u32, Option<String>)>>,
 
     // God tools
     god_tool_state: GodToolState,
@@ -381,10 +382,18 @@ impl App {
     }
 
     /// Launch a new game from a scenario.
-    fn start_scenario(&mut self, id: ScenarioId, map_size: (u32, u32), population: u32, fauna_density: FaunaDensity, island_count: u32) {
-        self.last_scenario = Some(Box::new((id, map_size, population, fauna_density, island_count)));
+    fn start_scenario(&mut self, id: ScenarioId, map_size: (u32, u32), population: u32, fauna_density: FaunaDensity, island_count: u32, map_preset: Option<String>) {
+        self.last_scenario = Some(Box::new((id, map_size, population, fauna_density, island_count, map_preset.clone())));
         let mut scenario = ScenarioConfig::new(id);
-        // Apply the map size chosen in the UI.
+        // Apply preset map or custom map size.
+        if let Some(ref preset) = map_preset {
+            scenario.world.map = match preset.as_str() {
+                "real_earth" => MapSelection::BuiltIn(MapId::RealEarth),
+                "pangaea" => MapSelection::BuiltIn(MapId::Pangaea),
+                "archipelago" => MapSelection::BuiltIn(MapId::Archipelago),
+                _ => MapSelection::Default,
+            };
+        }
         scenario.world.size = map_size;
         // Apply population and fauna overrides from the scenario select UI.
         scenario.world.initial_beings = population;
@@ -647,6 +656,7 @@ impl ApplicationHandler for App {
                 10,
                 FaunaDensity::Low,
                 3,
+                None,
             );
             // Stay on LaunchOverlay, not Playing.
             self.screen = ScreenState::LaunchOverlay;
@@ -820,6 +830,7 @@ impl ApplicationHandler for App {
                                         0,
                                         sel.fauna_density,
                                         sel.island_count,
+                                        sel.selected_preset.map(|s| s.to_string()),
                                     ));
                                 } else if key == KeyCode::Escape {
                                     self.screen = ScreenState::MainMenu;
@@ -920,8 +931,8 @@ impl ApplicationHandler for App {
             self.pending_new_game = false;
             self.screen = ScreenState::ScenarioSelect;
         }
-        if let Some((id, map, population, fauna_density, island_count)) = self.pending_scenario.take() {
-            self.start_scenario(id, map, population, fauna_density, island_count);
+        if let Some((id, map, population, fauna_density, island_count, preset)) = self.pending_scenario.take() {
+            self.start_scenario(id, map, population, fauna_density, island_count, preset);
         }
 
         // --- Timing ---
@@ -1009,8 +1020,8 @@ impl ApplicationHandler for App {
                                     ResetKind::Hard => {
                                         // Re-launch same scenario with a new seed
                                         if let Some(ref last) = self.last_scenario {
-                                            let (id, map, pop, fauna, islands) = *last.clone();
-                                            self.pending_scenario = Some((id, map, pop, fauna, islands));
+                                            let (id, map, pop, fauna, islands, ref preset) = *last.clone();
+                                            self.pending_scenario = Some((id, map, pop, fauna, islands, preset.clone()));
                                         }
                                     }
                                     ResetKind::Soft => {
@@ -1660,8 +1671,8 @@ impl ApplicationHandler for App {
             ScreenState::ScenarioSelect => {
                 self.scenario_select_ui.show(&self.egui_ctx);
                 match self.scenario_select_ui.action.clone() {
-                    ScenarioSelectAction::Start { id, map_size, population, fauna_density, island_count } => {
-                        self.pending_scenario = Some((id, map_size, population, fauna_density, island_count));
+                    ScenarioSelectAction::Start { id, map_size, population, fauna_density, island_count, map_preset } => {
+                        self.pending_scenario = Some((id, map_size, population, fauna_density, island_count, map_preset));
                     }
                     ScenarioSelectAction::Back => {
                         self.screen = ScreenState::MainMenu;
@@ -3100,6 +3111,7 @@ fn main() {
             10u32,
             FaunaDensity::Low,
             3u32,
+            None,
         ));
     }
     event_loop.run_app(&mut app).unwrap();

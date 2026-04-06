@@ -261,12 +261,14 @@ impl MainMenuUi {
 
 pub struct ScenarioSelectUi {
     pub action: ScenarioSelectAction,
-    /// Map size selection (width, height). Default (256, 256).
+    /// Map size selection (width, height). Default (1024, 1024).
     pub map_size: (u32, u32),
     /// Fauna density selection.
     pub fauna_density: FaunaDensity,
     /// Island count (1–10). Controls terrain noise frequency for Default map.
     pub island_count: u32,
+    /// Premium preset name when a preset card is selected; None for procedural.
+    pub selected_preset: Option<&'static str>,
 }
 
 /// Fauna density level, maps to predator_density in ScenarioDifficulty.
@@ -304,6 +306,8 @@ pub enum ScenarioSelectAction {
         population: u32,
         fauna_density: FaunaDensity,
         island_count: u32,
+        /// Set to "real_earth", "pangaea", or "archipelago" for premium presets; None for procedural.
+        map_preset: Option<String>,
     },
     Back,
 }
@@ -312,9 +316,10 @@ impl ScenarioSelectUi {
     pub fn new() -> Self {
         ScenarioSelectUi {
             action: ScenarioSelectAction::None,
-            map_size: (256, 256),
+            map_size: (1024, 1024),
             fauna_density: FaunaDensity::Low,
             island_count: 3,
+            selected_preset: None,
         }
     }
 
@@ -360,14 +365,16 @@ impl ScenarioSelectUi {
                     ui.add_space(8.0);
 
                     ui.horizontal(|ui| {
-                        let sizes: &[(&str, (u32, u32))] = &[
-                            ("Tiny", (128, 128)),
-                            ("Small", (256, 256)),
-                            ("Standard", (384, 384)),
-                            ("Huge", (512, 512)),
+                        let sizes: &[(&str, (u32, u32), &str)] = &[
+                            ("Small", (256, 256), "65K tiles"),
+                            ("Standard", (1024, 1024), "1M tiles"),
+                            ("Extensive", (2048, 2048), "4.1M tiles"),
+                            ("Titan", (3072, 3072), "9.4M tiles"),
+                            ("God Realm", (4096, 4096), "16.7M tiles"),
                         ];
-                        for &(label, size) in sizes {
-                            let is_selected = self.map_size == size;
+                        for &(label, size, tiles) in sizes {
+                            // Selected if no preset active and this size matches
+                            let is_selected = self.selected_preset.is_none() && self.map_size == size;
                             let bg = if is_selected {
                                 egui::Color32::from_rgba_premultiplied(60, 50, 20, 220)
                             } else {
@@ -382,13 +389,13 @@ impl ScenarioSelectUi {
                                 .fill(bg)
                                 .stroke(border)
                                 .corner_radius(egui::CornerRadius::same(10))
-                                .inner_margin(egui::Margin::symmetric(16, 12))
+                                .inner_margin(egui::Margin::symmetric(12, 10))
                                 .show(ui, |ui| {
-                                    ui.set_min_size(egui::vec2(120.0, 80.0));
+                                    ui.set_min_size(egui::vec2(100.0, 80.0));
                                     ui.vertical_centered(|ui| {
                                         ui.label(
                                             egui::RichText::new(label)
-                                                .size(16.0)
+                                                .size(14.0)
                                                 .strong()
                                                 .color(if is_selected {
                                                     egui::Color32::from_rgb(255, 220, 80)
@@ -397,14 +404,20 @@ impl ScenarioSelectUi {
                                                 }),
                                         );
                                         ui.label(
-                                            egui::RichText::new(format!("{}x{}", size.0, size.1))
-                                                .size(12.0)
-                                                .color(egui::Color32::from_gray(180)),
+                                            egui::RichText::new(format!("{}×{}", size.0, size.1))
+                                                .size(11.0)
+                                                .color(egui::Color32::from_gray(160)),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(tiles)
+                                                .size(10.0)
+                                                .color(egui::Color32::from_gray(120)),
                                         );
                                     });
                                 });
                             if card.response.interact(egui::Sense::click()).clicked() {
                                 self.map_size = size;
+                                self.selected_preset = None;
                             }
                         }
                     });
@@ -469,6 +482,80 @@ impl ScenarioSelectUi {
                         }
                     });
 
+                    ui.add_space(24.0);
+
+                    // PREMIUM SCENARIOS section
+                    ui.label(
+                        egui::RichText::new("PREMIUM SCENARIOS")
+                            .size(14.0)
+                            .strong()
+                            .color(egui::Color32::from_rgb(220, 200, 140)),
+                    );
+                    ui.add_space(8.0);
+
+                    ui.horizontal(|ui| {
+                        let presets: &[(&str, &str, (u32, u32), egui::Color32, egui::Color32)] = &[
+                            (
+                                "Real Earth",
+                                "real_earth",
+                                (4096, 2048),
+                                egui::Color32::from_rgba_premultiplied(20, 40, 80, 220),
+                                egui::Color32::from_rgb(60, 120, 200),
+                            ),
+                            (
+                                "Pangaea",
+                                "pangaea",
+                                (2048, 2048),
+                                egui::Color32::from_rgba_premultiplied(60, 40, 20, 220),
+                                egui::Color32::from_rgb(160, 120, 60),
+                            ),
+                            (
+                                "Archipelago",
+                                "archipelago",
+                                (3072, 3072),
+                                egui::Color32::from_rgba_premultiplied(15, 30, 60, 220),
+                                egui::Color32::from_rgb(40, 100, 180),
+                            ),
+                        ];
+                        for &(label, preset_key, size, bg_color, border_color) in presets {
+                            let is_selected = self.selected_preset == Some(preset_key);
+                            let border = if is_selected {
+                                egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 200, 60))
+                            } else {
+                                egui::Stroke::new(1.5, border_color)
+                            };
+                            let card = egui::Frame::default()
+                                .fill(bg_color)
+                                .stroke(border)
+                                .corner_radius(egui::CornerRadius::same(10))
+                                .inner_margin(egui::Margin::symmetric(18, 14))
+                                .show(ui, |ui| {
+                                    ui.set_min_size(egui::vec2(140.0, 90.0));
+                                    ui.vertical_centered(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(label)
+                                                .size(15.0)
+                                                .strong()
+                                                .color(if is_selected {
+                                                    egui::Color32::from_rgb(255, 220, 80)
+                                                } else {
+                                                    egui::Color32::from_rgb(200, 220, 255)
+                                                }),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(format!("{} × {}", size.0, size.1))
+                                                .size(11.0)
+                                                .color(border_color),
+                                        );
+                                    });
+                                });
+                            if card.response.interact(egui::Sense::click()).clicked() {
+                                self.selected_preset = Some(preset_key);
+                                self.map_size = size;
+                            }
+                        }
+                    });
+
                     ui.add_space(36.0);
 
                     // GENERATE WORLD button
@@ -492,6 +579,7 @@ impl ScenarioSelectUi {
                             population: 0,
                             fauna_density: self.fauna_density,
                             island_count: self.island_count,
+                            map_preset: self.selected_preset.map(|s| s.to_string()),
                         };
                     }
 

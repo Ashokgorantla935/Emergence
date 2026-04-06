@@ -296,7 +296,7 @@ impl RenderState {
         );
         let architecture_190_bind_group = Self::load_png_bind_group(
             &device, &queue,
-            include_bytes!("../../../../assets/sprites/190_assets/architecture_spritesheet_190.png"),
+            include_bytes!("../../../../assets/textures/architecture_spritesheet_190.png"),
             &atlas.bind_group_layout,
             "Architecture 190 Spritesheet",
         );
@@ -308,7 +308,7 @@ impl RenderState {
         );
         let fauna_190_bind_group = Self::load_png_bind_group(
             &device, &queue,
-            include_bytes!("../../../../assets/sprites/190_assets/fauna_spritesheet_190.png"),
+            include_bytes!("../../../../assets/textures/fauna_and_races_spritesheet_190.png"),
             &atlas.bind_group_layout,
             "Fauna 190 Spritesheet",
         );

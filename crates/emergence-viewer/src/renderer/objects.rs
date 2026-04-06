@@ -904,8 +904,8 @@ fn collect_chunk_decor(
                 // Cold: snow pines and conifers (row 1)
                 let v = FLORA_190_SNOW[hash % FLORA_190_SNOW.len()];
                 (v, 4.0 + (hash % 3) as f32 * 0.3, flora_cell)
-            } else if biome == Biome::Wetland || (moisture > 0.8 && biomass > 0.7) {
-                // Wetland: mushrooms + crystal mix
+            } else if biome == Biome::Wetland {
+                // Wetland ONLY: mushrooms + crystal mix (row 4)
                 if hash % 3 == 0 {
                     let v = FLORA_190_FUNGI[hash % FLORA_190_FUNGI.len()];
                     (v, 3.0 + (hash % 3) as f32 * 0.2, flora_cell)

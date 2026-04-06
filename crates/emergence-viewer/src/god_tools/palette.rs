@@ -8,15 +8,15 @@ use emergence_core::god_action::{GodAction, ResetKind};
 pub fn ensure_icons(ctx: &Context, state: &mut GodToolState) {
     if state.god_icons.is_none() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/god_tools_icons.png");
-        state.god_icons = Some(load_icon_grid(ctx, path, "god_icon"));
+        state.god_icons = Some(load_icon_grid(ctx, path, "god_icon", 8, 1));
     }
     if state.ui_icons.is_none() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/worldbox_ui_icons.png");
-        state.ui_icons = Some(load_icon_grid(ctx, path, "ui_icon"));
+        state.ui_icons = Some(load_icon_grid(ctx, path, "ui_icon", 8, 8));
     }
     if state.powers_icons.is_none() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/textures/powers_ui_spritesheet_190.png");
-        state.powers_icons = Some(load_icon_grid(ctx, path, "power_icon"));
+        state.powers_icons = Some(load_icon_grid(ctx, path, "power_icon", 10, 10));
     }
 }
 

@@ -92,8 +92,8 @@ impl ToolPalette {
 
     fn ensure_icons(&mut self, ctx: &egui::Context) {
         if self.god_icons.is_none() {
-            let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/god_tools_icons.png");
-            self.god_icons = Some(load_icon_grid(ctx, path, "tp_god_icon"));
+            let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/textures/powers_ui_spritesheet_190.png");
+            self.god_icons = Some(load_icon_grid(ctx, path, "tp_god_icon", 10, 10));
         }
     }
 

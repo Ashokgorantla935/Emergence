@@ -139,9 +139,9 @@ impl BeingRenderer {
 
             let mut atlas_uv = anim.atlas_uv(beings, i);
             let is_human = beings.hot.creature_type[i] == CreatureType::Human as u8;
-            // Fauna uses the new fauna_spritesheet (12 cols × 12 rows).
-            let cell_u = if is_human { ENTITY_CELL_U } else { 1.0 / 12.0 };
-            let cell_v = if is_human { ENTITY_CELL_V } else { 1.0 / 12.0 };
+            // Fauna uses the new fauna_spritesheet (12 cols × 12 rows), but clamped to 80% scale to strip border noise.
+            let cell_u = if is_human { ENTITY_CELL_U } else { (1.0 / 12.0) * 0.80 };
+            let cell_v = if is_human { ENTITY_CELL_V } else { (1.0 / 12.0) * 0.80 };
             
             let atlas_size = [cell_u, cell_v];
 

@@ -330,5 +330,10 @@ fn fauna_atlas_uv(ct: CreatureType, frame: u8) -> [f32; 2] {
         CreatureType::Human  => 0,  // fallback
     };
     let col = (frame as u32) % 3; // 3 frames per direction
-    [col as f32 * FAUNA_CELL_U, row as f32 * FAUNA_CELL_V]
+    
+    // Add a 10% inset to the UV mapping to neatly frame AI sprites and prevent neighbor clipping
+    [
+        col as f32 * FAUNA_CELL_U + (FAUNA_CELL_U * 0.10), 
+        row as f32 * FAUNA_CELL_V + (FAUNA_CELL_V * 0.10)
+    ]
 }

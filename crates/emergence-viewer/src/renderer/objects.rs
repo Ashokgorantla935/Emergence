@@ -106,7 +106,8 @@ const fn uv_190(col: u8, row: u8) -> [f32; 2] {
 // Flora sheet: 12×12 grid (~85px square cells on 1024×1024) — confirmed by Gemini
 const CELL_FLORA: f32 = 1.0 / 12.0;
 const fn uv_flora(col: u8, row: u8) -> [f32; 2] {
-    [col as f32 * CELL_FLORA, row as f32 * CELL_FLORA]
+    // 10% inset to strip out AI generated cell boundary noise
+    [col as f32 * CELL_FLORA + (CELL_FLORA * 0.10), row as f32 * CELL_FLORA + (CELL_FLORA * 0.10)]
 }
 
 // Flora 190 spritesheet — 12×12 grid (Gemini confirmed), 85px cells on 1024×1024
@@ -880,12 +881,13 @@ fn collect_chunk_decor(
 
             let temp = terrain.temperature_base[idx];
             // Flora atlas is 12 cols × 8 rows — use non-square cell sizes
-            let flora_cell = [CELL_FLORA, CELL_FLORA];
+            // 80% sampling bound to match the 10% top/left inset
+            let flora_cell = [CELL_FLORA * 0.80, CELL_FLORA * 0.80];
 
             let (atlas_uv, size, atlas_cell) = if temp < 0.2 {
                 // Cold: snow pines and conifers (row 1)
                 let v = FLORA_190_SNOW[hash % FLORA_190_SNOW.len()];
-                (v, 4.0 + (hash % 3) as f32 * 0.3, flora_cell)
+                (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell)
             } else if biome == Biome::Wetland {
                 // Wetland ONLY: mushrooms + crystal mix (row 4)
                 if hash % 3 == 0 {
@@ -904,7 +906,7 @@ fn collect_chunk_decor(
                     let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()];
                     (v, 2.0 + (hash % 2) as f32 * 0.2, flora_cell)
                 } else {
-                    let v = FLORA_190_GROUND[hash % FLORA_190_GROUND.len()];
+                    let v = FLORA_190_EXOTIC[hash % FLORA_190_EXOTIC.len()];
                     (v, 1.5, flora_cell)
                 }
             } else if biome == Biome::Mountain {
@@ -923,7 +925,7 @@ fn collect_chunk_decor(
                 // Forest: 70% temperate trees, 20% bushes, 10% flowers
                 if hash % 10 < 7 {
                     let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
-                    (v, 4.5 + (hash % 3) as f32 * 0.3, [CELL_FLORA * 1.5, CELL_FLORA * 1.5]) // expand to prevent clipping
+                    (v, 2.5 + (hash % 3) as f32 * 0.3, flora_cell)
                 } else if hash % 10 < 9 {
                     let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
                     (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell)
@@ -934,10 +936,8 @@ fn collect_chunk_decor(
             } else if biome == Biome::Grassland && temp >= 0.65 {
                 // Savannah: exotic palms and tropical trees (row 2)
                 let mut v = FLORA_190_EXOTIC[hash % FLORA_190_EXOTIC.len()];
-                // Expand UV sampling size to 1.5x width and 2.0x height to avoid wide/tall assets getting clipped 
-                v[0] -= CELL_FLORA * 0.25;
-                v[1] -= CELL_FLORA * 1.0;
-                (v, 5.0 + (hash % 3) as f32 * 0.4, [CELL_FLORA * 1.5, CELL_FLORA * 2.0])
+                // standard 1.x scale
+                (v, 2.5 + (hash % 3) as f32 * 0.4, flora_cell)
             } else {
                 // Temperate grassland: mix of trees, bushes, flowers
                 if hash % 8 < 1 { // Only 1/8 trees in grassland to make it cleaner

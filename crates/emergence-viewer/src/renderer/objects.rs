@@ -103,11 +103,10 @@ const fn uv_190(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * CELL_190, row as f32 * CELL_190]
 }
 
-// Flora sheet: 12 columns × 8 rows (~85px × 128px cells on 1024×1024)
-const CELL_FLORA_X: f32 = 1.0 / 12.0;
-const CELL_FLORA_Y: f32 = 1.0 / 8.0;
+// Flora sheet: 12×12 grid (~85px square cells on 1024×1024) — confirmed by Gemini
+const CELL_FLORA: f32 = 1.0 / 12.0;
 const fn uv_flora(col: u8, row: u8) -> [f32; 2] {
-    [col as f32 * CELL_FLORA_X, row as f32 * CELL_FLORA_Y]
+    [col as f32 * CELL_FLORA, row as f32 * CELL_FLORA]
 }
 
 // Flora 190 spritesheet — visually verified grid layout:
@@ -886,7 +885,7 @@ fn collect_chunk_decor(
 
             let temp = terrain.temperature_base[idx];
             // Flora atlas is 12 cols × 8 rows — use non-square cell sizes
-            let flora_cell = [CELL_FLORA_X, CELL_FLORA_Y];
+            let flora_cell = [CELL_FLORA, CELL_FLORA];
 
             let (atlas_uv, size, atlas_cell) = if temp < 0.2 {
                 // Cold: snow pines and conifers (row 1)

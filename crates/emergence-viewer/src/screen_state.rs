@@ -326,7 +326,7 @@ impl ScenarioSelectUi {
     pub fn show(&mut self, ctx: &egui::Context) {
         self.action = ScenarioSelectAction::None;
 
-        // Full-screen dark background painted directly onto the foreground layer.
+        // Translucent dark overlay — lets the world behind show through
         let painter = ctx.layer_painter(egui::LayerId::new(
             egui::Order::Foreground,
             egui::Id::new("scenario_bg"),
@@ -334,83 +334,93 @@ impl ScenarioSelectUi {
         painter.rect_filled(
             ctx.screen_rect(),
             0.0,
-            egui::Color32::from_rgba_premultiplied(14, 14, 18, 240),
+            egui::Color32::from_rgba_premultiplied(8, 12, 20, 160),
         );
 
         egui::Area::new(egui::Id::new("scenario_select_overlay"))
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                ui.set_width(700.0);
+                egui::Frame::none()
+                    .fill(egui::Color32::from_rgba_premultiplied(15, 20, 35, 200))
+                    .corner_radius(egui::CornerRadius::same(16))
+                    .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(80, 120, 200)))
+                    .inner_margin(egui::Margin::symmetric(40, 30))
+                    .show(ui, |ui| {
+                ui.set_width(620.0);
                 ui.vertical_centered(|ui| {
-                    ui.add_space(16.0);
-
-                    // Title — large bold golden text
+                    // Game title
                     ui.label(
-                        egui::RichText::new("CREATE NEW WORLD")
-                            .size(40.0)
+                        egui::RichText::new("EMERGENCE")
+                            .size(48.0)
                             .strong()
-                            .color(egui::Color32::from_rgb(255, 220, 80)),
+                            .color(egui::Color32::from_rgb(100, 220, 255)),
                     );
-                    ui.add_space(28.0);
+                    ui.label(
+                        egui::RichText::new("Create New World")
+                            .size(18.0)
+                            .color(egui::Color32::from_rgb(200, 200, 220)),
+                    );
+                    ui.add_space(24.0);
 
                     // MAP SIZE section
                     ui.label(
                         egui::RichText::new("MAP SIZE")
-                            .size(16.0)
+                            .size(14.0)
                             .strong()
-                            .color(egui::Color32::WHITE),
+                            .color(egui::Color32::from_rgb(140, 180, 255)),
                     );
-                    ui.add_space(8.0);
+                    ui.add_space(6.0);
 
                     ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
                         let sizes: &[(&str, (u32, u32), &str)] = &[
-                            ("Small", (256, 256), "65K tiles"),
-                            ("Standard", (1024, 1024), "1M tiles"),
-                            ("Extensive", (2048, 2048), "4.1M tiles"),
-                            ("Titan", (3072, 3072), "9.4M tiles"),
-                            ("God Realm", (4096, 4096), "16.7M tiles"),
+                            ("Small", (256, 256), "65K"),
+                            ("Standard", (1024, 1024), "1M"),
+                            ("Extensive", (2048, 2048), "4.1M"),
+                            ("Titan", (3072, 3072), "9.4M"),
+                            ("God Realm", (4096, 4096), "16.7M"),
                         ];
                         for &(label, size, tiles) in sizes {
-                            // Selected if no preset active and this size matches
                             let is_selected = self.selected_preset.is_none() && self.map_size == size;
                             let bg = if is_selected {
-                                egui::Color32::from_rgba_premultiplied(80, 65, 20, 240)
+                                egui::Color32::from_rgb(60, 80, 140)
                             } else {
-                                egui::Color32::from_rgba_premultiplied(35, 35, 45, 230)
+                                egui::Color32::from_rgb(30, 38, 55)
                             };
                             let border = if is_selected {
-                                egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 200, 60))
+                                egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 180, 255))
                             } else {
-                                egui::Stroke::new(1.0, egui::Color32::from_gray(60))
+                                egui::Stroke::new(1.0, egui::Color32::from_rgb(50, 65, 90))
                             };
                             let card = egui::Frame::default()
                                 .fill(bg)
                                 .stroke(border)
-                                .corner_radius(egui::CornerRadius::same(10))
-                                .inner_margin(egui::Margin::symmetric(12, 10))
+                                .corner_radius(egui::CornerRadius::same(8))
+                                .inner_margin(egui::Margin::symmetric(8, 8))
                                 .show(ui, |ui| {
-                                    ui.set_min_size(egui::vec2(100.0, 80.0));
+                                    ui.set_min_size(egui::vec2(100.0, 60.0));
+                                    ui.set_max_size(egui::vec2(110.0, 70.0));
                                     ui.vertical_centered(|ui| {
                                         ui.label(
                                             egui::RichText::new(label)
-                                                .size(14.0)
+                                                .size(13.0)
                                                 .strong()
                                                 .color(if is_selected {
-                                                    egui::Color32::from_rgb(255, 220, 80)
+                                                    egui::Color32::from_rgb(140, 210, 255)
                                                 } else {
-                                                    egui::Color32::from_rgb(230, 220, 200)
+                                                    egui::Color32::WHITE
                                                 }),
                                         );
                                         ui.label(
                                             egui::RichText::new(format!("{}×{}", size.0, size.1))
-                                                .size(11.0)
-                                                .color(egui::Color32::from_rgb(200, 200, 200)),
+                                                .size(10.0)
+                                                .color(egui::Color32::from_rgb(180, 195, 220)),
                                         );
                                         ui.label(
                                             egui::RichText::new(tiles)
-                                                .size(10.0)
-                                                .color(egui::Color32::from_rgb(170, 170, 170)),
+                                                .size(9.0)
+                                                .color(egui::Color32::from_rgb(120, 150, 190)),
                                         );
                                     });
                                 });
@@ -426,9 +436,9 @@ impl ScenarioSelectUi {
                     // ISLAND DENSITY section
                     ui.label(
                         egui::RichText::new("ISLAND DENSITY")
-                            .size(16.0)
+                            .size(14.0)
                             .strong()
-                            .color(egui::Color32::WHITE),
+                            .color(egui::Color32::from_rgb(140, 180, 255)),
                     );
                     ui.add_space(8.0);
 
@@ -488,13 +498,14 @@ impl ScenarioSelectUi {
                     // PREMIUM SCENARIOS section
                     ui.label(
                         egui::RichText::new("PREMIUM SCENARIOS")
-                            .size(16.0)
+                            .size(14.0)
                             .strong()
-                            .color(egui::Color32::WHITE),
+                            .color(egui::Color32::from_rgb(255, 200, 100)),
                     );
                     ui.add_space(8.0);
 
                     ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
                         let presets: &[(&str, &str, (u32, u32), egui::Color32, egui::Color32)] = &[
                             (
                                 "Real Earth",
@@ -532,6 +543,7 @@ impl ScenarioSelectUi {
                                 .inner_margin(egui::Margin::symmetric(18, 14))
                                 .show(ui, |ui| {
                                     ui.set_min_size(egui::vec2(160.0, 110.0));
+                                    ui.set_max_size(egui::vec2(190.0, 120.0));
                                     ui.vertical_centered(|ui| {
                                         // Mini-map preview (painted geography)
                                         let (preview_rect, _) = ui.allocate_exact_size(
@@ -616,15 +628,15 @@ impl ScenarioSelectUi {
                     // GENERATE WORLD button
                     if ui
                         .add_sized(
-                            egui::vec2(300.0, 60.0),
+                            egui::vec2(280.0, 50.0),
                             egui::Button::new(
                                 egui::RichText::new("GENERATE WORLD")
                                     .strong()
-                                    .size(20.0)
-                                    .color(egui::Color32::BLACK),
+                                    .size(18.0)
+                                    .color(egui::Color32::from_rgb(10, 15, 30)),
                             )
-                            .fill(egui::Color32::from_rgb(255, 200, 60))
-                            .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(200, 160, 40))),
+                            .fill(egui::Color32::from_rgb(100, 200, 255))
+                            .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(60, 160, 220))),
                         )
                         .clicked()
                     {
@@ -657,8 +669,9 @@ impl ScenarioSelectUi {
                         self.action = ScenarioSelectAction::Back;
                     }
 
-                    ui.add_space(16.0);
+                    ui.add_space(12.0);
                 });
+                    }); // Frame
             });
     }
 }

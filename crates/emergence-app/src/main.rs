@@ -3003,9 +3003,9 @@ fn build_kingdom_frame(
             && k.leader_idx < world.beings.cold.true_memetic_hash.len()
         {
             let hash = &world.beings.cold.true_memetic_hash[k.leader_idx];
-            let r = (hash[0] % 255) as u8;
-            let g = (hash[1] % 255) as u8;
-            let b = (hash[2] % 255) as u8;
+            let r = hash[0] as u8;
+            let g = hash[1] as u8;
+            let b = hash[2] as u8;
             [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
         } else {
             [k.color[0] as f32 / 255.0, k.color[1] as f32 / 255.0, k.color[2] as f32 / 255.0]

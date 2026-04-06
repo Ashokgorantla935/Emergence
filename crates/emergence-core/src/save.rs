@@ -216,6 +216,18 @@ pub struct SaveFile {
     pub being_caloric_energy: Vec<f32>,
     pub being_last_fire_tick: Vec<u32>,
 
+    // V50 metaphysical fields (hot)
+    pub being_dread_ratio: Vec<f32>,
+    pub being_boredom_entropy: Vec<f32>,
+    pub being_pattern_hallucination: Vec<f32>,
+    pub being_karma_modifier: Vec<f32>,
+    // V50 metaphysical fields (cold)
+    pub being_true_memetic_hash: Vec<[u16; 8]>,
+    pub being_false_memetic_hash: Vec<[u16; 8]>,
+    pub being_abstract_fiction_hash: Vec<u64>,
+    pub being_generational_trauma: Vec<f32>,
+    pub being_metaphysical_flags: Vec<u32>,
+
     // World Laws (Phase 6)
     pub laws: WorldLaws,
 
@@ -398,6 +410,17 @@ impl SaveFile {
             being_caloric_energy: world.beings.hot.caloric_energy.clone(),
             being_last_fire_tick: world.beings.hot.last_fire_tick.clone(),
 
+            // V50 metaphysical fields
+            being_dread_ratio: world.beings.hot.dread_ratio.clone(),
+            being_boredom_entropy: world.beings.hot.boredom_entropy.clone(),
+            being_pattern_hallucination: world.beings.hot.pattern_hallucination.clone(),
+            being_karma_modifier: world.beings.hot.karma_modifier.clone(),
+            being_true_memetic_hash: world.beings.cold.true_memetic_hash.clone(),
+            being_false_memetic_hash: world.beings.cold.false_memetic_hash.clone(),
+            being_abstract_fiction_hash: world.beings.cold.abstract_fiction_hash.clone(),
+            being_generational_trauma: world.beings.cold.generational_trauma.clone(),
+            being_metaphysical_flags: world.beings.cold.metaphysical_flags.clone(),
+
             // World Laws
             laws: world.laws.clone(),
 
@@ -569,6 +592,17 @@ impl SaveFile {
             };
             beings.cold.genotypes.push(genotype);
             beings.cold.home_settlement_pos.push(None);
+
+            // V50 metaphysical fields
+            beings.hot.dread_ratio.push(if i < self.being_dread_ratio.len() { self.being_dread_ratio[i] } else { 0.0 });
+            beings.hot.boredom_entropy.push(if i < self.being_boredom_entropy.len() { self.being_boredom_entropy[i] } else { 0.0 });
+            beings.hot.pattern_hallucination.push(if i < self.being_pattern_hallucination.len() { self.being_pattern_hallucination[i] } else { 0.02 });
+            beings.hot.karma_modifier.push(if i < self.being_karma_modifier.len() { self.being_karma_modifier[i] } else { 0.0 });
+            beings.cold.true_memetic_hash.push(if i < self.being_true_memetic_hash.len() { self.being_true_memetic_hash[i] } else { std::array::from_fn(|_| fastrand::u16(..)) });
+            beings.cold.false_memetic_hash.push(if i < self.being_false_memetic_hash.len() { self.being_false_memetic_hash[i] } else { [0u16; 8] });
+            beings.cold.abstract_fiction_hash.push(if i < self.being_abstract_fiction_hash.len() { self.being_abstract_fiction_hash[i] } else { 0u64 });
+            beings.cold.generational_trauma.push(if i < self.being_generational_trauma.len() { self.being_generational_trauma[i] } else { 0.0 });
+            beings.cold.metaphysical_flags.push(if i < self.being_metaphysical_flags.len() { self.being_metaphysical_flags[i] } else { 0u32 });
 
             // Relationships
             let mut slots = crate::being::memory::RelationshipSlots::new();

@@ -12,3 +12,4 @@ pub mod names;
 pub mod hebbian;
 pub mod brain;
 pub mod memes;
+pub mod memetics;

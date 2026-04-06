@@ -220,6 +220,15 @@ pub struct BeingsHot {
     /// Fauna beings get zeroed weights (unused — they use fauna_params instead).
     pub brain_weights: Vec<[f32; 318]>,
 
+    /// Axiom 9: age/lifespan panic ratio (0.0–1.0). Rises as being approaches death.
+    pub dread_ratio: Vec<f32>,
+    /// Axiom 7: idle play generation entropy. Rises when needs satisfied and nothing to do.
+    pub boredom_entropy: Vec<f32>,
+    /// Axiom 8: input corruption chance (0.0–1.0). Small baseline; rises under stress.
+    pub pattern_hallucination: Vec<f32>,
+    /// Axiom 26: generational debt modifier. Positive = karmic credit; negative = debt.
+    pub karma_modifier: Vec<f32>,
+
     pub count: usize,
     pub alive_count: usize,
     pub human_count: usize,  // updated by rebuild_partition_indices
@@ -264,6 +273,10 @@ impl Genotype {
     }
 }
 
+// Metaphysical flag constants (stored in BeingsCold::metaphysical_flags as u32 bitmask)
+pub const BUDDHA_STATE: u32 = 1 << 0;    // Being has achieved transcendent equanimity
+pub const REALIZED_FORMS: u32 = 1 << 1; // Being perceives the underlying forms of reality
+
 /// Cold data — accessed only for inspector, social actions, and memory lookups.
 pub struct BeingsCold {
     pub causal_memories: Vec<CausalMemoryRing>,
@@ -283,6 +296,17 @@ pub struct BeingsCold {
     /// Home settlement position: set when a being builds or bonds to a structure.
     /// Used by SeekShelter to move toward a known home rather than any nearby structure.
     pub home_settlement_pos: Vec<Option<[u32; 2]>>,
+
+    /// Axiom 16: cultural identity hash. Random at spawn; drifts toward group consensus.
+    pub true_memetic_hash: Vec<[u16; 8]>,
+    /// Axiom 5: deception mask hash. Diverges from true_memetic_hash when being is deceptive.
+    pub false_memetic_hash: Vec<[u16; 8]>,
+    /// Axiom 13: shared reality / religion fingerprint. Group-wide fiction alignment.
+    pub abstract_fiction_hash: Vec<u64>,
+    /// Axiom 17: inherited anxiety from parent. Set at birth; decays slowly over lifetime.
+    pub generational_trauma: Vec<f32>,
+    /// Bit flags for metaphysical states. See BUDDHA_STATE, REALIZED_FORMS constants.
+    pub metaphysical_flags: Vec<u32>,
 }
 
 /// Wrapper that owns both hot and cold sub-structs. All callers go through this.
@@ -325,6 +349,10 @@ impl Beings {
                 caloric_energy: Vec::new(),
                 last_fire_tick: Vec::new(),
                 brain_weights: Vec::new(),
+                dread_ratio: Vec::new(),
+                boredom_entropy: Vec::new(),
+                pattern_hallucination: Vec::new(),
+                karma_modifier: Vec::new(),
                 count: 0,
                 alive_count: 0,
                 human_count: 0,
@@ -344,6 +372,11 @@ impl Beings {
                 meme_slots: Vec::new(),
                 genotypes: Vec::new(),
                 home_settlement_pos: Vec::new(),
+                true_memetic_hash: Vec::new(),
+                false_memetic_hash: Vec::new(),
+                abstract_fiction_hash: Vec::new(),
+                generational_trauma: Vec::new(),
+                metaphysical_flags: Vec::new(),
             },
         }
     }
@@ -388,6 +421,10 @@ impl Beings {
         self.hot.caloric_energy.push(0.8);
         self.hot.last_fire_tick.push(0u32);
         self.hot.brain_weights.push([0.0; 318]); // zeroed by default; init_human_brain called for humans after spawn
+        self.hot.dread_ratio.push(0.0);
+        self.hot.boredom_entropy.push(0.0);
+        self.hot.pattern_hallucination.push(0.02); // small baseline corruption chance
+        self.hot.karma_modifier.push(0.0);
         self.cold.causal_memories.push(CausalMemoryRing::new());
         self.cold.relationships.push(RelationshipSlots::new());
         self.cold.traces.push(None); // allocated on demand when inspector selects
@@ -399,6 +436,11 @@ impl Beings {
         self.cold.meme_slots.push([super::memes::MemeSlotState::default(); 4]);
         self.cold.genotypes.push(Genotype::default());
         self.cold.home_settlement_pos.push(None);
+        self.cold.true_memetic_hash.push(std::array::from_fn(|_| fastrand::u16(..)));
+        self.cold.false_memetic_hash.push([0u16; 8]);
+        self.cold.abstract_fiction_hash.push(0u64);
+        self.cold.generational_trauma.push(0.0); // lifecycle code overrides from parent at birth
+        self.cold.metaphysical_flags.push(0u32);
         self.hot.count += 1;
         self.hot.alive_count += 1;
         idx

@@ -67,13 +67,31 @@ pub fn process_witnessing(
 
         let generous_trait = beings.hot.personalities[observer][TRAIT_GENEROUS];
 
+        // Axiom 5 & 13: compute memetic trust for observer→actor cultural alignment.
+        // [u16; 8] is Copy, so reading hashes does not conflict with later mutable relationship borrows.
+        let divergence = {
+            let active_hash = if beings.cold.false_memetic_hash[observer] != [0u16; 8] {
+                beings.cold.false_memetic_hash[observer]
+            } else {
+                beings.cold.true_memetic_hash[observer]
+            };
+            super::memetics::memetic_divergence(&active_hash, &beings.cold.true_memetic_hash[actor])
+        };
+        let mut memetic_trust = super::memetics::divergence_to_trust(divergence);
+        // Axiom 13: shared abstract fiction overrides trust to 1.0
+        if beings.cold.abstract_fiction_hash[observer] == beings.cold.abstract_fiction_hash[actor]
+            && beings.cold.abstract_fiction_hash[observer] != 0
+        {
+            memetic_trust = 1.0;
+        }
+
         match action {
             Action::TakeFood => {
-                // Harmful action witnessed
+                // Harmful action witnessed — scaled by cultural alignment
                 let imp = beings.cold.relationships[observer].get_or_create(actor as u32, current_tick);
-                imp.warmth -= 0.1 * (generous_trait + 1.0) / 2.0;
+                imp.warmth -= 0.1 * (generous_trait + 1.0) / 2.0 * memetic_trust;
                 imp.warmth = imp.warmth.clamp(-1.0, 1.0);
-                imp.trust -= 0.05;
+                imp.trust -= 0.05 * memetic_trust;
                 imp.trust = imp.trust.clamp(-1.0, 1.0);
                 imp.last_interaction = current_tick;
                 imp.memory_count = imp.memory_count.saturating_add(1);
@@ -105,11 +123,11 @@ pub fn process_witnessing(
                 }
             }
             Action::ShareFood => {
-                // Kind action witnessed
+                // Kind action witnessed — scaled by cultural alignment
                 let imp = beings.cold.relationships[observer].get_or_create(actor as u32, current_tick);
-                imp.warmth += 0.05;
+                imp.warmth += 0.05 * memetic_trust;
                 imp.warmth = imp.warmth.clamp(-1.0, 1.0);
-                imp.trust += 0.03;
+                imp.trust += 0.03 * memetic_trust;
                 imp.trust = imp.trust.clamp(-1.0, 1.0);
                 imp.last_interaction = current_tick;
                 imp.memory_count = imp.memory_count.saturating_add(1);

@@ -292,7 +292,41 @@ pub fn score_actions(
             brain_input[i] += meme_bias[i];
         }
 
+        // Axiom 8: Pattern hallucination — corrupt a random input node before evaluation.
+        // Uses age-based hash to avoid consuming the shared RNG (preserves Boltzmann determinism).
+        // +1 offset on both terms prevents zero-seed when age=0 and index=0.
+        {
+            let halluc_seed = (beings.hot.ages[being_index] as u64).wrapping_add(1)
+                .wrapping_mul(0x9e3779b97f4a7c15)
+                ^ ((being_index as u64).wrapping_add(1).wrapping_mul(0x517cc1b727220a95));
+            let halluc_roll = (halluc_seed >> 32) as f32 / u32::MAX as f32;
+            if halluc_roll < beings.hot.pattern_hallucination[being_index] {
+                let corrupt_idx = (halluc_seed as usize) % 14;
+                brain_input[corrupt_idx] *= 2.0;
+            }
+        }
+
         let (mut q_values, _hidden) = brain::forward(&beings.hot.brain_weights[being_index], &brain_input);
+
+        // Axiom 9: Mortality dread — old beings increasingly flee and build
+        let dread = beings.hot.dread_ratio[being_index];
+        if dread > 0.1 {
+            let dread_mult = 1.0 + f32::exp(dread * 4.0);
+            q_values[Action::Flee as usize] *= dread_mult;
+            q_values[Action::AvoidBeing as usize] *= dread_mult;
+            q_values[Action::Build as usize] *= dread_mult;
+        }
+
+        // Axiom 7: Boredom entropy spike — idle beings act unpredictably.
+        // Uses age-based hash (same pattern as hallucination) to avoid RNG state drift.
+        let boredom = beings.hot.boredom_entropy[being_index];
+        if boredom > 1.0 {
+            let boredom_seed = (beings.hot.ages[being_index] as u64)
+                .wrapping_mul(0x6c62272e07bb0142)
+                ^ (being_index as u64);
+            let spike_idx = (boredom_seed as usize) % 22;
+            q_values[spike_idx] += boredom * 10.0;
+        }
 
         // Guard behavior: bold humans detect Crime signal and prioritize hunting the criminal.
         // Read Crime separately (channel 7, not in LocalSignals cache which only holds 7 channels).

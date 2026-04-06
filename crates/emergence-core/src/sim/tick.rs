@@ -310,6 +310,22 @@ pub fn tick(world: &mut World) {
             if let Some(imp) = world.beings.cold.relationships[i].find(dead_idx as u32) {
                 if imp.warmth > 0.3 {
                     trigger_emotion(&mut world.beings, i, EMO_GRIEF, 0.9);
+
+                    // Axiom 12: grief erodes brain weights when culturally similar being dies
+                    if world.beings.hot.creature_type[i] == CreatureType::Human as u8
+                        && world.beings.hot.creature_type[dead_idx] == CreatureType::Human as u8
+                    {
+                        let hash_i = world.beings.cold.true_memetic_hash[i];
+                        let hash_d = world.beings.cold.true_memetic_hash[dead_idx];
+                        let divergence: u32 = hash_i.iter().zip(hash_d.iter())
+                            .map(|(&a, &b)| (a ^ b).count_ones())
+                            .sum();
+                        if divergence < 32 {
+                            for w in &mut world.beings.hot.brain_weights[i] {
+                                *w *= 0.99;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -381,6 +397,46 @@ pub fn tick(world: &mut World) {
             &mut world.rng,
             world.tick,
         );
+    }
+
+    // 5e-pre2-metaphysical. Staggered cognitive axiom tick (every 10 ticks)
+    // Heavy metaphysical math runs here instead of every tick to stay within 60fps budget.
+    if world.tick % 10 == 0 {
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] == BeingState::Dead { continue; }
+
+            // Axiom 9: Update mortality dread ratio (age / lifespan)
+            let age = world.beings.hot.ages[i] as f32;
+            let lifespan = world.beings.hot.lifespans[i] as f32;
+            world.beings.hot.dread_ratio[i] = (age / lifespan).clamp(0.0, 1.0);
+
+            // Axiom 8: Hallucination chance rises with age/dread
+            world.beings.hot.pattern_hallucination[i] = 0.02 + world.beings.hot.dread_ratio[i] * 0.1;
+
+            // Axiom 7: Boredom entropy — humans with satisfied needs and no threat accumulate entropy
+            if world.beings.hot.creature_type[i] == CreatureType::Human as u8 {
+                let hunger = world.beings.hot.needs[i][NEED_HUNGER];
+                let fear = world.beings.hot.emotions[i][EMO_FEAR];
+                if hunger > 0.7 && fear < 0.2 {
+                    world.beings.hot.boredom_entropy[i] = (world.beings.hot.boredom_entropy[i] + 0.005).min(2.0);
+                } else {
+                    world.beings.hot.boredom_entropy[i] = (world.beings.hot.boredom_entropy[i] - 0.01).max(0.0);
+                }
+            }
+        }
+
+        // Axiom 10: Tragedy of Commons — overpopulation depletes local food resources
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] == BeingState::Dead { continue; }
+            let pos = world.beings.hot.positions[i];
+            let nearby_count = world.spatial.count_in_radius(pos[0], pos[1], 5.0);
+            if nearby_count > 5 {
+                let cx = (pos[0] as u32).min(world.terrain.width - 1);
+                let cy = (pos[1] as u32).min(world.terrain.height - 1);
+                let cell_idx = (cy * world.terrain.width + cx) as usize;
+                world.resources.food[cell_idx] = (world.resources.food[cell_idx] - 0.002).max(0.0);
+            }
+        }
     }
 
     // 5e-pre2a. Danger flee override — highest priority survival behavior
@@ -518,6 +574,12 @@ pub fn tick(world: &mut World) {
     // 5f. Execute actions (sequential)
     for (i, decision) in decisions.iter().enumerate() {
         if world.beings.hot.states[i] != BeingState::Awake {
+            continue;
+        }
+
+        // Axiom 28/29/30: Buddha state — transcendence, no physical activity needed
+        if world.beings.cold.metaphysical_flags[i] & BUDDHA_STATE != 0 {
+            world.beings.hot.caloric_energy[i] = 1.0;
             continue;
         }
 

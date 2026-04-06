@@ -431,6 +431,13 @@ pub fn tick_human_breeding(beings: &mut Beings, terrain: &crate::world::terrain:
         }
         
         if let Some(p) = partner {
+            // Axiom 26: Karma modifier reduces reproduction probability for negative karma beings
+            let karma = beings.hot.karma_modifier[i];
+            if karma < 0.0 {
+                let spawn_chance = (1.0 + karma).max(0.0); // karma=-0.5 → 50% chance
+                if rng.f32() > spawn_chance { continue; }
+            }
+
             // Initiate spawn!
             let jitter_x = (rng.f32() - 0.5) * 2.0;
             let jitter_y = (rng.f32() - 0.5) * 2.0;
@@ -440,7 +447,7 @@ pub fn tick_human_breeding(beings: &mut Beings, terrain: &crate::world::terrain:
                 [(pos[0] + jitter_x).clamp(0.0, terrain.width as f32 - 1.0),
                  (pos[1] + jitter_y).clamp(0.0, terrain.height as f32 - 1.0)]
             ));
-            
+
             // Apply cooldowns so they don't spawn 100 babies
             beings.cold.last_birth_tick[i] = world_tick;
             beings.cold.last_birth_tick[p] = world_tick;
@@ -464,7 +471,20 @@ pub fn tick_human_breeding(beings: &mut Beings, terrain: &crate::world::terrain:
         let child_idx = beings.spawn(child_pos, child_personality, child_life as u32, [p1 as u32, p2 as u32]);
         beings.cold.genotypes[child_idx] = child_geno;
         beings.hot.cultural_frequency[child_idx] = beings.hot.cultural_frequency[p1]; // Inherit culture
-        
+
+        // Axiom 16: inherit memetic hash from primary parent with small mutations
+        let parent_hash = beings.cold.true_memetic_hash[p1];
+        for k in 0..8 {
+            beings.cold.true_memetic_hash[child_idx][k] = parent_hash[k] ^ rng.u16(..256);
+        }
+        // Axiom 13: inherit shared fiction (religion/culture) from primary parent
+        beings.cold.abstract_fiction_hash[child_idx] = beings.cold.abstract_fiction_hash[p1];
+
+        // Axiom 17: Generational trauma — inherit anxiety from parent's dread and trauma
+        let parent_dread = beings.hot.dread_ratio[p1];
+        let parent_trauma = beings.cold.generational_trauma[p1];
+        beings.cold.generational_trauma[child_idx] = ((parent_trauma + parent_dread) / 2.0).clamp(0.0, 1.0);
+
         // Init brain for human
         beings.hot.brain_weights[child_idx] = crate::being::data::init_human_brain(rng);
         beings.hot.human_indices.push(child_idx);

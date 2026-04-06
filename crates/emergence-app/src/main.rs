@@ -2998,13 +2998,21 @@ fn build_kingdom_frame(
         } else {
             k.centroid
         };
+        // Derive kingdom color from leader's memetic hash (first 3 channels → RGB)
+        let color = if k.leader_idx < world.beings.hot.count
+            && k.leader_idx < world.beings.cold.true_memetic_hash.len()
+        {
+            let hash = &world.beings.cold.true_memetic_hash[k.leader_idx];
+            let r = (hash[0] % 255) as u8;
+            let g = (hash[1] % 255) as u8;
+            let b = (hash[2] % 255) as u8;
+            [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
+        } else {
+            [k.color[0] as f32 / 255.0, k.color[1] as f32 / 255.0, k.color[2] as f32 / 255.0]
+        };
         KingdomInfo {
             id: k.id,
-            color: [
-                k.color[0] as f32 / 255.0,
-                k.color[1] as f32 / 255.0,
-                k.color[2] as f32 / 255.0,
-            ],
+            color,
             capital_pos: k.centroid,
             leader_idx: k.leader_idx,
             at_war: !k.at_war_with.is_empty(),

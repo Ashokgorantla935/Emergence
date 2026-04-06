@@ -7,6 +7,7 @@ use emergence_core::being::data::{
     BEING_TRAIT_HUNTER, BEING_TRAIT_PACIFIST, BEING_TRAIT_EXPLORER, BEING_TRAIT_LEADER,
     BEING_TRAIT_ELDER, BEING_TRAIT_WOLF_SLAYER, BEING_TRAIT_BEAR_SLAYER,
     BEING_TRAIT_SURVIVOR, BEING_TRAIT_FOUNDER, BEING_TRAIT_VETERAN,
+    BUDDHA_STATE, REALIZED_FORMS,
 };
 use emergence_core::sim::spatial::SpatialIndex;
 use emergence_core::sim::world_state::EventLog;
@@ -366,6 +367,135 @@ impl Inspector {
         if child_count > 0 {
             ui.label(format!("Has {child_count} children"));
         }
+
+        // --- Metaphysical / Soul section ---
+        ui.separator();
+        egui::CollapsingHeader::new(egui::RichText::new("Soul").strong())
+            .default_open(false)
+            .show(ui, |ui| {
+                egui::Frame::none()
+                    .fill(egui::Color32::from_rgba_premultiplied(8, 8, 14, 200))
+                    .corner_radius(egui::CornerRadius::same(6))
+                    .inner_margin(egui::Margin::same(6))
+                    .show(ui, |ui| {
+                        // 1. Dread Ratio
+                        let dread = if idx < beings.hot.dread_ratio.len() {
+                            beings.hot.dread_ratio[idx].clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Dread").small().color(egui::Color32::from_rgb(200, 60, 60)));
+                            ui.add(
+                                egui::ProgressBar::new(dread)
+                                    .desired_width(160.0)
+                                    .fill(egui::Color32::from_rgb(180, 30, 30)),
+                            );
+                        });
+
+                        // 2. Boredom Entropy (0.0–2.0 mapped to 0–1)
+                        let boredom_raw = if idx < beings.hot.boredom_entropy.len() {
+                            beings.hot.boredom_entropy[idx]
+                        } else {
+                            0.0
+                        };
+                        let boredom_norm = (boredom_raw / 2.0).clamp(0.0, 1.0);
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Boredom").small().color(egui::Color32::from_rgb(220, 200, 40)));
+                            ui.add(
+                                egui::ProgressBar::new(boredom_norm)
+                                    .desired_width(160.0)
+                                    .fill(egui::Color32::from_rgb(200, 180, 20)),
+                            );
+                        });
+
+                        // 3. Pattern Hallucination
+                        let halluc = if idx < beings.hot.pattern_hallucination.len() {
+                            beings.hot.pattern_hallucination[idx]
+                        } else {
+                            0.0
+                        };
+                        ui.label(
+                            egui::RichText::new(format!("Halluc: {:.0}%", halluc * 100.0))
+                                .small()
+                                .color(egui::Color32::from_rgb(160, 100, 220)),
+                        );
+
+                        // 4. Karma
+                        let karma = if idx < beings.hot.karma_modifier.len() {
+                            beings.hot.karma_modifier[idx]
+                        } else {
+                            0.0
+                        };
+                        let karma_color = if karma < 0.0 {
+                            egui::Color32::from_rgb(220, 60, 60)
+                        } else {
+                            egui::Color32::from_rgb(60, 200, 80)
+                        };
+                        ui.colored_label(karma_color, format!("Karma: {karma:+.2}"));
+
+                        // 5. Memetic Hash
+                        if idx < beings.cold.true_memetic_hash.len() {
+                            let hash = &beings.cold.true_memetic_hash[idx];
+                            let hex_str: String = hash.iter()
+                                .map(|v| format!("{v:04X}"))
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            ui.label(
+                                egui::RichText::new(format!("Meme: {hex_str}"))
+                                    .small()
+                                    .monospace()
+                                    .color(egui::Color32::from_rgb(120, 160, 200)),
+                            );
+                        }
+
+                        // 6. Abstract Fiction Hash
+                        if idx < beings.cold.abstract_fiction_hash.len() {
+                            let fiction = beings.cold.abstract_fiction_hash[idx];
+                            if fiction != 0 {
+                                ui.label(
+                                    egui::RichText::new(format!("Fiction: {fiction:#018X}"))
+                                        .small()
+                                        .monospace()
+                                        .color(egui::Color32::from_rgb(140, 100, 180)),
+                                );
+                            } else {
+                                ui.label(egui::RichText::new("Fiction: None").small().color(egui::Color32::from_rgb(80, 80, 100)));
+                            }
+                        }
+
+                        // 7. Generational Trauma
+                        if idx < beings.cold.generational_trauma.len() {
+                            let trauma = beings.cold.generational_trauma[idx];
+                            ui.label(
+                                egui::RichText::new(format!("Gen Trauma: {trauma:.3}"))
+                                    .small()
+                                    .color(egui::Color32::from_rgb(160, 120, 80)),
+                            );
+                        }
+
+                        // 8. Metaphysical Flags — badges
+                        if idx < beings.cold.metaphysical_flags.len() {
+                            let flags = beings.cold.metaphysical_flags[idx];
+                            if flags != 0 {
+                                ui.horizontal(|ui| {
+                                    if flags & BUDDHA_STATE != 0 {
+                                        ui.colored_label(
+                                            egui::Color32::GOLD,
+                                            egui::RichText::new("BUDDHA").strong().small(),
+                                        );
+                                    }
+                                    if flags & REALIZED_FORMS != 0 {
+                                        ui.colored_label(
+                                            egui::Color32::from_rgb(160, 220, 255),
+                                            egui::RichText::new("REALIZED").strong().small(),
+                                        );
+                                    }
+                                });
+                            }
+                        }
+                    });
+            });
 
         // --- Life story ---
         ui.separator();

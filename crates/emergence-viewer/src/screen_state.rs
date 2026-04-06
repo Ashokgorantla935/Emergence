@@ -345,22 +345,21 @@ impl ScenarioSelectUi {
                 ui.vertical_centered(|ui| {
                     ui.add_space(16.0);
 
-                    // Title — pixel-art style via monospace + letter spacing
+                    // Title — large bold golden text
                     ui.label(
-                        egui::RichText::new("C R E A T E   N E W   W O R L D")
-                            .size(32.0)
-                            .family(egui::FontFamily::Monospace)
+                        egui::RichText::new("CREATE NEW WORLD")
+                            .size(40.0)
                             .strong()
-                            .color(egui::Color32::from_rgb(255, 200, 60)),
+                            .color(egui::Color32::from_rgb(255, 220, 80)),
                     );
                     ui.add_space(28.0);
 
                     // MAP SIZE section
                     ui.label(
                         egui::RichText::new("MAP SIZE")
-                            .size(14.0)
+                            .size(16.0)
                             .strong()
-                            .color(egui::Color32::from_rgb(220, 200, 140)),
+                            .color(egui::Color32::WHITE),
                     );
                     ui.add_space(8.0);
 
@@ -376,9 +375,9 @@ impl ScenarioSelectUi {
                             // Selected if no preset active and this size matches
                             let is_selected = self.selected_preset.is_none() && self.map_size == size;
                             let bg = if is_selected {
-                                egui::Color32::from_rgba_premultiplied(60, 50, 20, 220)
+                                egui::Color32::from_rgba_premultiplied(80, 65, 20, 240)
                             } else {
-                                egui::Color32::from_rgba_premultiplied(22, 22, 28, 210)
+                                egui::Color32::from_rgba_premultiplied(35, 35, 45, 230)
                             };
                             let border = if is_selected {
                                 egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 200, 60))
@@ -406,12 +405,12 @@ impl ScenarioSelectUi {
                                         ui.label(
                                             egui::RichText::new(format!("{}×{}", size.0, size.1))
                                                 .size(11.0)
-                                                .color(egui::Color32::from_gray(160)),
+                                                .color(egui::Color32::from_rgb(200, 200, 200)),
                                         );
                                         ui.label(
                                             egui::RichText::new(tiles)
                                                 .size(10.0)
-                                                .color(egui::Color32::from_gray(120)),
+                                                .color(egui::Color32::from_rgb(170, 170, 170)),
                                         );
                                     });
                                 });
@@ -427,13 +426,14 @@ impl ScenarioSelectUi {
                     // ISLAND DENSITY section
                     ui.label(
                         egui::RichText::new("ISLAND DENSITY")
-                            .size(14.0)
+                            .size(16.0)
                             .strong()
-                            .color(egui::Color32::from_rgb(220, 200, 140)),
+                            .color(egui::Color32::WHITE),
                     );
                     ui.add_space(8.0);
 
                     ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
                         for i in 1u32..=10 {
                             let is_selected = self.island_count == i;
                             // Gradient: low density = deep ocean blue, high = lush green
@@ -460,9 +460,10 @@ impl ScenarioSelectUi {
                                 .fill(bg)
                                 .stroke(border)
                                 .corner_radius(egui::CornerRadius::same(6))
-                                .inner_margin(egui::Margin::symmetric(6, 6))
+                                .inner_margin(egui::Margin::symmetric(0, 0))
                                 .show(ui, |ui| {
                                     ui.set_min_size(egui::vec2(40.0, 40.0));
+                                    ui.set_max_size(egui::vec2(40.0, 40.0));
                                     ui.vertical_centered(|ui| {
                                         ui.label(
                                             egui::RichText::new(format!("{}", i))
@@ -487,9 +488,9 @@ impl ScenarioSelectUi {
                     // PREMIUM SCENARIOS section
                     ui.label(
                         egui::RichText::new("PREMIUM SCENARIOS")
-                            .size(14.0)
+                            .size(16.0)
                             .strong()
-                            .color(egui::Color32::from_rgb(220, 200, 140)),
+                            .color(egui::Color32::WHITE),
                     );
                     ui.add_space(8.0);
 

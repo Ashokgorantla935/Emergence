@@ -50,6 +50,7 @@ struct VertexOutput {
     @location(4) @interpolate(flat) elevation:      f32,       // terrain elevation [0.0, 1.0]
     @location(5) @interpolate(flat) build_progress: f32,
     @location(6) tile_uv:        vec2<f32>,
+    @location(7) uv:             vec2<f32>, // tile-local [0,1] UV — interpolates cleanly inside quad
 };
 
 @vertex
@@ -63,6 +64,9 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     );
 
     out.clip_position = camera.view_proj * vec4<f32>(world, 0.0, 1.0);
+
+    // Tile-local UV interpolates perfectly [0,1] across the quad — no seam artifacts
+    out.uv = vertex.uv;
 
     // Provide base tile UV to bound the fragment samples when generating the canopy layers
     out.tile_uv = inst.tile_uv;
@@ -173,7 +177,7 @@ fn apply_illumination(color: vec4<f32>, illumination: f32, comfort: f32) -> vec4
 }
 
 // Structure overlays. Mixes building color onto the base biome color based on cell distance and LOD
-fn apply_structure(base: vec4<f32>, structure_type: u32, build_progress: f32, world_pos: vec2<f32>, time: f32, lod: u32) -> vec4<f32> {
+fn apply_structure(base: vec4<f32>, structure_type: u32, build_progress: f32, world_pos: vec2<f32>, time: f32, lod: u32, uv: vec2<f32>) -> vec4<f32> {
     let cell_frac = fract(world_pos) - vec2<f32>(0.5, 0.5); // [-0.5, 0.5]
     
     // Create a smooth squircle mask to confine the road to the cell geometry without hitting triangle edges
@@ -191,7 +195,8 @@ fn apply_structure(base: vec4<f32>, structure_type: u32, build_progress: f32, wo
     // StoneRoad (7) — cobblestone road
     if (structure_type == 7u) {
         let stone_road = vec4<f32>(0.55, 0.55, 0.53, 1.0);
-        let grid = step(0.08, fract(world_pos.x * 4.0)) * step(0.08, fract(world_pos.y * 4.0));
+        // Use tile-local uv [0,1] instead of fract(world_pos) to eliminate diagonal seam artifacts
+        let grid = step(0.08, fract(uv.x * 4.0)) * step(0.08, fract(uv.y * 4.0));
         let cobble = mix(vec4<f32>(0.45, 0.45, 0.43, 1.0), stone_road, grid);
         return mix(base, cobble, mask * 0.90);
     }
@@ -254,7 +259,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Blend LOD 0 → LOD 1 when zoom in [0, 1)
     if (zoom < 1.0) {
         let blended = mix(color_lod0, color_lod1, zoom);
-        let structured = apply_structure(blended, structure_id, in.build_progress, in.world_pos, t, 0u);
+        let structured = apply_structure(blended, structure_id, in.build_progress, in.world_pos, t, 0u, in.uv);
         return apply_illumination(structured, illumination, comfort);
     }
 
@@ -298,6 +303,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Blend LOD 1 → LOD 2 when zoom in [1, 2]
     let blend_12 = zoom - 1.0;
     let blended = mix(color_lod1, color_lod2, blend_12);
-    let structured = apply_structure(blended, structure_id, in.build_progress, in.world_pos, t, u32(zoom));
+    let structured = apply_structure(blended, structure_id, in.build_progress, in.world_pos, t, u32(zoom), in.uv);
     return apply_illumination(structured, illumination, comfort);
 }

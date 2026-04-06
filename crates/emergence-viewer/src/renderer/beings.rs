@@ -328,7 +328,7 @@ fn state_color_and_size(
 
     // Fauna: species-specific color and size, ignore state/emotion
     if creature_type != CreatureType::Human as u8 && ct < 8 {
-        let color = FAUNA_COLOR[ct];
+        let color = [1.0_f32, 1.0, 1.0]; // White tint: let PNG texture shine through
         let size = FAUNA_SIZE[ct];
         return (color, size);
     }

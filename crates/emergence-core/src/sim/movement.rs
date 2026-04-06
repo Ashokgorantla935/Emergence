@@ -624,10 +624,25 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     let bx = cx.min(world.terrain.width - 1);
                     let by = cy.min(world.terrain.height - 1);
                     world.terrain.place_structure(bx, by, target_type, being_index as u32);
-                    // Deforestation: violently clear biomass and flora
+                    // Deforestation: clear biomass, flora, and degrade soil
                     world.terrain.biomass[cidx] = 0.0;
                     world.resources.flora_stage[cidx] = 0;
                     world.resources.flora_energy[cidx] = 0;
+                    world.terrain.nutrient_density[cidx] *= 0.5;
+                    // Clear adjacent tiles (1-tile radius) to prevent flora clipping
+                    let tw = world.terrain.width as i32;
+                    let th = world.terrain.height as i32;
+                    for dy in -1i32..=1 {
+                        for dx in -1i32..=1 {
+                            if dx == 0 && dy == 0 { continue; }
+                            let nx = (bx as i32 + dx).clamp(0, tw - 1) as usize;
+                            let ny = (by as i32 + dy).clamp(0, th - 1) as usize;
+                            let nidx = ny * world.terrain.width as usize + nx;
+                            if world.terrain.structure[nidx] == 0 {
+                                world.terrain.biomass[nidx] = 0.0;
+                            }
+                        }
+                    }
                     // Structure presence increases mineralize (foundation)
                     world.terrain.mineralize[cidx] = (world.terrain.mineralize[cidx] + 0.5).min(1.0);
                     // Bond builder to this location as home settlement

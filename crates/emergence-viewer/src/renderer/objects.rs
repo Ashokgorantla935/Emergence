@@ -104,10 +104,10 @@ const fn uv_190(col: u8, row: u8) -> [f32; 2] {
 }
 
 // Flora sheet: 12×12 grid (~85px square cells on 1024×1024) — confirmed by Gemini
-const CELL_FLORA: f32 = 1.0 / 12.0;
+const CELL_FLORA: f32 = 1.0 / 14.0;
 const fn uv_flora(col: u8, row: u8) -> [f32; 2] {
-    // 10% inset to strip out AI generated cell boundary noise
-    [col as f32 * CELL_FLORA + (CELL_FLORA * 0.10), row as f32 * CELL_FLORA + (CELL_FLORA * 0.10)]
+    // Exact mapping, no offset needed for mathematically precise grids.
+    [col as f32 * CELL_FLORA, row as f32 * CELL_FLORA]
 }
 
 // Flora 190 spritesheet — 12×12 grid (Gemini confirmed), 85px cells on 1024×1024
@@ -881,8 +881,8 @@ fn collect_chunk_decor(
 
             let temp = terrain.temperature_base[idx];
             // Flora atlas is 12 cols × 8 rows — use non-square cell sizes
-            // 80% sampling bound to match the 10% top/left inset
-            let flora_cell = [CELL_FLORA * 0.80, CELL_FLORA * 0.80];
+            // 98% sampling bound to prevent subpixel edge bleed from neighbors
+            let flora_cell = [CELL_FLORA * 0.98, CELL_FLORA * 0.98];
 
             let (atlas_uv, size, atlas_cell) = if temp < 0.2 {
                 // Cold: snow pines and conifers (row 1)

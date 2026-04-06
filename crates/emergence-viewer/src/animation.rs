@@ -8,9 +8,9 @@ use emergence_core::being::data::{BeingState, Beings, CreatureType};
 const ENTITY_CELL_U: f32 = 1.0 / 4.0;
 /// Cell size in the entity spritesheet vertical (1 / 96)
 const ENTITY_CELL_V: f32 = 1.0 / 96.0;
-/// Cell size in the fauna spritesheet (12 cols × 12 rows).
-const FAUNA_CELL_U: f32 = 1.0 / 12.0;
-const FAUNA_CELL_V: f32 = 1.0 / 12.0;
+/// Cell size in the fauna spritesheet (16 cols × 16 rows, empirically verified).
+const FAUNA_CELL_U: f32 = 1.0 / 16.0;
+const FAUNA_CELL_V: f32 = 1.0 / 16.0;
 
 /// 10 animation states (matches atlas row layout).
 #[repr(u8)]
@@ -331,9 +331,9 @@ fn fauna_atlas_uv(ct: CreatureType, frame: u8) -> [f32; 2] {
     };
     let col = (frame as u32) % 3; // 3 frames per direction
     
-    // Add a 10% inset to the UV mapping to neatly frame AI sprites and prevent neighbor clipping
+    // Rigorously perfect grid tracking.
     [
-        col as f32 * FAUNA_CELL_U + (FAUNA_CELL_U * 0.10), 
-        row as f32 * FAUNA_CELL_V + (FAUNA_CELL_V * 0.10)
+        col as f32 * FAUNA_CELL_U, 
+        row as f32 * FAUNA_CELL_V
     ]
 }

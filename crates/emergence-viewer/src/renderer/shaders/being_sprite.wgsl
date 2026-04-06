@@ -62,7 +62,8 @@ struct VertexOutput {
 };
 
 fn is_magenta(c: vec3<f32>) -> bool {
-    return (c.r > 0.5 && c.b > 0.5 && c.g < 0.45) || distance(c, vec3<f32>(1.0, 0.0, 1.0)) < 0.8;
+    // Only detect pure JPEG magenta artifacts: extreme R & B, low G.
+    return (c.r > 0.8 && c.b > 0.8 && c.g < 0.25) || distance(c, vec3<f32>(1.0, 0.0, 1.0)) < 0.3;
 }
 
 // ── Vertex shader ────────────────────────────────────────────────────────────
@@ -149,11 +150,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Transparent pixel: check for outline or shadow before discarding.
     if (alpha < 0.1) {
-        // 1px black outline: sample 4 adjacent texels in atlas space.
-        let sn = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(0.0,  -px.y), 0.0);
-        let ss = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(0.0,   px.y), 0.0);
-        let se = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>( px.x,  0.0), 0.0);
-        let sw = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(-px.x,  0.0), 0.0);
+        let cell_min = in.atlas_uv;
+        let cell_max = in.atlas_uv + in.atlas_size;
+        
+        // 1px black outline: sample 4 adjacent texels in atlas space, rigorously bounded.
+        let uv_n = clamp(in.uv + vec2<f32>(0.0,  -px.y), cell_min, cell_max);
+        let uv_s = clamp(in.uv + vec2<f32>(0.0,   px.y), cell_min, cell_max);
+        let uv_e = clamp(in.uv + vec2<f32>( px.x,  0.0), cell_min, cell_max);
+        let uv_w = clamp(in.uv + vec2<f32>(-px.x,  0.0), cell_min, cell_max);
+
+        let sn = textureSampleLevel(sprite_atlas, atlas_sampler, uv_n, 0.0);
+        let ss = textureSampleLevel(sprite_atlas, atlas_sampler, uv_s, 0.0);
+        let se = textureSampleLevel(sprite_atlas, atlas_sampler, uv_e, 0.0);
+        let sw = textureSampleLevel(sprite_atlas, atlas_sampler, uv_w, 0.0);
 
         let nm = is_magenta(sn.rgb);
         let sm = is_magenta(ss.rgb);

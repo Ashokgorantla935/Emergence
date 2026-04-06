@@ -81,7 +81,8 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
 }
 
 fn is_magenta(c: vec3<f32>) -> bool {
-    return (c.r > 0.5 && c.b > 0.5 && c.g < 0.45) || distance(c, vec3<f32>(1.0, 0.0, 1.0)) < 0.8;
+    // Only detect pure JPEG magenta artifacts: extreme R & B, low G.
+    return (c.r > 0.8 && c.b > 0.8 && c.g < 0.25) || distance(c, vec3<f32>(1.0, 0.0, 1.0)) < 0.3;
 }
 
 @fragment

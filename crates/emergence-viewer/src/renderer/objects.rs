@@ -122,24 +122,16 @@ const fn uv_flora(col: u8, row: u8) -> [f32; 2] {
 // Row  9: Stumps, logs, tiny plants, rocks
 // Rows 10-11: Sparse/empty
 const FLORA_190_TEMPERATE: &[[f32; 2]] = &[
-    uv_flora(0,0), uv_flora(1,0), uv_flora(2,0), uv_flora(3,0),
-    uv_flora(4,0), uv_flora(5,0), uv_flora(6,0), uv_flora(7,0),
-    uv_flora(8,0), uv_flora(9,0), uv_flora(10,0), uv_flora(11,0),
+    uv_flora(0,0), uv_flora(1,0), uv_flora(2,0), uv_flora(3,0), uv_flora(4,0)
 ];
 const FLORA_190_SNOW: &[[f32; 2]] = &[
-    uv_flora(0,1), uv_flora(1,1), uv_flora(2,1), uv_flora(3,1),
-    uv_flora(4,1), uv_flora(5,1), uv_flora(6,1), uv_flora(7,1),
-    uv_flora(8,1), uv_flora(9,1), uv_flora(10,1), uv_flora(11,1),
+    uv_flora(0,1), uv_flora(1,1), uv_flora(2,1), uv_flora(3,1), uv_flora(4,1)
 ];
 const FLORA_190_EXOTIC: &[[f32; 2]] = &[
-    uv_flora(0,2), uv_flora(1,2), uv_flora(2,2), uv_flora(3,2),
-    uv_flora(4,2), uv_flora(5,2), uv_flora(6,2), uv_flora(7,2),
-    uv_flora(8,2), uv_flora(9,2), uv_flora(10,2), uv_flora(11,2),
+    uv_flora(0,2), uv_flora(1,2), uv_flora(2,2), uv_flora(3,2), uv_flora(4,2)
 ];
 const FLORA_190_DEAD: &[[f32; 2]] = &[
-    uv_flora(0,3), uv_flora(1,3), uv_flora(2,3), uv_flora(3,3),
-    uv_flora(4,3), uv_flora(5,3), uv_flora(6,3), uv_flora(7,3),
-    uv_flora(8,3), uv_flora(9,3), uv_flora(10,3), uv_flora(11,3),
+    uv_flora(0,3), uv_flora(1,3), uv_flora(2,3), uv_flora(3,3), uv_flora(4,3)
 ];
 const FLORA_190_FUNGI: &[[f32; 2]] = &[
     uv_flora(0,4), uv_flora(1,4), uv_flora(2,4), uv_flora(3,4), uv_flora(4,4), uv_flora(5,4),
@@ -926,22 +918,22 @@ fn collect_chunk_decor(
                     (v, 1.5, flora_cell)
                 }
             } else if biome == Biome::Mountain {
-                // Mountain: dead trees, sparse ground, some shrubs
+                // Mountain: mostly sparse, some bushes/shrubs
                 if hash % 3 == 0 {
-                    let v = FLORA_190_DEAD[hash % FLORA_190_DEAD.len()];
-                    (v, 3.0 + (hash % 2) as f32 * 0.3, flora_cell)
+                    let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
+                    (v, 2.5 + (hash % 2) as f32 * 0.3, flora_cell)
                 } else if hash % 3 == 1 {
                     let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()];
                     (v, 2.0 + (hash % 2) as f32 * 0.2, flora_cell)
                 } else {
-                    let v = FLORA_190_GROUND[hash % FLORA_190_GROUND.len()];
+                    let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()]; // use shrub instead of corrupt ground row
                     (v, 1.5, flora_cell)
                 }
             } else if biome == Biome::Forest {
                 // Forest: 70% temperate trees, 20% bushes, 10% flowers
                 if hash % 10 < 7 {
                     let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
-                    (v, 4.5 + (hash % 3) as f32 * 0.3, flora_cell)
+                    (v, 4.5 + (hash % 3) as f32 * 0.3, [CELL_FLORA * 1.5, CELL_FLORA * 1.5]) // expand to prevent clipping
                 } else if hash % 10 < 9 {
                     let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
                     (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell)
@@ -951,21 +943,24 @@ fn collect_chunk_decor(
                 }
             } else if biome == Biome::Grassland && temp >= 0.65 {
                 // Savannah: exotic palms and tropical trees (row 2)
-                let v = FLORA_190_EXOTIC[hash % FLORA_190_EXOTIC.len()];
-                (v, 5.0 + (hash % 3) as f32 * 0.4, flora_cell)
+                let mut v = FLORA_190_EXOTIC[hash % FLORA_190_EXOTIC.len()];
+                // Expand UV sampling size to 1.5x width and 2.0x height to avoid wide/tall assets getting clipped 
+                v[0] -= CELL_FLORA * 0.25;
+                v[1] -= CELL_FLORA * 1.0;
+                (v, 5.0 + (hash % 3) as f32 * 0.4, [CELL_FLORA * 1.5, CELL_FLORA * 2.0])
             } else {
-                // Temperate grassland: mix of trees, bushes, flowers, grass
-                if hash % 8 < 2 {
+                // Temperate grassland: mix of trees, bushes, flowers
+                if hash % 8 < 1 { // Only 1/8 trees in grassland to make it cleaner
                     let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
-                    (v, 4.0, flora_cell)
-                } else if hash % 8 < 4 {
+                    (v, 4.0, [CELL_FLORA * 1.5, CELL_FLORA * 1.5])
+                } else if hash % 8 < 3 {
                     let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
                     (v, 2.5, flora_cell)
                 } else if hash % 8 < 6 {
                     let v = FLORA_190_FLOWERS[hash % FLORA_190_FLOWERS.len()];
                     (v, 1.5, flora_cell)
                 } else {
-                    let v = FLORA_190_GRASS[hash % FLORA_190_GRASS.len()];
+                    let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()]; // use shrub instead of corrupt grass row
                     (v, 1.5, flora_cell)
                 }
             };

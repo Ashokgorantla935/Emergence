@@ -131,8 +131,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (in.screen_size < 2.0) { discard; }
     var texel = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
     
-    // Magenta chroma-key discard (#FF00FF) — threshold for compression artifacts
-    if (texel.r > 0.9 && texel.g < 0.15 && texel.b > 0.9) { discard; }
+    // Magenta chroma-key discard (#FF00FF) — relative checking handles anti-aliased AI fringes
+    if (texel.r > texel.g + 0.15 && texel.b > texel.g + 0.15) { discard; }
     
     // White background discard for generated fauna assets
     if (texel.r > 0.95 && texel.g > 0.95 && texel.b > 0.95) { discard; }
@@ -146,10 +146,26 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Transparent pixel: check for outline or shadow before discarding.
     if (alpha < 0.1) {
         // 1px black outline: sample 4 adjacent texels in atlas space.
-        let n = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(0.0,  -px.y), 0.0).a;
-        let s = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(0.0,   px.y), 0.0).a;
-        let e = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>( px.x,  0.0), 0.0).a;
-        let w = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(-px.x,  0.0), 0.0).a;
+        let sn = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(0.0,  -px.y), 0.0);
+        let ss = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(0.0,   px.y), 0.0);
+        let se = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>( px.x,  0.0), 0.0);
+        let sw = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(-px.x,  0.0), 0.0);
+
+        let nm = sn.r > sn.g + 0.15 && sn.b > sn.g + 0.15;
+        let sm = ss.r > ss.g + 0.15 && ss.b > ss.g + 0.15;
+        let em = se.r > se.g + 0.15 && se.b > se.g + 0.15;
+        let wm = sw.r > sw.g + 0.15 && sw.b > sw.g + 0.15;
+
+        let nw = sn.r > 0.95 && sn.g > 0.95 && sn.b > 0.95;
+        let sw_w = ss.r > 0.95 && ss.g > 0.95 && ss.b > 0.95;
+        let ew = se.r > 0.95 && se.g > 0.95 && se.b > 0.95;
+        let ww = sw.r > 0.95 && sw.g > 0.95 && sw.b > 0.95;
+
+        let n = select(0.0, 1.0, sn.a > 0.5 && !nm && !nw);
+        let s = select(0.0, 1.0, ss.a > 0.5 && !sm && !sw_w);
+        let e = select(0.0, 1.0, se.a > 0.5 && !em && !ew);
+        let w = select(0.0, 1.0, sw.a > 0.5 && !wm && !ww);
+
         if (n > 0.5 || s > 0.5 || e > 0.5 || w > 0.5) {
             return vec4<f32>(0.05, 0.03, 0.02, 0.9);
         }

@@ -196,9 +196,11 @@ fn apply_structure(base: vec4<f32>, structure_type: u32, build_progress: f32, wo
     // StoneRoad (7) — cobblestone road
     if (structure_type == 7u) {
         let stone_road = vec4<f32>(0.55, 0.55, 0.53, 1.0);
-        // Use tile-local uv [0,1] instead of fract(world_pos) to eliminate diagonal seam artifacts
-        let grid = step(0.08, fract(uv.x * 4.0)) * step(0.08, fract(uv.y * 4.0));
-        let cobble = mix(vec4<f32>(0.45, 0.45, 0.43, 1.0), stone_road, grid);
+        // Use smooth sine waves to create grid pattern instead of fract, which avoids 
+        // bounding box precision tearing across the diagonal vertices in the quad.
+        let grid_x = smoothstep(-0.2, 0.2, sin(uv.x * 3.14159 * 8.0));
+        let grid_y = smoothstep(-0.2, 0.2, sin(uv.y * 3.14159 * 8.0));
+        let cobble = mix(vec4<f32>(0.45, 0.45, 0.43, 1.0), stone_road, grid_x * grid_y);
         return mix(base, cobble, mask * 0.90);
     }
 

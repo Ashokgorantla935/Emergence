@@ -351,6 +351,12 @@ pub fn score_actions(
             q_values[Action::Bond as usize] = 0.0;
         }
 
+        // V53: Stronger heuristic drive for Action::Bond when belonging < 0.5
+        let belonging = beings.hot.needs[being_index][crate::being::data::NEED_BELONGING];
+        if belonging < 0.5 && hunger > 0.4 && safety > 0.4 {
+            q_values[Action::Bond as usize] += 80.0;
+        }
+
         // ── Shelter & Construction Override ───────────────────────────────────
         // If cold or scared, humans actively build or seek shelter.
         let warmth = beings.hot.needs[being_index][crate::being::data::NEED_WARMTH];
@@ -394,8 +400,8 @@ pub fn score_actions(
 
             // V53: Forest/flora penalty — must chop trees before building
             if flora_blocks && !currently_building {
-                boost *= 0.05; // 95% penalty: go chop first
-                q_values[Action::PickUpFood as usize] += 40.0; // steer toward foraging/clearing
+                boost -= 1000.0; // 95% penalty: go chop first
+                q_values[Action::PickUpFood as usize] += 200.0; // steer toward foraging/clearing
             }
 
             q_values[Action::Build as usize] += boost;

@@ -86,11 +86,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let c = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
 
-    // Magenta chroma-key discard (#FF00FF). We use a wider tolerance
+    // Magenta chroma-key discard (#FF00FF). We use a relative hue logic
     // to catch anti-aliased light pink/white fringes from AI upscaling.
-    if (c.r > 0.75 && c.g < 0.45 && c.b > 0.75) { discard; }
-    // White background discard for generated assets.
-    if (c.r > 0.95 && c.g > 0.95 && c.b > 0.95) { discard; }
+    if (c.r > c.g + 0.15 && c.b > c.g + 0.15) { discard; }
+    // White background discard for generated assets (AI makes off-white).
+    if (c.r > 0.90 && c.g > 0.90 && c.b > 0.90) { discard; }
     // Pixel size in atlas UV space (atlas is 1024x1024)
     let px = 1.0 / 1024.0;
 

@@ -8,9 +8,9 @@ use emergence_core::being::data::{BeingState, Beings, CreatureType};
 const ENTITY_CELL_U: f32 = 1.0 / 4.0;
 /// Cell size in the entity spritesheet vertical (1 / 96)
 const ENTITY_CELL_V: f32 = 1.0 / 96.0;
-/// Cell size in the fauna spritesheet (12 cols × 12 rows).
-const FAUNA_CELL_U: f32 = 1.0 / 12.0;
-const FAUNA_CELL_V: f32 = 1.0 / 12.0;
+/// Cell size in the fauna spritesheet (8 cols × 8 rows).
+const FAUNA_CELL_U: f32 = 1.0 / 8.0;
+const FAUNA_CELL_V: f32 = 1.0 / 8.0;
 
 /// 10 animation states (matches atlas row layout).
 #[repr(u8)]
@@ -323,10 +323,10 @@ fn fauna_atlas_uv(ct: CreatureType, frame: u8) -> [f32; 2] {
         CreatureType::Rabbit => 0,
         CreatureType::Deer   => 1,
         CreatureType::Wolf   => 2,
-        CreatureType::Bear   => 3,
-        CreatureType::Hawk   => 4,
-        CreatureType::Fish   => 5,
-        CreatureType::Snake  => 6,
+        CreatureType::Bear   => 4,
+        CreatureType::Hawk   => 5,
+        CreatureType::Fish   => 6,
+        CreatureType::Snake  => 7,
         CreatureType::Human  => 0,  // fallback
     };
     let col = (frame as u32) % 3; // 3 frames per direction

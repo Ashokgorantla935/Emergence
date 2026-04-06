@@ -137,11 +137,12 @@ impl BeingRenderer {
                 continue;
             }
 
-            let atlas_uv = anim.atlas_uv(beings, i);
+            let mut atlas_uv = anim.atlas_uv(beings, i);
             let is_human = beings.hot.creature_type[i] == CreatureType::Human as u8;
-            // Fauna uses the new fauna_spritesheet (12 cols × 12 rows).
-            let cell_u = if is_human { ENTITY_CELL_U } else { 1.0 / 12.0 };
-            let cell_v = if is_human { ENTITY_CELL_V } else { 1.0 / 12.0 };
+            // Fauna uses the new fauna_spritesheet (8 cols × 8 rows).
+            let cell_u = if is_human { ENTITY_CELL_U } else { 1.0 / 8.0 };
+            let cell_v = if is_human { ENTITY_CELL_V } else { 1.0 / 8.0 };
+            
             let atlas_size = [cell_u, cell_v];
 
             let (emotion_tint, mut size) = state_color_and_size(
@@ -152,6 +153,7 @@ impl BeingRenderer {
                 beings.hot.creature_type[i],
                 beings.life_phase(i),
             );
+
             let mut skin_tone = personality_skin_tone(&beings.hot.personalities[i]);
 
             // Apply genotype visual traits for humans
@@ -328,7 +330,8 @@ fn state_color_and_size(
 
     // Fauna: species-specific color and size, ignore state/emotion
     if creature_type != CreatureType::Human as u8 && ct < 8 {
-        let color = [1.0_f32, 1.0, 1.0]; // White tint: let PNG texture shine through
+        // Pure white let's the high-fidelity 190 pixel art show through naturally
+        let color = [1.0_f32, 1.0, 1.0];
         let size = FAUNA_SIZE[ct];
         return (color, size);
     }

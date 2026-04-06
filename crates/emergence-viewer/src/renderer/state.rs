@@ -89,16 +89,18 @@ pub struct RenderState {
     /// Bound to slot 1 of the terrain pipeline instead of the procedural atlas.
     /// Falls back to atlas bind group if the PNG is missing.
     pub terrain_bind_group: wgpu::BindGroup,
-    /// New asset spritesheet bind groups (Wave 16 multi-pass pipeline).
-    pub flora_bind_group: wgpu::BindGroup,
-    pub building_bind_group: wgpu::BindGroup,
-    pub fauna_bind_group: wgpu::BindGroup,
-    pub item_bind_group: wgpu::BindGroup,
     /// 190-series spritesheets (8x8 atlas grid, 128px cells, magenta chroma-key).
     pub flora_190_bind_group: wgpu::BindGroup,
     pub architecture_190_bind_group: wgpu::BindGroup,
     pub minerals_190_bind_group: wgpu::BindGroup,
     pub fauna_190_bind_group: wgpu::BindGroup,
+    /// V41: Additional 190-series spritesheets.
+    pub consumables_190_bind_group: wgpu::BindGroup,
+    pub vfx_traits_190_bind_group: wgpu::BindGroup,
+    pub human_races_190_bind_group: wgpu::BindGroup,
+    pub worldbox_items_190_bind_group: wgpu::BindGroup,
+    pub exotic_biomes_190_bind_group: wgpu::BindGroup,
+    pub fauna_standalone_190_bind_group: wgpu::BindGroup,
     /// V1: World objects (resources + structures) — single instanced draw call.
     pub object_pipeline: wgpu::RenderPipeline,
     /// V2: Unified particle system — single instanced draw call for ALL particles.
@@ -285,32 +287,6 @@ impl RenderState {
             })
         };
 
-        // ── Wave 16: New asset spritesheets ────────────────────────────────
-        let flora_bind_group = Self::load_png_bind_group(
-            &device, &queue,
-            include_bytes!("../../../../assets/textures/flora_spritesheet.png"),
-            &atlas.bind_group_layout,
-            "Flora Spritesheet",
-        );
-        let building_bind_group = Self::load_png_bind_group(
-            &device, &queue,
-            include_bytes!("../../../../assets/textures/building_spritesheet.png"),
-            &atlas.bind_group_layout,
-            "Building Spritesheet",
-        );
-        let fauna_bind_group = Self::load_png_bind_group(
-            &device, &queue,
-            include_bytes!("../../../../assets/textures/fauna_spritesheet.png"),
-            &atlas.bind_group_layout,
-            "Fauna Spritesheet",
-        );
-        let item_bind_group = Self::load_png_bind_group(
-            &device, &queue,
-            include_bytes!("../../../../assets/textures/item_spritesheet.png"),
-            &atlas.bind_group_layout,
-            "Item Spritesheet",
-        );
-
         // ── Wave 36: 190-series spritesheets (8x8 atlas, magenta chroma-key) ──
         let flora_190_bind_group = Self::load_png_bind_group(
             &device, &queue,
@@ -335,6 +311,44 @@ impl RenderState {
             include_bytes!("../../../../assets/textures/fauna_and_races_spritesheet_190.png"),
             &atlas.bind_group_layout,
             "Fauna 190 Spritesheet",
+        );
+
+        // ── V41: Additional 190-series spritesheets ────────────────────────
+        let consumables_190_bind_group = Self::load_png_bind_group(
+            &device, &queue,
+            include_bytes!("../../../../assets/textures/consumables_spritesheet_190.png"),
+            &atlas.bind_group_layout,
+            "Consumables 190 Spritesheet",
+        );
+        let vfx_traits_190_bind_group = Self::load_png_bind_group(
+            &device, &queue,
+            include_bytes!("../../../../assets/textures/vfx_and_traits_spritesheet_190.png"),
+            &atlas.bind_group_layout,
+            "VFX Traits 190 Spritesheet",
+        );
+        let human_races_190_bind_group = Self::load_png_bind_group(
+            &device, &queue,
+            include_bytes!("../../../../assets/textures/human_races_190.png"),
+            &atlas.bind_group_layout,
+            "Human Races 190 Spritesheet",
+        );
+        let worldbox_items_190_bind_group = Self::load_png_bind_group(
+            &device, &queue,
+            include_bytes!("../../../../assets/textures/worldbox_items_spritesheet_190.png"),
+            &atlas.bind_group_layout,
+            "WorldBox Items 190 Spritesheet",
+        );
+        let exotic_biomes_190_bind_group = Self::load_png_bind_group(
+            &device, &queue,
+            include_bytes!("../../../../assets/textures/exotic_biomes_spritesheet_190.png"),
+            &atlas.bind_group_layout,
+            "Exotic Biomes 190 Spritesheet",
+        );
+        let fauna_standalone_190_bind_group = Self::load_png_bind_group(
+            &device, &queue,
+            include_bytes!("../../../../assets/textures/fauna_spritesheet_190.png"),
+            &atlas.bind_group_layout,
+            "Fauna Standalone 190 Spritesheet",
         );
 
         // ── Camera uniform buffer (extended) ──────────────────────────────
@@ -972,14 +986,16 @@ impl RenderState {
             atlas,
             entity_bind_group,
             terrain_bind_group,
-            flora_bind_group,
-            building_bind_group,
-            fauna_bind_group,
-            item_bind_group,
             flora_190_bind_group,
             architecture_190_bind_group,
             minerals_190_bind_group,
             fauna_190_bind_group,
+            consumables_190_bind_group,
+            vfx_traits_190_bind_group,
+            human_races_190_bind_group,
+            worldbox_items_190_bind_group,
+            exotic_biomes_190_bind_group,
+            fauna_standalone_190_bind_group,
             object_pipeline,
             particle_pipeline,
             postprocess,

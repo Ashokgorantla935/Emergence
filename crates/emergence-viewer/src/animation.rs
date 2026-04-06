@@ -8,9 +8,9 @@ use emergence_core::being::data::{BeingState, Beings, CreatureType};
 const ENTITY_CELL_U: f32 = 1.0 / 4.0;
 /// Cell size in the entity spritesheet vertical (1 / 96)
 const ENTITY_CELL_V: f32 = 1.0 / 96.0;
-/// Cell size in the fauna spritesheet (8 cols × 8 rows).
-const FAUNA_CELL_U: f32 = 1.0 / 8.0;
-const FAUNA_CELL_V: f32 = 1.0 / 8.0;
+/// Cell size in the fauna spritesheet (12 cols × 12 rows).
+const FAUNA_CELL_U: f32 = 1.0 / 12.0;
+const FAUNA_CELL_V: f32 = 1.0 / 12.0;
 
 /// 10 animation states (matches atlas row layout).
 #[repr(u8)]

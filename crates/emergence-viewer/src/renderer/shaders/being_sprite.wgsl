@@ -131,8 +131,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (in.screen_size < 2.0) { discard; }
     var texel = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
     
-    // Magenta chroma-key discard (#FF00FF) — relative checking handles anti-aliased AI fringes
-    if (texel.r > texel.g + 0.15 && texel.b > texel.g + 0.15) { discard; }
+    // Magenta chroma-key discard (#FF00FF) — distance based
+    if (distance(texel.rgb, vec3<f32>(1.0, 0.0, 1.0)) < 0.6) { discard; }
     
     // White background discard for generated fauna assets
     if (texel.r > 0.95 && texel.g > 0.95 && texel.b > 0.95) { discard; }
@@ -151,10 +151,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let se = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>( px.x,  0.0), 0.0);
         let sw = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv + vec2<f32>(-px.x,  0.0), 0.0);
 
-        let nm = sn.r > sn.g + 0.15 && sn.b > sn.g + 0.15;
-        let sm = ss.r > ss.g + 0.15 && ss.b > ss.g + 0.15;
-        let em = se.r > se.g + 0.15 && se.b > se.g + 0.15;
-        let wm = sw.r > sw.g + 0.15 && sw.b > sw.g + 0.15;
+        let nm = distance(sn.rgb, vec3<f32>(1.0, 0.0, 1.0)) < 0.6;
+        let sm = distance(ss.rgb, vec3<f32>(1.0, 0.0, 1.0)) < 0.6;
+        let em = distance(se.rgb, vec3<f32>(1.0, 0.0, 1.0)) < 0.6;
+        let wm = distance(sw.rgb, vec3<f32>(1.0, 0.0, 1.0)) < 0.6;
 
         let nw = sn.r > 0.95 && sn.g > 0.95 && sn.b > 0.95;
         let sw_w = ss.r > 0.95 && ss.g > 0.95 && ss.b > 0.95;

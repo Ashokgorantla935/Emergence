@@ -23,7 +23,20 @@ pub fn load_icon_grid(ctx: &Context, path: &str, name_prefix: &str) -> Vec<Textu
             let rgba = sub.to_rgba8();
             let pixels: Vec<egui::Color32> = rgba
                 .pixels()
-                .map(|p| egui::Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3]))
+                .map(|p| {
+                    let r = p[0] as f32 / 255.0;
+                    let g = p[1] as f32 / 255.0;
+                    let b = p[2] as f32 / 255.0;
+                    let dr = r - 1.0;
+                    let dg = g - 0.0;
+                    let db = b - 1.0;
+                    let dist = (dr*dr + dg*dg + db*db).sqrt();
+                    if dist < 0.6 {
+                        egui::Color32::TRANSPARENT
+                    } else {
+                        egui::Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3])
+                    }
+                })
                 .collect();
             let color_image = ColorImage {
                 size: [cell as usize, cell as usize],

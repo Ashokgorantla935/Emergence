@@ -134,35 +134,25 @@ const FLORA_190_DEAD: &[[f32; 2]] = &[
     uv_flora(0,3), uv_flora(1,3), uv_flora(2,3), uv_flora(3,3), uv_flora(4,3)
 ];
 const FLORA_190_FUNGI: &[[f32; 2]] = &[
-    uv_flora(0,4), uv_flora(1,4), uv_flora(2,4), uv_flora(3,4), uv_flora(4,4), uv_flora(5,4),
+    uv_flora(0,4), uv_flora(1,4), uv_flora(2,4), uv_flora(3,4)
 ];
 const FLORA_190_CRYSTAL: &[[f32; 2]] = &[
-    uv_flora(6,4), uv_flora(7,4), uv_flora(8,4), uv_flora(9,4), uv_flora(10,4), uv_flora(11,4),
+    uv_flora(6,4), uv_flora(7,4), uv_flora(8,4)
 ];
 const FLORA_190_BUSH: &[[f32; 2]] = &[
-    uv_flora(0,5), uv_flora(1,5), uv_flora(2,5), uv_flora(3,5),
-    uv_flora(4,5), uv_flora(5,5), uv_flora(6,5), uv_flora(7,5),
-    uv_flora(8,5), uv_flora(9,5), uv_flora(10,5), uv_flora(11,5),
+    uv_flora(0,5), uv_flora(1,5), uv_flora(2,5), uv_flora(3,5)
 ];
 const FLORA_190_FLOWERS: &[[f32; 2]] = &[
-    uv_flora(0,6), uv_flora(1,6), uv_flora(2,6), uv_flora(3,6),
-    uv_flora(4,6), uv_flora(5,6), uv_flora(6,6), uv_flora(7,6),
-    uv_flora(8,6), uv_flora(9,6), uv_flora(10,6), uv_flora(11,6),
+    uv_flora(0,6), uv_flora(1,6), uv_flora(2,6), uv_flora(3,6)
 ];
 const FLORA_190_SHRUB: &[[f32; 2]] = &[
-    uv_flora(0,7), uv_flora(1,7), uv_flora(2,7), uv_flora(3,7),
-    uv_flora(4,7), uv_flora(5,7), uv_flora(6,7), uv_flora(7,7),
-    uv_flora(8,7), uv_flora(9,7), uv_flora(10,7), uv_flora(11,7),
+    uv_flora(0,7), uv_flora(1,7), uv_flora(2,7), uv_flora(3,7)
 ];
 const FLORA_190_GRASS: &[[f32; 2]] = &[
-    uv_flora(0,8), uv_flora(1,8), uv_flora(2,8), uv_flora(3,8),
-    uv_flora(4,8), uv_flora(5,8), uv_flora(6,8), uv_flora(7,8),
-    uv_flora(8,8), uv_flora(9,8), uv_flora(10,8), uv_flora(11,8),
+    uv_flora(0,8), uv_flora(1,8), uv_flora(2,8), uv_flora(3,8)
 ];
 const FLORA_190_GROUND: &[[f32; 2]] = &[
-    uv_flora(0,9), uv_flora(1,9), uv_flora(2,9), uv_flora(3,9),
-    uv_flora(4,9), uv_flora(5,9), uv_flora(6,9), uv_flora(7,9),
-    uv_flora(8,9), uv_flora(9,9), uv_flora(10,9), uv_flora(11,9),
+    uv_flora(0,9), uv_flora(1,9), uv_flora(2,9), uv_flora(3,9)
 ];
 
 // Architecture 190 grid (8x8):

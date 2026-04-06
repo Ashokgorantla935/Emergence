@@ -86,9 +86,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let c = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
 
-    // Magenta chroma-key discard (#FF00FF). We use a relative hue logic
-    // to catch anti-aliased light pink/white fringes from AI upscaling.
-    if (c.r > c.g + 0.15 && c.b > c.g + 0.15) { discard; }
+    // Magenta chroma-key discard (#FF00FF) — distance based
+    if (distance(c.rgb, vec3<f32>(1.0, 0.0, 1.0)) < 0.6) { discard; }
     // White background discard for generated assets (AI makes off-white).
     if (c.r > 0.90 && c.g > 0.90 && c.b > 0.90) { discard; }
     // Pixel size in atlas UV space (atlas is 1024x1024)
@@ -108,10 +107,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let se = textureSampleLevel(sprite_atlas, atlas_sampler, uv_e, 0.0);
         let sw = textureSampleLevel(sprite_atlas, atlas_sampler, uv_w, 0.0);
 
-        let n = select(0.0, 1.0, sn.a > 0.5 && !(sn.r > 0.75 && sn.g < 0.45 && sn.b > 0.75));
-        let s = select(0.0, 1.0, ss.a > 0.5 && !(ss.r > 0.75 && ss.g < 0.45 && ss.b > 0.75));
-        let e = select(0.0, 1.0, se.a > 0.5 && !(se.r > 0.75 && se.g < 0.45 && se.b > 0.75));
-        let w = select(0.0, 1.0, sw.a > 0.5 && !(sw.r > 0.75 && sw.g < 0.45 && sw.b > 0.75));
+        let n = select(0.0, 1.0, sn.a > 0.5 && distance(sn.rgb, vec3<f32>(1.0, 0.0, 1.0)) >= 0.6);
+        let s = select(0.0, 1.0, ss.a > 0.5 && distance(ss.rgb, vec3<f32>(1.0, 0.0, 1.0)) >= 0.6);
+        let e = select(0.0, 1.0, se.a > 0.5 && distance(se.rgb, vec3<f32>(1.0, 0.0, 1.0)) >= 0.6);
+        let w = select(0.0, 1.0, sw.a > 0.5 && distance(sw.rgb, vec3<f32>(1.0, 0.0, 1.0)) >= 0.6);
 
         if (n > 0.5 || s > 0.5 || e > 0.5 || w > 0.5) {
             return vec4<f32>(0.05, 0.03, 0.02, 0.9);

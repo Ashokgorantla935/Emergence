@@ -109,15 +109,18 @@ const fn uv_flora(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * CELL_FLORA, row as f32 * CELL_FLORA]
 }
 
-// Flora 190 spritesheet — visually verified grid layout:
-// Row 0: 12 green deciduous trees (temperate forests)
-// Row 1: 12 snow/ice pine trees and conifers
-// Row 2: 12 palm/tropical/savannah trees (exotic biomes)
-// Row 3: 6 pink mushrooms (cols 0-5), 6 cyan crystals (cols 6-11)
-// Row 4: 12 round green bushes and hedges
-// Row 5: 12 colorful flowers and small plants
-// Row 6: 12 grass patches, shrubs, cacti
-// Row 7: 12 stumps, logs, rocks, saplings (ground cover)
+// Flora 190 spritesheet — 12×12 grid (Gemini confirmed), 85px cells on 1024×1024
+// Row  0: Green deciduous trees (temperate)
+// Row  1: Snow/ice pine trees and conifers
+// Row  2: Palm/tropical trees (exotic/savannah)
+// Row  3: Dead/brown trees, driftwood, dried palms
+// Row  4: Pink mushrooms (cols 0-5) + Cyan crystals (cols 6-11) — Gemini confirmed
+// Row  5: Round green bushes and hedges
+// Row  6: Colorful flowers and small plants
+// Row  7: Shrubs, cacti, tall grass, autumn bushes
+// Row  8: Green/brown grass patches, ground cover
+// Row  9: Stumps, logs, tiny plants, rocks
+// Rows 10-11: Sparse/empty
 const FLORA_190_TEMPERATE: &[[f32; 2]] = &[
     uv_flora(0,0), uv_flora(1,0), uv_flora(2,0), uv_flora(3,0),
     uv_flora(4,0), uv_flora(5,0), uv_flora(6,0), uv_flora(7,0),
@@ -133,31 +136,41 @@ const FLORA_190_EXOTIC: &[[f32; 2]] = &[
     uv_flora(4,2), uv_flora(5,2), uv_flora(6,2), uv_flora(7,2),
     uv_flora(8,2), uv_flora(9,2), uv_flora(10,2), uv_flora(11,2),
 ];
+const FLORA_190_DEAD: &[[f32; 2]] = &[
+    uv_flora(0,3), uv_flora(1,3), uv_flora(2,3), uv_flora(3,3),
+    uv_flora(4,3), uv_flora(5,3), uv_flora(6,3), uv_flora(7,3),
+    uv_flora(8,3), uv_flora(9,3), uv_flora(10,3), uv_flora(11,3),
+];
 const FLORA_190_FUNGI: &[[f32; 2]] = &[
-    uv_flora(0,3), uv_flora(1,3), uv_flora(2,3), uv_flora(3,3), uv_flora(4,3), uv_flora(5,3),
+    uv_flora(0,4), uv_flora(1,4), uv_flora(2,4), uv_flora(3,4), uv_flora(4,4), uv_flora(5,4),
 ];
 const FLORA_190_CRYSTAL: &[[f32; 2]] = &[
-    uv_flora(6,3), uv_flora(7,3), uv_flora(8,3), uv_flora(9,3), uv_flora(10,3), uv_flora(11,3),
+    uv_flora(6,4), uv_flora(7,4), uv_flora(8,4), uv_flora(9,4), uv_flora(10,4), uv_flora(11,4),
 ];
 const FLORA_190_BUSH: &[[f32; 2]] = &[
-    uv_flora(0,4), uv_flora(1,4), uv_flora(2,4), uv_flora(3,4),
-    uv_flora(4,4), uv_flora(5,4), uv_flora(6,4), uv_flora(7,4),
-    uv_flora(8,4), uv_flora(9,4), uv_flora(10,4), uv_flora(11,4),
-];
-const FLORA_190_FLOWERS: &[[f32; 2]] = &[
     uv_flora(0,5), uv_flora(1,5), uv_flora(2,5), uv_flora(3,5),
     uv_flora(4,5), uv_flora(5,5), uv_flora(6,5), uv_flora(7,5),
     uv_flora(8,5), uv_flora(9,5), uv_flora(10,5), uv_flora(11,5),
 ];
-const FLORA_190_GRASS: &[[f32; 2]] = &[
+const FLORA_190_FLOWERS: &[[f32; 2]] = &[
     uv_flora(0,6), uv_flora(1,6), uv_flora(2,6), uv_flora(3,6),
     uv_flora(4,6), uv_flora(5,6), uv_flora(6,6), uv_flora(7,6),
     uv_flora(8,6), uv_flora(9,6), uv_flora(10,6), uv_flora(11,6),
 ];
-const FLORA_190_GROUND: &[[f32; 2]] = &[
+const FLORA_190_SHRUB: &[[f32; 2]] = &[
     uv_flora(0,7), uv_flora(1,7), uv_flora(2,7), uv_flora(3,7),
     uv_flora(4,7), uv_flora(5,7), uv_flora(6,7), uv_flora(7,7),
     uv_flora(8,7), uv_flora(9,7), uv_flora(10,7), uv_flora(11,7),
+];
+const FLORA_190_GRASS: &[[f32; 2]] = &[
+    uv_flora(0,8), uv_flora(1,8), uv_flora(2,8), uv_flora(3,8),
+    uv_flora(4,8), uv_flora(5,8), uv_flora(6,8), uv_flora(7,8),
+    uv_flora(8,8), uv_flora(9,8), uv_flora(10,8), uv_flora(11,8),
+];
+const FLORA_190_GROUND: &[[f32; 2]] = &[
+    uv_flora(0,9), uv_flora(1,9), uv_flora(2,9), uv_flora(3,9),
+    uv_flora(4,9), uv_flora(5,9), uv_flora(6,9), uv_flora(7,9),
+    uv_flora(8,9), uv_flora(9,9), uv_flora(10,9), uv_flora(11,9),
 ];
 
 // Architecture 190 grid (8x8):
@@ -901,22 +914,28 @@ fn collect_chunk_decor(
                     (v, 3.5 + (hash % 3) as f32 * 0.3, flora_cell)
                 }
             } else if biome == Biome::Desert {
-                // Desert: sparse ground cover and grass (row 6-7)
-                if hash % 2 == 0 {
-                    let v = FLORA_190_GRASS[hash % FLORA_190_GRASS.len()];
-                    (v, 2.0 + (hash % 3) as f32 * 0.2, flora_cell)
+                // Desert: dead trees (row 3), sparse shrubs and ground
+                if hash % 3 == 0 {
+                    let v = FLORA_190_DEAD[hash % FLORA_190_DEAD.len()];
+                    (v, 3.0 + (hash % 3) as f32 * 0.2, flora_cell)
+                } else if hash % 3 == 1 {
+                    let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()];
+                    (v, 2.0 + (hash % 2) as f32 * 0.2, flora_cell)
                 } else {
                     let v = FLORA_190_GROUND[hash % FLORA_190_GROUND.len()];
-                    (v, 1.5 + (hash % 2) as f32 * 0.3, flora_cell)
+                    (v, 1.5, flora_cell)
                 }
             } else if biome == Biome::Mountain {
-                // Mountain: ground cover and sparse bushes
+                // Mountain: dead trees, sparse ground, some shrubs
                 if hash % 3 == 0 {
-                    let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
-                    (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell)
+                    let v = FLORA_190_DEAD[hash % FLORA_190_DEAD.len()];
+                    (v, 3.0 + (hash % 2) as f32 * 0.3, flora_cell)
+                } else if hash % 3 == 1 {
+                    let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()];
+                    (v, 2.0 + (hash % 2) as f32 * 0.2, flora_cell)
                 } else {
                     let v = FLORA_190_GROUND[hash % FLORA_190_GROUND.len()];
-                    (v, 2.0 + (hash % 2) as f32 * 0.3, flora_cell)
+                    (v, 1.5, flora_cell)
                 }
             } else if biome == Biome::Forest {
                 // Forest: 70% temperate trees, 20% bushes, 10% flowers

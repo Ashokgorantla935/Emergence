@@ -41,6 +41,7 @@ pub enum StructureType {
     Keep = 18,         // requires TECH_MASONRY + TECH_SMELTING
     Castle = 19,       // requires TECH_MASONRY + TECH_SMELTING + TECH_ENGINEERING
     FarmField = 20,    // tilled agricultural land
+    Canal = 21,        // irrigation channel: sets water flag, clears biomass
 }
 
 impl StructureType {
@@ -67,6 +68,7 @@ impl StructureType {
             StructureType::Keep => 150,
             StructureType::Castle => 300,
             StructureType::FarmField => 5,
+            StructureType::Canal => 20,
         }
     }
 
@@ -92,6 +94,7 @@ impl StructureType {
             18 => StructureType::Keep,
             19 => StructureType::Castle,
             20 => StructureType::FarmField,
+            21 => StructureType::Canal,
             _ => StructureType::None,
         }
     }
@@ -451,6 +454,15 @@ impl Terrain {
                 | StructureType::Castle
         ) {
             self.shelter[idx] = true;
+        }
+        // Canal: set water flag and clear flora
+        if stype == StructureType::Canal {
+            self.water[idx] = true;
+            self.biomass[idx] = 0.0;
+        }
+        // All non-path structures clear flora at the build site
+        if !matches!(stype, StructureType::None | StructureType::DirtPath | StructureType::StoneRoad | StructureType::Canal) {
+            self.biomass[idx] = 0.0;
         }
     }
 

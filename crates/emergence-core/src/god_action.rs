@@ -330,6 +330,12 @@ pub enum GodAction {
         anger: f32,
     },
 
+    // ── Tab 2 (Terrain): Canal placement ───────────────────────────────────────
+    PlaceCanal {
+        x: u32,
+        y: u32,
+    },
+
     // ── Tab 8: World ───────────────────────────────────────────────────────────
     FastForward {
         ticks: u64,
@@ -1329,6 +1335,23 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         GodAction::ToggleLaw { law_id } => {
             let current = get_law(&world.laws, law_id);
             apply_law(&mut world.laws, law_id, !current);
+        }
+
+        GodAction::PlaceCanal { x, y } => {
+            let tw = world.terrain.width;
+            let th = world.terrain.height;
+            let bx = x.min(tw - 1);
+            let by = y.min(th - 1);
+            let idx = (by * tw + bx) as usize;
+            if idx < world.terrain.structure.len() && !world.terrain.water[idx] {
+                world.terrain.place_structure(
+                    bx,
+                    by,
+                    crate::world::terrain::StructureType::Canal,
+                    0,
+                );
+                world.terrain.modified[idx] = world.terrain.modified[idx].saturating_add(1);
+            }
         }
     }
 }

@@ -1149,6 +1149,19 @@ pub fn tick(world: &mut World) {
                 let scy = (s.center[1] as u32).min(world.signals.height - 1);
                 world.signals.deposit(SignalChannel::Comfort, scx, scy, 1.0);
                 world.signals.deposit(SignalChannel::Celebration, scx, scy, 0.5);
+                // Deforestation: clear flora in 5x5 area around new settlement center
+                let tw = world.terrain.width as i32;
+                let th = world.terrain.height as i32;
+                let cx = s.center[0] as i32;
+                let cy = s.center[1] as i32;
+                for dy in -2i32..=2 {
+                    for dx in -2i32..=2 {
+                        let nx = (cx + dx).clamp(0, tw - 1) as usize;
+                        let ny = (cy + dy).clamp(0, th - 1) as usize;
+                        let idx = ny * world.terrain.width as usize + nx;
+                        world.terrain.biomass[idx] = 0.0;
+                    }
+                }
             }
         }
 

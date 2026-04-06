@@ -178,8 +178,9 @@ fn apply_illumination(color: vec4<f32>, illumination: f32, comfort: f32) -> vec4
 
 // Structure overlays. Mixes building color onto the base biome color based on cell distance and LOD
 fn apply_structure(base: vec4<f32>, structure_type: u32, build_progress: f32, world_pos: vec2<f32>, time: f32, lod: u32, uv: vec2<f32>) -> vec4<f32> {
-    let cell_frac = fract(world_pos) - vec2<f32>(0.5, 0.5); // [-0.5, 0.5]
-    
+    // Use tile-local uv [0,1] mapped to [-0.5, 0.5] — avoids fract(world_pos) triangle-border tearing
+    let cell_frac = uv - vec2<f32>(0.5, 0.5);
+
     // Create a smooth squircle mask to confine the road to the cell geometry without hitting triangle edges
     let rect_dist = max(abs(cell_frac.x), abs(cell_frac.y));
     let mask = smoothstep(0.50, 0.40, rect_dist);

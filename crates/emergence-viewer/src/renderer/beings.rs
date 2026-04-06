@@ -262,8 +262,8 @@ impl BeingRenderer {
     }
 }
 
-/// Fauna base colors and sizes by CreatureType value.
-/// Order matches CreatureType enum: Human=0, Wolf=1, Deer=2, Rabbit=3, Fish=4, Hawk=5, Bear=6, Snake=7
+/// Fauna base colors — retained for memetic mutation tinting (V53: base fauna uses white [1,1,1] pass-through)
+#[allow(dead_code)]
 const FAUNA_COLOR: [[f32; 3]; 8] = [
     [0.3, 0.85, 0.3],           // Human — not used (handled below)
     [0.4, 0.4, 0.45],           // Wolf — dark gray

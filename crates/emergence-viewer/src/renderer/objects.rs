@@ -96,28 +96,70 @@ const FLORA_SWAMP_B: [f32; 2] = flora_uv(1, 4);
 const FLORA_SWAMP_C: [f32; 2] = flora_uv(2, 4);
 const FLORA_SWAMP_D: [f32; 2] = flora_uv(3, 4);
 
-// 190-series atlas: 8x8 grid, 128px per cell
+// ── 190-series grid constants ──────────────────────────────────────────────
+// Architecture sheet: 8×8 grid (128px cells on 1024×1024)
 const CELL_190: f32 = 1.0 / 8.0;
 const fn uv_190(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * CELL_190, row as f32 * CELL_190]
 }
 
-// Flora 190 spritesheet grid mapping (8x8):
-// Row 0: Temperate trees
-// Row 1: Snow/ice pines and conifers
-// Row 2: Cherry blossom / exotic trees
-// Row 3: Mushrooms and fungi
-// Row 4-5: Dark swamp / dead trees
-// Row 6: Bushes and shrubs
-// Row 7: Ground cover, round bushes, saplings
-const FLORA_190_TEMPERATE: &[[f32; 2]] = &[uv_190(0,0), uv_190(1,0), uv_190(2,0), uv_190(3,0), uv_190(4,0), uv_190(5,0), uv_190(6,0), uv_190(7,0)];
-const FLORA_190_SNOW: &[[f32; 2]] = &[uv_190(0,1), uv_190(1,1), uv_190(2,1), uv_190(3,1), uv_190(4,1), uv_190(5,1), uv_190(6,1), uv_190(7,1)];
-const FLORA_190_EXOTIC: &[[f32; 2]] = &[uv_190(0,2), uv_190(1,2), uv_190(2,2), uv_190(3,2)];
-const FLORA_190_FUNGI: &[[f32; 2]] = &[uv_190(0,3), uv_190(1,3), uv_190(2,3), uv_190(3,3), uv_190(4,3), uv_190(5,3)];
-const FLORA_190_SWAMP: &[[f32; 2]] = &[uv_190(0,4), uv_190(1,4), uv_190(2,4), uv_190(3,4)];
-const FLORA_190_DEAD: &[[f32; 2]] = &[uv_190(0,5), uv_190(1,5), uv_190(2,5), uv_190(3,5)];
-const FLORA_190_BUSH: &[[f32; 2]] = &[uv_190(0,6), uv_190(1,6), uv_190(2,6), uv_190(3,6), uv_190(4,6), uv_190(5,6)];
-const FLORA_190_GROUND: &[[f32; 2]] = &[uv_190(0,7), uv_190(1,7), uv_190(2,7), uv_190(3,7)];
+// Flora sheet: 12 columns × 8 rows (~85px × 128px cells on 1024×1024)
+const CELL_FLORA_X: f32 = 1.0 / 12.0;
+const CELL_FLORA_Y: f32 = 1.0 / 8.0;
+const fn uv_flora(col: u8, row: u8) -> [f32; 2] {
+    [col as f32 * CELL_FLORA_X, row as f32 * CELL_FLORA_Y]
+}
+
+// Flora 190 spritesheet — visually verified grid layout:
+// Row 0: 12 green deciduous trees (temperate forests)
+// Row 1: 12 snow/ice pine trees and conifers
+// Row 2: 12 palm/tropical/savannah trees (exotic biomes)
+// Row 3: 6 pink mushrooms (cols 0-5), 6 cyan crystals (cols 6-11)
+// Row 4: 12 round green bushes and hedges
+// Row 5: 12 colorful flowers and small plants
+// Row 6: 12 grass patches, shrubs, cacti
+// Row 7: 12 stumps, logs, rocks, saplings (ground cover)
+const FLORA_190_TEMPERATE: &[[f32; 2]] = &[
+    uv_flora(0,0), uv_flora(1,0), uv_flora(2,0), uv_flora(3,0),
+    uv_flora(4,0), uv_flora(5,0), uv_flora(6,0), uv_flora(7,0),
+    uv_flora(8,0), uv_flora(9,0), uv_flora(10,0), uv_flora(11,0),
+];
+const FLORA_190_SNOW: &[[f32; 2]] = &[
+    uv_flora(0,1), uv_flora(1,1), uv_flora(2,1), uv_flora(3,1),
+    uv_flora(4,1), uv_flora(5,1), uv_flora(6,1), uv_flora(7,1),
+    uv_flora(8,1), uv_flora(9,1), uv_flora(10,1), uv_flora(11,1),
+];
+const FLORA_190_EXOTIC: &[[f32; 2]] = &[
+    uv_flora(0,2), uv_flora(1,2), uv_flora(2,2), uv_flora(3,2),
+    uv_flora(4,2), uv_flora(5,2), uv_flora(6,2), uv_flora(7,2),
+    uv_flora(8,2), uv_flora(9,2), uv_flora(10,2), uv_flora(11,2),
+];
+const FLORA_190_FUNGI: &[[f32; 2]] = &[
+    uv_flora(0,3), uv_flora(1,3), uv_flora(2,3), uv_flora(3,3), uv_flora(4,3), uv_flora(5,3),
+];
+const FLORA_190_CRYSTAL: &[[f32; 2]] = &[
+    uv_flora(6,3), uv_flora(7,3), uv_flora(8,3), uv_flora(9,3), uv_flora(10,3), uv_flora(11,3),
+];
+const FLORA_190_BUSH: &[[f32; 2]] = &[
+    uv_flora(0,4), uv_flora(1,4), uv_flora(2,4), uv_flora(3,4),
+    uv_flora(4,4), uv_flora(5,4), uv_flora(6,4), uv_flora(7,4),
+    uv_flora(8,4), uv_flora(9,4), uv_flora(10,4), uv_flora(11,4),
+];
+const FLORA_190_FLOWERS: &[[f32; 2]] = &[
+    uv_flora(0,5), uv_flora(1,5), uv_flora(2,5), uv_flora(3,5),
+    uv_flora(4,5), uv_flora(5,5), uv_flora(6,5), uv_flora(7,5),
+    uv_flora(8,5), uv_flora(9,5), uv_flora(10,5), uv_flora(11,5),
+];
+const FLORA_190_GRASS: &[[f32; 2]] = &[
+    uv_flora(0,6), uv_flora(1,6), uv_flora(2,6), uv_flora(3,6),
+    uv_flora(4,6), uv_flora(5,6), uv_flora(6,6), uv_flora(7,6),
+    uv_flora(8,6), uv_flora(9,6), uv_flora(10,6), uv_flora(11,6),
+];
+const FLORA_190_GROUND: &[[f32; 2]] = &[
+    uv_flora(0,7), uv_flora(1,7), uv_flora(2,7), uv_flora(3,7),
+    uv_flora(4,7), uv_flora(5,7), uv_flora(6,7), uv_flora(7,7),
+    uv_flora(8,7), uv_flora(9,7), uv_flora(10,7), uv_flora(11,7),
+];
 
 // Architecture 190 grid (8x8):
 // Row 0: Huts, tents, basic shelters, caches, oilpump, farm
@@ -843,45 +885,70 @@ fn collect_chunk_decor(
             let jitter_y = ((hash >> 10) % 13) as f32 * 0.05 - 0.30;
 
             let temp = terrain.temperature_base[idx];
+            // Flora atlas is 12 cols × 8 rows — use non-square cell sizes
+            let flora_cell = [CELL_FLORA_X, CELL_FLORA_Y];
+
             let (atlas_uv, size, atlas_cell) = if temp < 0.2 {
+                // Cold: snow pines and conifers (row 1)
                 let v = FLORA_190_SNOW[hash % FLORA_190_SNOW.len()];
-                (v, 4.0 + (hash % 3) as f32 * 0.3, CELL_190)
+                (v, 4.0 + (hash % 3) as f32 * 0.3, flora_cell)
             } else if biome == Biome::Wetland || (moisture > 0.8 && biomass > 0.7) {
+                // Wetland: mushrooms + crystal mix
                 if hash % 3 == 0 {
                     let v = FLORA_190_FUNGI[hash % FLORA_190_FUNGI.len()];
-                    (v, 3.0 + (hash % 3) as f32 * 0.2, CELL_190)
+                    (v, 3.0 + (hash % 3) as f32 * 0.2, flora_cell)
                 } else {
-                    let v = FLORA_190_SWAMP[hash % FLORA_190_SWAMP.len()];
-                    (v, 3.5 + (hash % 3) as f32 * 0.3, CELL_190)
+                    let v = FLORA_190_CRYSTAL[hash % FLORA_190_CRYSTAL.len()];
+                    (v, 3.5 + (hash % 3) as f32 * 0.3, flora_cell)
                 }
             } else if biome == Biome::Desert {
-                let v = FLORA_190_DEAD[hash % FLORA_190_DEAD.len()];
-                (v, 3.0 + (hash % 3) as f32 * 0.2, CELL_190)
-            } else if biome == Biome::Mountain {
-                let v = FLORA_190_DEAD[hash % FLORA_190_DEAD.len()];
-                (v, 3.5 + (hash % 3) as f32 * 0.2, CELL_190)
-            } else if biome == Biome::Forest {
-                if hash % 10 < 7 {
-                    let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
-                    (v, 4.5 + (hash % 3) as f32 * 0.3, CELL_190)
-                } else {
-                    let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
-                    (v, 2.5 + (hash % 3) as f32 * 0.2, CELL_190)
-                }
-            } else if biome == Biome::Grassland && temp >= 0.65 {
-                // Savannah: hot grassland — use exotic/tropical trees with wider atlas cell to prevent clipping
-                let v = FLORA_190_EXOTIC[hash % FLORA_190_EXOTIC.len()];
-                (v, 5.0 + (hash % 3) as f32 * 0.4, CELL_190 * 1.5)
-            } else {
-                if hash % 5 == 0 {
-                    let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
-                    (v, 4.0, CELL_190)
-                } else if hash % 5 < 3 {
-                    let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
-                    (v, 2.5, CELL_190)
+                // Desert: sparse ground cover and grass (row 6-7)
+                if hash % 2 == 0 {
+                    let v = FLORA_190_GRASS[hash % FLORA_190_GRASS.len()];
+                    (v, 2.0 + (hash % 3) as f32 * 0.2, flora_cell)
                 } else {
                     let v = FLORA_190_GROUND[hash % FLORA_190_GROUND.len()];
-                    (v, 1.5, CELL_190)
+                    (v, 1.5 + (hash % 2) as f32 * 0.3, flora_cell)
+                }
+            } else if biome == Biome::Mountain {
+                // Mountain: ground cover and sparse bushes
+                if hash % 3 == 0 {
+                    let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
+                    (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell)
+                } else {
+                    let v = FLORA_190_GROUND[hash % FLORA_190_GROUND.len()];
+                    (v, 2.0 + (hash % 2) as f32 * 0.3, flora_cell)
+                }
+            } else if biome == Biome::Forest {
+                // Forest: 70% temperate trees, 20% bushes, 10% flowers
+                if hash % 10 < 7 {
+                    let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
+                    (v, 4.5 + (hash % 3) as f32 * 0.3, flora_cell)
+                } else if hash % 10 < 9 {
+                    let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
+                    (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell)
+                } else {
+                    let v = FLORA_190_FLOWERS[hash % FLORA_190_FLOWERS.len()];
+                    (v, 1.5 + (hash % 2) as f32 * 0.2, flora_cell)
+                }
+            } else if biome == Biome::Grassland && temp >= 0.65 {
+                // Savannah: exotic palms and tropical trees (row 2)
+                let v = FLORA_190_EXOTIC[hash % FLORA_190_EXOTIC.len()];
+                (v, 5.0 + (hash % 3) as f32 * 0.4, flora_cell)
+            } else {
+                // Temperate grassland: mix of trees, bushes, flowers, grass
+                if hash % 8 < 2 {
+                    let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
+                    (v, 4.0, flora_cell)
+                } else if hash % 8 < 4 {
+                    let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
+                    (v, 2.5, flora_cell)
+                } else if hash % 8 < 6 {
+                    let v = FLORA_190_FLOWERS[hash % FLORA_190_FLOWERS.len()];
+                    (v, 1.5, flora_cell)
+                } else {
+                    let v = FLORA_190_GRASS[hash % FLORA_190_GRASS.len()];
+                    (v, 1.5, flora_cell)
                 }
             };
 
@@ -908,7 +975,7 @@ fn collect_chunk_decor(
             flora_out.push(ObjectInstance {
                 position:   [wx + jitter_x, wy + jitter_y],
                 atlas_uv,
-                atlas_size: [atlas_cell, atlas_cell],
+                atlas_size: atlas_cell,
                 tint,
                 size,
                 alpha:      1.0,

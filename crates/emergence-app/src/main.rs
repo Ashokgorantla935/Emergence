@@ -2786,10 +2786,9 @@ impl ApplicationHandler for App {
                             obj_r.index_buffer.slice(..),
                             wgpu::IndexFormat::Uint16,
                         );
-                        // Pass 1: Resources (existing atlas)
-                        render_pass.set_bind_group(1, &rs.atlas.bind_group, &[]);
+                        // Pass 1: Resources + carry indicators (190-series consumables)
+                        render_pass.set_bind_group(1, &rs.consumables_190_bind_group, &[]);
                         obj_r.draw(&mut render_pass);
-                        // Carry indicators: tiny sprites above beings holding items (same pipeline)
                         obj_r.draw_carry_indicators(&mut render_pass);
                         // Pass 2: Flora (190-series spritesheet)
                         render_pass.set_bind_group(1, &rs.flora_190_bind_group, &[]);
@@ -2840,7 +2839,7 @@ impl ApplicationHandler for App {
                         if ps.active_count > 0 {
                             render_pass.set_pipeline(&rs.particle_pipeline);
                             render_pass.set_bind_group(0, &rs.camera_bind_group, &[]);
-                            render_pass.set_bind_group(1, &rs.atlas.bind_group, &[]);
+                            render_pass.set_bind_group(1, &rs.vfx_traits_190_bind_group, &[]);
                             // Particles share the beings vertex buffer layout (unit quad)
                             if let Some(ref being_r) = self.being_renderer {
                                 render_pass.set_vertex_buffer(0, being_r.vertex_buffer.slice(..));

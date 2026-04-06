@@ -640,6 +640,8 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                             let nidx = ny * world.terrain.width as usize + nx;
                             if world.terrain.structure[nidx] == 0 {
                                 world.terrain.biomass[nidx] = 0.0;
+                                world.resources.flora_stage[nidx] = 0;
+                                world.resources.flora_energy[nidx] = 0;
                             }
                         }
                     }

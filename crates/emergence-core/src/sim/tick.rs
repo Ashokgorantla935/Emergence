@@ -9,6 +9,7 @@ pub const FIXED_DT: f32 = 1.0;
 
 use crate::being::actions::{score_actions, Action, ScoredAction};
 use crate::being::data::*;
+use crate::world::terrain::Biome;
 use crate::being::emotions::{decay_emotions, trigger_emotion, update_emotions_from_needs};
 use crate::being::lifecycle::{age_beings, age_beings_no_death, blend_child_genotype, check_death_conditions, drift_personality_humans, generate_personality};
 use crate::being::names::generate_name;
@@ -1250,6 +1251,10 @@ pub fn tick(world: &mut World) {
                         let ny = (cy + dy).clamp(0, th - 1) as usize;
                         let idx = ny * world.terrain.width as usize + nx;
                         world.terrain.biomass[idx] = 0.0;
+                        // Prevent forest regrowth inside settlements
+                        if matches!(world.terrain.biome[idx], Biome::Forest | Biome::Wetland) {
+                            world.terrain.biome[idx] = Biome::Grassland;
+                        }
                     }
                 }
             }

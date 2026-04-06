@@ -252,7 +252,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Blend LOD 0 → LOD 1 when zoom in [0, 1)
     if (zoom < 1.0) {
         let blended = mix(color_lod0, color_lod1, zoom);
-        return apply_illumination(blended, illumination, comfort);
+        let structured = apply_structure(blended, structure_id, in.build_progress, in.world_pos, t, 0u);
+        return apply_illumination(structured, illumination, comfort);
     }
 
     // ── LOD 2: Close zoom — LOD 1 + shore foam + forest canopy ───────────

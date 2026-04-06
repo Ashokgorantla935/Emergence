@@ -18,10 +18,10 @@ struct CameraUniform {
 @group(1) @binding(1) var atlas_sampler: sampler;
 
 struct TimeUniform {
-    time: f32,
-    _pad0: f32,
-    _pad1: f32,
-    _pad2: f32,
+    time:       f32,
+    delta_time: f32,  // seconds since last sim tick, for dead-reckoning
+    _pad1:      f32,
+    _pad2:      f32,
 };
 @group(2) @binding(0) var<uniform> time_u: TimeUniform;
 
@@ -42,7 +42,10 @@ struct InstanceInput {
     @location(8) alpha:        f32,        // opacity
     /// Encoded: sign = facing dir (+1 right, -1 left). Magnitude = bob phase.
     /// Exactly 0.0 means idle (no bob, no flip needed — default face right).
-    @location(9) bob_flip:     f32,
+    @location(9)  bob_flip:         f32,
+    @location(10) velocity:         vec2<f32>,  // [dx, dy] per second for dead-reckoning
+    @location(11) scale_multiplier: f32,        // biological size factor
+    @location(12) _pad_v54:         f32,
 };
 
 // ── Vertex output ────────────────────────────────────────────────────────────
@@ -72,8 +75,15 @@ fn is_magenta(c: vec3<f32>) -> bool {
 fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
 
-    let screen_size = instance.size * camera.pixels_per_unit;
-    let final_size  = instance.size;  // native world-space size, no inflation
+    // V54: Biological scaling
+    let bio_size    = instance.size * instance.scale_multiplier;
+    let screen_size = bio_size * camera.pixels_per_unit;
+
+    // V54: LOD discard — sub-pixel entities not worth drawing
+    if (screen_size < 1.0) {
+        out.clip_position = vec4<f32>(2000.0, 2000.0, 2000.0, 1.0);
+        return out;
+    }
 
     // Walking bob: only when bob_flip != 0 (moving).
     // bob_flip encodes: sign = facing direction, magnitude = phase (game_tick * 0.18 + id * 0.72).
@@ -88,10 +98,13 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     // Horizontal flip: if bob_flip < 0, facing left — mirror UV horizontally.
     let flip_sign = select(1.0, -1.0, instance.bob_flip < -0.001);
 
-    // Billboard quad centred on world_pos, shifted up by bob.
-    var pos = instance.world_pos;
+    // V54: Dead-reckoning GPU interpolation — advance position by velocity * delta_time
+    let predicted_pos = instance.world_pos + instance.velocity * time_u.delta_time;
+
+    // Billboard quad centred on predicted_pos, shifted up by bob.
+    var pos = predicted_pos;
     pos.y += bob_offset;
-    let world_xy = pos + vertex.vertex_pos * final_size;
+    let world_xy = pos + vertex.vertex_pos * bio_size;
     var clip_pos = camera.view_proj * vec4<f32>(world_xy, 0.0, 1.0);
     // Y-sort depth bias: beings further south (higher world Y) render behind northern ones.
     let depth_bias = clamp(instance.world_pos.y / 512.0, 0.0, 1.0) * 0.9;

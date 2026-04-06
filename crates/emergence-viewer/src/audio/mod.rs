@@ -60,6 +60,18 @@ pub struct AudioContext {
     /// Camera zoom level: 0.0 = fully zoomed out (far), 1.0 = fully zoomed in (close).
     /// Drives ambient volume: far = 0.05, close = 0.20.
     pub zoom_normalized: f32,
+    /// Human beings currently visible in the camera viewport.
+    /// Used at micro zoom to scale town chatter volume.
+    pub humans_in_view: u32,
+    /// Non-human beings (fauna) currently visible in the camera viewport.
+    /// Used at micro zoom to add animal ambient sounds.
+    pub fauna_in_view: u32,
+    /// Tree/forest flora cells visible in the camera viewport.
+    /// Boosts nature ambient layer when trees are present.
+    pub trees_in_view: u32,
+    /// Water biome cells visible in the camera viewport.
+    /// Drives water/stream ambient layer when water is in view.
+    pub water_in_view: u32,
 }
 
 impl Default for AudioContext {
@@ -73,6 +85,10 @@ impl Default for AudioContext {
             war_nearby:      false,
             biome:           BiomeAmbience::Grassland,
             zoom_normalized: 0.5,
+            humans_in_view:  0,
+            fauna_in_view:   0,
+            trees_in_view:   0,
+            water_in_view:   0,
         }
     }
 }
@@ -289,6 +305,18 @@ impl AmbientLayer {
 }
 
 // ---------------------------------------------------------------------------
+// Zoom thresholds for spatial audio mixing
+// ---------------------------------------------------------------------------
+
+/// zoom_normalized ≥ MICRO_ZOOM_NORM: individual-scale audio (town chatter, fauna calls).
+/// Corresponds roughly to camera.zoom ≤ 35 (very close-up view).
+const MICRO_ZOOM_NORM: f32 = 0.95;
+
+/// zoom_normalized ≤ MACRO_ZOOM_NORM: continent-scale audio (cosmic wind drone only).
+/// Corresponds roughly to camera.zoom ≥ 100 (far-out view).
+const MACRO_ZOOM_NORM: f32 = 0.82;
+
+// ---------------------------------------------------------------------------
 // Internal audio thread state
 // ---------------------------------------------------------------------------
 
@@ -362,10 +390,62 @@ impl AudioThreadState {
         };
 
         let nature_base: f32 = if ctx.weather_active { 0.3 } else { 1.0 };
-        let nature_w     = (nature_base * biome_nature_boost).min(1.0);
         let night_w      = if is_night { 0.8 } else { 0.0 };
-        let settlement_w = if ctx.near_settlement { 0.6 } else { 0.0 };
         let weather_w    = if ctx.weather_active { 0.9 } else { 0.0 };
+
+        // Spatial audio: nature and settlement weights driven by zoom + entity counts.
+        //
+        // MICRO zoom (zoom_normalized >= MICRO_ZOOM_NORM):
+        //   - Town chatter scales with human count in viewport.
+        //   - Fauna calls scale with animal count in viewport.
+        //   - Full biome sounds.
+        //
+        // MACRO zoom (zoom_normalized <= MACRO_ZOOM_NORM):
+        //   - Suppress individual sounds; only wind/cosmic drone remains.
+        //   - play_ambient_tick switches to deep cosmic drone at this zoom.
+        //
+        // MID zoom: linear blend.
+        // Trees in viewport boost nature layer; water in viewport adds water ambiance.
+        // Both are normalized against reasonable cell counts per viewport.
+        let tree_boost  = (ctx.trees_in_view as f32 / 50.0).clamp(0.0, 0.4);
+        let water_boost = (ctx.water_in_view as f32 / 50.0).clamp(0.0, 0.5);
+
+        let zoom = ctx.zoom_normalized;
+        let (nature_w, settlement_w) = if zoom >= MICRO_ZOOM_NORM {
+            // Micro: full biome sounds + fauna + tree boost + entity-count-driven town chatter.
+            // Water ambiance is mixed in below as a separate layer contribution.
+            let fauna_boost = (ctx.fauna_in_view as f32 / 15.0).min(0.4);
+            let n = ((nature_base * biome_nature_boost) + fauna_boost + tree_boost).min(1.0);
+            let s = (ctx.humans_in_view as f32 / 20.0).clamp(0.0, 1.0) * 0.7;
+            (n, s)
+        } else if zoom <= MACRO_ZOOM_NORM {
+            // Macro: suppress micro sounds; cosmic drone handled in play_ambient_tick
+            let n = (nature_base * biome_nature_boost * 0.15).min(1.0);
+            (n, 0.0)
+        } else {
+            // Mid blend: lerp between macro and micro
+            let t = (zoom - MACRO_ZOOM_NORM) / (MICRO_ZOOM_NORM - MACRO_ZOOM_NORM);
+            let fauna_boost = (ctx.fauna_in_view as f32 / 15.0).min(0.4) * t;
+            let tree_boost_t = tree_boost * t;
+            let nature_macro = nature_base * biome_nature_boost * 0.15;
+            let nature_micro = (nature_base * biome_nature_boost) + fauna_boost + tree_boost_t;
+            let n = (nature_macro + (nature_micro - nature_macro) * t).min(1.0);
+            let s = if ctx.near_settlement {
+                0.6 * t
+            } else {
+                (ctx.humans_in_view as f32 / 20.0).clamp(0.0, 1.0) * 0.7 * t
+            };
+            (n, s)
+        };
+
+        // Water layer: blend into the weather slot's unused capacity when weather is off,
+        // or independently boost nature layer with a water-ambiance nudge.
+        // We fold water_boost into the nature weight when zoom is not macro and water is visible.
+        let nature_w = if zoom > MACRO_ZOOM_NORM && water_boost > 0.0 {
+            (nature_w + water_boost * 0.5).min(1.0)
+        } else {
+            nature_w
+        };
 
         // Track biome and zoom for play_ambient_tick
         self.current_biome = ctx.biome;
@@ -411,6 +491,16 @@ impl AudioThreadState {
         let mut wind_layer = synth_ambient_drone(90.0, 3.0, wind_vol * 0.5);
         for (a, b) in wind_layer.iter_mut().zip(wind.iter()) { *a += b; }
         sink.append(to_rodio_source(wind_layer, 1.0));
+
+        // Macro zoom: replace biome chirps with a deep cosmic wind drone.
+        // Individual entity sounds are suppressed by layer weights in apply_context.
+        if self.current_zoom <= MACRO_ZOOM_NORM {
+            // Deep planetary wind: very low frequency drone + filtered noise
+            let cosmic_vol = amb_vol * 0.35;
+            let cosmic = synth_ambient_drone(25.0, 4.0, cosmic_vol);
+            sink.append(to_rodio_source(cosmic, 1.0));
+            return;
+        }
 
         if weather_w > 0.5 {
             // Rain/storm: broadband noise on top of wind

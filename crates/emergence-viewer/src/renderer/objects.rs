@@ -103,14 +103,35 @@ const fn uv_190(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * CELL_190, row as f32 * CELL_190]
 }
 
-// Flora sheet: 12×12 grid (~85px square cells on 1024×1024) — confirmed by Gemini
-const CELL_FLORA: f32 = 1.0 / 14.0;
+// ── V54 §1.1: ALL spritesheet grid constants (HARDCODED) ──────────────────
+// Flora spritesheet: 16×12 grid (non-square cells)
+const CELL_FLORA_W: f32 = 1.0 / 16.0;   // 16 columns
+const CELL_FLORA_H: f32 = 1.0 / 12.0;   // 12 rows
 const fn uv_flora(col: u8, row: u8) -> [f32; 2] {
-    // Exact mapping, no offset needed for mathematically precise grids.
-    [col as f32 * CELL_FLORA, row as f32 * CELL_FLORA]
+    [col as f32 * CELL_FLORA_W, row as f32 * CELL_FLORA_H]
 }
+// Fauna & Races: 12×12 grid
+const CELL_FAUNA: f32 = 1.0 / 12.0;
+// Human Races: 16×12 grid (non-square)
+const CELL_HUMAN_W: f32 = 1.0 / 16.0;   // 16 columns
+const CELL_HUMAN_H: f32 = 1.0 / 12.0;   // 12 rows
+// Minerals: 8×8 grid (same as architecture)
+const CELL_MINERALS: f32 = 1.0 / 8.0;
+// Exotic Biomes: 8×8 grid
+const CELL_EXOTIC: f32 = 1.0 / 8.0;
+// Consumables: 10×12 grid (non-square)
+const CELL_CONS_W: f32 = 1.0 / 10.0;    // 10 columns
+const CELL_CONS_H: f32 = 1.0 / 12.0;    // 12 rows
+// Powers UI: 10×10 grid
+const CELL_POWERS: f32 = 1.0 / 10.0;
+// VFX & Traits: 10×10 grid
+const CELL_VFX: f32 = 1.0 / 10.0;
+// Worldbox Items: 8×8 grid
+#[allow(dead_code)]
+const CELL_ITEMS: f32 = 1.0 / 8.0;
+// Terrain: 16×16 grid (defined in terrain.rs as ATLAS_CELL)
 
-// Flora 190 spritesheet — 12×12 grid (Gemini confirmed), 85px cells on 1024×1024
+// Flora 190 spritesheet — 16×12 grid per V54 §1.1
 // Row  0: Green deciduous trees (temperate)
 // Row  1: Snow/ice pine trees and conifers
 // Row  2: Palm/tropical trees (exotic/savannah)
@@ -337,24 +358,26 @@ const MAX_GLOBAL_FLORA: usize = 100_000;
 /// Max global building instances
 const MAX_GLOBAL_BUILDINGS: usize = 25_000;
 
-/// 48-byte instance — resources and structures share this layout.
+/// 60-byte instance — resources and structures share this layout. (V54)
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ObjectInstance {
-    pub position:   [f32; 2], // 8B  world-space center
-    pub atlas_uv:   [f32; 2], // 8B  top-left UV of sprite cell
-    pub atlas_size: [f32; 2], // 8B  UV extent (typically 1/32 x 1/32)
-    pub tint:       [f32; 3], // 12B full/depleted tint
-    pub size:       f32,      // 4B  world units
-    pub alpha:      f32,      // 4B  construction opacity or 1.0
-    pub _pad:       f32,      // 4B  align to 48 bytes
+    pub position:         [f32; 2], // 8B  world-space center
+    pub atlas_uv:         [f32; 2], // 8B  top-left UV of sprite cell
+    pub atlas_size:       [f32; 2], // 8B  UV extent
+    pub tint:             [f32; 3], // 12B full/depleted tint
+    pub size:             f32,      // 4B  world units
+    pub alpha:            f32,      // 4B  construction opacity or 1.0
+    pub velocity:         [f32; 2], // 8B  V54: dead-reckoning (static objects = [0,0])
+    pub scale_multiplier: f32,      // 4B  V54: biological/type size multiplier
+    pub _pad_v54:         f32,      // 4B  padding to 60 bytes
 }
 
 /// Chunk grid constants
 const CHUNK_CELL_SIZE: u32 = 64;
 /// Max instances per chunk (64×64 = 4096 cells, one per cell worst-case)
 const MAX_INSTANCES_PER_CHUNK: usize = 4096;
-/// Bytes per chunk instance buffer: 4096 × 48
+/// Bytes per chunk instance buffer: 4096 × 60
 const CHUNK_BUFFER_SIZE: u64 = (MAX_INSTANCES_PER_CHUNK * std::mem::size_of::<ObjectInstance>()) as u64;
 
 /// A single render chunk — owns its GPU instance buffer.
@@ -676,26 +699,30 @@ impl ChunkedObjectRenderer {
 
             if food_carry > 0.1 {
                 instances.push(ObjectInstance {
-                    position:   [pos[0], head_y],
-                    atlas_uv:   UV_WHEAT_FULL,
-                    atlas_size: [ATLAS_CELL, ATLAS_CELL],
-                    tint:       [1.0, 0.85, 0.2],  // golden
-                    size:       0.7,
-                    alpha:      0.9,
-                    _pad:       0.0,
+                    position:         [pos[0], head_y],
+                    atlas_uv:         UV_WHEAT_FULL,
+                    atlas_size:       [ATLAS_CELL, ATLAS_CELL],
+                    tint:             [1.0, 0.85, 0.2],  // golden
+                    size:             0.7,
+                    alpha:            0.9,
+                    velocity:         [0.0, 0.0],
+                    scale_multiplier: 0.1,
+                    _pad_v54:         0.0,
                 });
             }
             if stone_carry > 0.1 {
                 // Offset right slightly when both food and stone are carried
                 let x_off = if food_carry > 0.1 { 0.5 } else { 0.0 };
                 instances.push(ObjectInstance {
-                    position:   [pos[0] + x_off, head_y],
-                    atlas_uv:   UV_STONE,
-                    atlas_size: [ATLAS_CELL, ATLAS_CELL],
-                    tint:       [0.7, 0.7, 0.7],  // grey
-                    size:       0.6,
-                    alpha:      0.9,
-                    _pad:       0.0,
+                    position:         [pos[0] + x_off, head_y],
+                    atlas_uv:         UV_STONE,
+                    atlas_size:       [ATLAS_CELL, ATLAS_CELL],
+                    tint:             [0.7, 0.7, 0.7],  // grey
+                    size:             0.6,
+                    alpha:            0.9,
+                    velocity:         [0.0, 0.0],
+                    scale_multiplier: 0.1,
+                    _pad_v54:         0.0,
                 });
             }
 
@@ -843,13 +870,15 @@ fn collect_chunk_decor(
             };
 
             building_out.push(ObjectInstance {
-                position:   [x as f32 + 0.5, y as f32 + 0.5],
+                position:         [x as f32 + 0.5, y as f32 + 0.5],
                 atlas_uv,
-                atlas_size: [CELL_190, CELL_190],
+                atlas_size:       [CELL_190, CELL_190],
                 tint,
                 size,
                 alpha,
-                _pad:       0.0,
+                velocity:         [0.0, 0.0],
+                scale_multiplier: 3.0,
+                _pad_v54:         0.0,
             });
         }
     }
@@ -880,78 +909,77 @@ fn collect_chunk_decor(
             let jitter_y = ((hash >> 10) % 13) as f32 * 0.05 - 0.30;
 
             let temp = terrain.temperature_base[idx];
-            // Flora atlas is 12 cols × 8 rows — use non-square cell sizes
+            // Flora atlas is 16 cols × 12 rows — use non-square cell sizes (V54 §1.1)
             // 98% sampling bound to prevent subpixel edge bleed from neighbors
-            let flora_cell = [CELL_FLORA * 0.98, CELL_FLORA * 0.98];
+            let flora_cell = [CELL_FLORA_W * 0.98, CELL_FLORA_H * 0.98];
 
-            let (atlas_uv, size, atlas_cell) = if temp < 0.2 {
+            let (atlas_uv, size, atlas_cell, scale_mult) = if temp < 0.2 {
                 // Cold: snow pines and conifers (row 1)
                 let v = FLORA_190_SNOW[hash % FLORA_190_SNOW.len()];
-                (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell)
+                (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell, 2.0f32)
             } else if biome == Biome::Wetland {
                 // Wetland ONLY: mushrooms + crystal mix (row 4)
                 if hash % 3 == 0 {
                     let v = FLORA_190_FUNGI[hash % FLORA_190_FUNGI.len()];
-                    (v, 3.0 + (hash % 3) as f32 * 0.2, flora_cell)
+                    (v, 3.0 + (hash % 3) as f32 * 0.2, flora_cell, 1.0f32)
                 } else {
                     let v = FLORA_190_CRYSTAL[hash % FLORA_190_CRYSTAL.len()];
-                    (v, 3.5 + (hash % 3) as f32 * 0.3, flora_cell)
+                    (v, 3.5 + (hash % 3) as f32 * 0.3, flora_cell, 1.0f32)
                 }
             } else if biome == Biome::Desert {
                 // Desert: dead trees (row 3), sparse shrubs and ground
                 if hash % 3 == 0 {
                     let v = FLORA_190_DEAD[hash % FLORA_190_DEAD.len()];
-                    (v, 3.0 + (hash % 3) as f32 * 0.2, flora_cell)
+                    (v, 3.0 + (hash % 3) as f32 * 0.2, flora_cell, 2.0f32)
                 } else if hash % 3 == 1 {
                     let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()];
-                    (v, 2.0 + (hash % 2) as f32 * 0.2, flora_cell)
+                    (v, 2.0 + (hash % 2) as f32 * 0.2, flora_cell, 1.0f32)
                 } else {
                     let v = FLORA_190_EXOTIC[hash % FLORA_190_EXOTIC.len()];
-                    (v, 1.5, flora_cell)
+                    (v, 1.5, flora_cell, 2.0f32)
                 }
             } else if biome == Biome::Mountain {
                 // Mountain: mostly sparse, some bushes/shrubs
                 if hash % 3 == 0 {
                     let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
-                    (v, 2.5 + (hash % 2) as f32 * 0.3, flora_cell)
+                    (v, 2.5 + (hash % 2) as f32 * 0.3, flora_cell, 1.0f32)
                 } else if hash % 3 == 1 {
                     let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()];
-                    (v, 2.0 + (hash % 2) as f32 * 0.2, flora_cell)
+                    (v, 2.0 + (hash % 2) as f32 * 0.2, flora_cell, 1.0f32)
                 } else {
                     let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()]; // use shrub instead of corrupt ground row
-                    (v, 1.5, flora_cell)
+                    (v, 1.5, flora_cell, 0.5f32)
                 }
             } else if biome == Biome::Forest {
                 // Forest: 70% temperate trees, 20% bushes, 10% flowers
                 if hash % 10 < 7 {
                     let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
-                    (v, 2.5 + (hash % 3) as f32 * 0.3, flora_cell)
+                    (v, 2.5 + (hash % 3) as f32 * 0.3, flora_cell, 2.0f32)
                 } else if hash % 10 < 9 {
                     let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
-                    (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell)
+                    (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell, 1.0f32)
                 } else {
                     let v = FLORA_190_FLOWERS[hash % FLORA_190_FLOWERS.len()];
-                    (v, 1.5 + (hash % 2) as f32 * 0.2, flora_cell)
+                    (v, 1.5 + (hash % 2) as f32 * 0.2, flora_cell, 0.3f32)
                 }
             } else if biome == Biome::Grassland && temp >= 0.65 {
                 // Savannah: exotic palms and tropical trees (row 2)
-                let mut v = FLORA_190_EXOTIC[hash % FLORA_190_EXOTIC.len()];
-                // standard 1.x scale
-                (v, 2.5 + (hash % 3) as f32 * 0.4, flora_cell)
+                let v = FLORA_190_EXOTIC[hash % FLORA_190_EXOTIC.len()];
+                (v, 2.5 + (hash % 3) as f32 * 0.4, flora_cell, 2.0f32)
             } else {
                 // Temperate grassland: mix of trees, bushes, flowers
                 if hash % 8 < 1 { // Only 1/8 trees in grassland to make it cleaner
                     let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
-                    (v, 4.0, [CELL_FLORA * 1.5, CELL_FLORA * 1.5])
+                    (v, 4.0, [CELL_FLORA_W, CELL_FLORA_H], 2.0f32)
                 } else if hash % 8 < 3 {
                     let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
-                    (v, 2.5, flora_cell)
+                    (v, 2.5, flora_cell, 1.0f32)
                 } else if hash % 8 < 6 {
                     let v = FLORA_190_FLOWERS[hash % FLORA_190_FLOWERS.len()];
-                    (v, 1.5, flora_cell)
+                    (v, 1.5, flora_cell, 0.3f32)
                 } else {
                     let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()]; // use shrub instead of corrupt grass row
-                    (v, 1.5, flora_cell)
+                    (v, 1.5, flora_cell, 1.0f32)
                 }
             };
 
@@ -976,13 +1004,15 @@ fn collect_chunk_decor(
             }
 
             flora_out.push(ObjectInstance {
-                position:   [wx + jitter_x, wy + jitter_y],
+                position:         [wx + jitter_x, wy + jitter_y],
                 atlas_uv,
-                atlas_size: atlas_cell,
+                atlas_size:       atlas_cell,
                 tint,
                 size,
-                alpha:      1.0,
-                _pad:       0.0,
+                alpha:            1.0,
+                velocity:         [0.0, 0.0],
+                scale_multiplier: scale_mult,
+                _pad_v54:         0.0,
             });
             decor_count += 1;
         }
@@ -1081,13 +1111,15 @@ fn rebuild_chunk_standalone(
             let jitter_y = (((hash >> 4) % 17) as f32 / 17.0 - 0.5) * 0.8;
 
             instances.push(ObjectInstance {
-                position:   [x as f32 + 0.5 + jitter_x, y as f32 + 0.5 + jitter_y],
+                position:         [x as f32 + 0.5 + jitter_x, y as f32 + 0.5 + jitter_y],
                 atlas_uv,
-                atlas_size: [ATLAS_CELL, ATLAS_CELL],
+                atlas_size:       [ATLAS_CELL, ATLAS_CELL],
                 tint,
                 size,
-                alpha:      1.0,
-                _pad:       0.0,
+                alpha:            1.0,
+                velocity:         [0.0, 0.0],
+                scale_multiplier: 1.0,
+                _pad_v54:         0.0,
             });
 
             if instances.len() >= MAX_INSTANCES_PER_CHUNK {

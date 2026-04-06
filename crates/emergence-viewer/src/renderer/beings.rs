@@ -11,23 +11,26 @@ use wgpu::util::DeviceExt;
 use crate::animation::AnimationManager;
 use crate::atlas::generator::SKIN_TONES;
 
-/// Instance data per being (64 bytes, matches being_sprite.wgsl layout).
+/// Instance data per being (80 bytes, matches being_sprite.wgsl layout).
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct BeingInstance {
-    pub position:     [f32; 2], // 8B  -- world space
-    pub atlas_uv:     [f32; 2], // 8B  -- current animation frame UV (top-left)
-    pub atlas_size:   [f32; 2], // 8B  -- UV extent per cell (1/32, 1/32)
-    pub emotion_tint: [f32; 3], // 12B -- clothing color from dominant emotion
-    pub skin_tone:    [f32; 3], // 12B -- from personality hash
-    pub size:         f32,      // 4B  -- world units
-    pub brightness:   f32,      // 4B  -- 1.5 when need < 0.3
-    pub alpha:        f32,      // 4B  -- 0.5 sleeping, 0.3 dying, 1.0 normal
+    pub position:         [f32; 2], // 8B  -- world space
+    pub atlas_uv:         [f32; 2], // 8B  -- current animation frame UV (top-left)
+    pub atlas_size:       [f32; 2], // 8B  -- UV extent per cell (1/32, 1/32)
+    pub emotion_tint:     [f32; 3], // 12B -- clothing color from dominant emotion
+    pub skin_tone:        [f32; 3], // 12B -- from personality hash
+    pub size:             f32,      // 4B  -- world units
+    pub brightness:       f32,      // 4B  -- 1.5 when need < 0.3
+    pub alpha:            f32,      // 4B  -- 0.5 sleeping, 0.3 dying, 1.0 normal
     /// Encoded: sign = facing direction (+1.0 right, -1.0 left = flip UV).
     /// Magnitude = per-being bob phase offset (radians). Zero when idle (no bob).
-    pub bob_flip:     f32,      // 4B  -- sign(flip_x) * bob_phase; 0.0 = idle/no-flip
+    pub bob_flip:         f32,      // 4B  -- sign(flip_x) * bob_phase; 0.0 = idle/no-flip
+    pub velocity:         [f32; 2], // 8B  -- [dx, dy] per second for dead-reckoning
+    pub scale_multiplier: f32,      // 4B  -- biological size factor
+    pub _pad_v54:         f32,      // 4B  -- align to 80 bytes total
 }
-// 64 bytes. 11,500 instances = 736KB.
+// 80 bytes. 11,500 instances = 920KB.
 
 /// Cell width in the entity spritesheet (1/4 columns).
 const ENTITY_CELL_U: f32 = 1.0 / 4.0;
@@ -139,9 +142,9 @@ impl BeingRenderer {
 
             let mut atlas_uv = anim.atlas_uv(beings, i);
             let is_human = beings.hot.creature_type[i] == CreatureType::Human as u8;
-            // Fauna uses the new fauna spritesheet (10 cols × 10 rows).
-            let cell_u = if is_human { ENTITY_CELL_U } else { (1.0 / 10.0) };
-            let cell_v = if is_human { ENTITY_CELL_V } else { (1.0 / 10.0) };
+            // Fauna uses fauna_and_races_spritesheet_190 (12×12 grid per V54 §1.1).
+            let cell_u = if is_human { ENTITY_CELL_U } else { (1.0 / 12.0) };
+            let cell_v = if is_human { ENTITY_CELL_V } else { (1.0 / 12.0) };
             
             let atlas_size = [cell_u, cell_v];
 
@@ -234,6 +237,9 @@ impl BeingRenderer {
                 brightness,
                 alpha,
                 bob_flip,
+                velocity: beings.hot.velocities[i],
+                scale_multiplier: creature_scale_multiplier(beings.hot.creature_type[i]),
+                _pad_v54: 0.0,
             };
             if is_human {
                 human_instances.push(inst);
@@ -403,6 +409,21 @@ fn blend_colors(base: [f32; 3], overlay: [f32; 3], t: f32) -> [f32; 3] {
         (base[1] * (1.0 - t) + overlay[1] * t).clamp(0.0, 1.0),
         (base[2] * (1.0 - t) + overlay[2] * t).clamp(0.0, 1.0),
     ]
+}
+
+/// Biological scale multiplier per creature type for V54 LOD and bio-sizing.
+fn creature_scale_multiplier(creature_type: u8) -> f32 {
+    match creature_type {
+        0 => 0.8, // Human
+        1 => 0.4, // Wolf
+        2 => 0.4, // Deer
+        3 => 0.2, // Rabbit
+        4 => 0.2, // Fish
+        5 => 0.3, // Hawk
+        6 => 0.6, // Bear
+        7 => 0.3, // Snake
+        _ => 0.5,
+    }
 }
 
 /// Derive skin tone from personality hash (0-7).

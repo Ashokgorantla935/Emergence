@@ -5,7 +5,7 @@ use wgpu::util::DeviceExt;
 /// a real 16x16 tile from the sprite atlas. No more 1-pixel-per-cell texture.
 
 // Sunnyside tileset is 1024x1024 with 16px tiles → 64x64 grid.
-const ATLAS_CELL: f32 = 1.0 / 64.0;
+const ATLAS_CELL: f32 = 1.0 / 16.0;
 
 /// One instance per visible terrain cell.
 #[repr(C)]
@@ -17,7 +17,10 @@ pub struct TerrainInstance {
     pub elevation:          f32,      // terrain elevation [0.0, 1.0] — used for water depth coloring
     pub structure_type:     f32,      // StructureType as f32: 0=None, 1=Campfire, etc.
     pub build_progress:     f32,      // Ticks accumulated for construction, 0 = none.
+    pub density:            f32,      // V54 §4.1: flora/entity density [0.0, 1.0] for canopy shadow
+    pub _pad_density:       f32,      // padding to align struct to 40 bytes
 }
+// 40 bytes per instance.
 
 /// Unit quad vertex.
 #[repr(C)]
@@ -250,6 +253,17 @@ impl TerrainRenderer {
                             let elevation = terrain.elevation[idx];
                             let structure_type = terrain.structure[idx] as f32;
 
+                            // V54 §4.1: biome-based flora density for macro canopy shadow.
+                            let density = match biome {
+                                Biome::Forest    => 0.85,
+                                Biome::Wetland   => 0.50,
+                                Biome::Grassland => 0.15,
+                                Biome::Mountain  => 0.05,
+                                Biome::Snow      => 0.02,
+                                Biome::Desert    => 0.0,
+                                Biome::Water     => 0.0,
+                            };
+
                             instances.push(TerrainInstance {
                                 world_pos: [x as f32, y as f32],
                                 tile_uv,
@@ -257,6 +271,8 @@ impl TerrainRenderer {
                                 elevation,
                                 structure_type,
                                 build_progress: terrain.build_progress[idx] as f32,
+                                density,
+                                _pad_density: 0.0,
                             });
                         }
                     }

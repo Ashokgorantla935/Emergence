@@ -14,10 +14,10 @@ struct CameraUniform {
 @group(1) @binding(1) var atlas_sampler: sampler;
 
 struct ObjectTimeUniform {
-    time: f32,
-    _pad0: f32,
-    _pad1: f32,
-    _pad2: f32,
+    time:       f32,
+    delta_time: f32,  // V54: seconds since last sim tick for dead-reckoning
+    _pad1:      f32,
+    _pad2:      f32,
 };
 @group(2) @binding(0) var<uniform> obj_time: ObjectTimeUniform;
 
@@ -31,13 +31,15 @@ struct VertexInput {
 };
 
 struct InstanceInput {
-    @location(1) world_pos:   vec2<f32>,
-    @location(2) atlas_uv:    vec2<f32>,
-    @location(3) atlas_size:  vec2<f32>,
-    @location(4) tint:        vec3<f32>,
-    @location(5) size:        f32,
-    @location(6) alpha:       f32,
-    @location(7) _pad:        f32,
+    @location(1) world_pos:         vec2<f32>,
+    @location(2) atlas_uv:          vec2<f32>,
+    @location(3) atlas_size:        vec2<f32>,
+    @location(4) tint:              vec3<f32>,
+    @location(5) size:              f32,
+    @location(6) alpha:             f32,
+    @location(7) velocity:          vec2<f32>,
+    @location(8) scale_multiplier:  f32,
+    @location(9) _pad_v54:          f32,
 };
 
 struct VertexOutput {
@@ -53,19 +55,29 @@ struct VertexOutput {
 @vertex
 fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
-    let screen_size = inst.size * camera.pixels_per_unit;
-    let final_size  = inst.size;  // native world-space size, no inflation
-    var world_pos   = inst.world_pos;
+
+    // V54: Dead-reckoning — predict position based on velocity and elapsed time
+    var world_pos = inst.world_pos + inst.velocity * obj_time.delta_time;
+
+    // V54: Biological scaling — combine base size with type/category multiplier
+    let bio_size   = inst.size * inst.scale_multiplier;
+    let screen_size = bio_size * camera.pixels_per_unit;
+
+    // V54: LOD discard — cull objects that are sub-pixel at current zoom
+    if (screen_size < 1.0) {
+        out.clip_position = vec4<f32>(2000.0, 2000.0, 2000.0, 1.0);
+        return out;
+    }
 
     // Tree wind sway: only for sprites in atlas row 21 (decor tree/bush).
     // Offset only the top half of the quad (vertex_pos.y > 0) so roots stay planted.
     let in_tree_row = inst.atlas_uv.y >= TREE_ROW_MIN && inst.atlas_uv.y < TREE_ROW_MAX;
     if in_tree_row && vertex.vertex_pos.y > 0.0 {
-        let sway = sin(obj_time.time * 1.5 + inst.world_pos.x * 3.0) * 0.03 * inst.size;
+        let sway = sin(obj_time.time * 1.5 + inst.world_pos.x * 3.0) * 0.03 * bio_size;
         world_pos.x += sway;
     }
 
-    let world       = world_pos + vertex.vertex_pos * final_size;
+    let world       = world_pos + vertex.vertex_pos * bio_size;
     var clip        = camera.view_proj * vec4<f32>(world, 0.0, 1.0);
     // Y-sort depth bias: objects further south (higher world Y) render behind northern ones.
     let depth_bias  = clamp(inst.world_pos.y / 512.0, 0.0, 1.0) * 0.9;

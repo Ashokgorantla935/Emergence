@@ -1272,8 +1272,8 @@ impl ApplicationHandler for App {
                 }
             }
             rs.update_water_time_signals(self.elapsed_time, self.cached_sig_danger, self.cached_sig_comfort, self.cached_sig_grief, 1.0, self.cached_sig_water_level);
-            rs.update_object_time(self.elapsed_time);
-            rs.update_being_time(self.elapsed_time);
+            rs.update_object_time(self.elapsed_time, dt);
+            rs.update_being_time(self.elapsed_time, dt);
         }
 
         // Onboarding timer (only while Playing)
@@ -1372,6 +1372,75 @@ impl ApplicationHandler for App {
                 // Normalize zoom: camera.zoom 10=close, 512+=far
                 // Invert so zoom_normalized 1.0=close (loud), 0.0=far (quiet)
                 let zoom_normalized = 1.0 - ((self.camera.zoom - 10.0) / 500.0).clamp(0.0, 1.0);
+
+                // Count beings in viewport for spatial micro-audio.
+                // Only scan at non-macro zoom to avoid unnecessary work at large zoom levels.
+                let (humans_in_view, fauna_in_view) = if self.camera.zoom < 100.0 {
+                    let cx = self.camera.position[0];
+                    let cy = self.camera.position[1];
+                    let half_w = self.camera.zoom * self.camera.aspect * 0.5 + 2.0;
+                    let half_h = self.camera.zoom * 0.5 + 2.0;
+                    let x_min = cx - half_w;
+                    let x_max = cx + half_w;
+                    let y_min = cy - half_h;
+                    let y_max = cy + half_h;
+                    let mut humans = 0u32;
+                    let mut fauna = 0u32;
+                    for i in 0..w.beings.hot.count {
+                        if w.beings.hot.states[i] == emergence_core::being::data::BeingState::Dead {
+                            continue;
+                        }
+                        let [px, py] = w.beings.hot.positions[i];
+                        if px >= x_min && px <= x_max && py >= y_min && py <= y_max {
+                            if w.beings.hot.creature_type[i] == 0 {
+                                humans += 1;
+                            } else {
+                                fauna += 1;
+                            }
+                        }
+                    }
+                    (humans, fauna)
+                } else {
+                    (0, 0)
+                };
+
+                // Count Forest and Water terrain cells in viewport for spatial audio.
+                // Scanned every 30 frames to amortize cost of iterating terrain cells.
+                // Only performed at non-macro zoom where individual biome detail matters.
+                // Reuses sig_sample_counter==0 gate (already fires every 30 frames).
+                let (trees_in_view, water_in_view) = if self.camera.zoom < 100.0
+                    && self.sig_sample_counter == 0
+                {
+                    let cx = self.camera.position[0];
+                    let cy = self.camera.position[1];
+                    let half_w = self.camera.zoom * self.camera.aspect * 0.5 + 2.0;
+                    let half_h = self.camera.zoom * 0.5 + 2.0;
+                    let tw = w.terrain.width;
+                    let th = w.terrain.height;
+                    // Convert world-space bounds to integer terrain cell bounds (clamped).
+                    let cell_x_min = (cx - half_w).max(0.0) as u32;
+                    let cell_x_max = ((cx + half_w) as u32).min(tw.saturating_sub(1));
+                    let cell_y_min = (cy - half_h).max(0.0) as u32;
+                    let cell_y_max = ((cy + half_h) as u32).min(th.saturating_sub(1));
+                    let mut trees = 0u32;
+                    let mut water = 0u32;
+                    for ty in cell_y_min..=cell_y_max {
+                        for tx in cell_x_min..=cell_x_max {
+                            match w.terrain.biome_at(tx, ty) {
+                                emergence_core::world::terrain::Biome::Forest  => trees += 1,
+                                emergence_core::world::terrain::Biome::Water
+                                | emergence_core::world::terrain::Biome::Wetland => water += 1,
+                                _ => {}
+                            }
+                        }
+                    }
+                    (trees, water)
+                } else {
+                    // Outside scan frames: retain last counts via AudioContext defaults (0 on
+                    // first frame, stable once the audio thread has received real counts).
+                    (0, 0)
+                };
+
                 AudioContext {
                     camera_pos: self.camera.position,
                     time_of_day: w.climate.light_level(),
@@ -1381,6 +1450,10 @@ impl ApplicationHandler for App {
                     war_nearby,
                     biome,
                     zoom_normalized,
+                    humans_in_view,
+                    fauna_in_view,
+                    trees_in_view,
+                    water_in_view,
                 }
             } else {
                 AudioContext::default()

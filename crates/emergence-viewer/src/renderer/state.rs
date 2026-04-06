@@ -89,18 +89,18 @@ pub struct RenderState {
     /// Bound to slot 1 of the terrain pipeline instead of the procedural atlas.
     /// Falls back to atlas bind group if the PNG is missing.
     pub terrain_bind_group: wgpu::BindGroup,
-    /// 190-series spritesheets (8x8 atlas grid, 128px cells, magenta chroma-key).
-    pub flora_190_bind_group: wgpu::BindGroup,
-    pub architecture_190_bind_group: wgpu::BindGroup,
-    pub minerals_190_bind_group: wgpu::BindGroup,
-    pub fauna_190_bind_group: wgpu::BindGroup,
-    /// V41: Additional 190-series spritesheets.
-    pub consumables_190_bind_group: wgpu::BindGroup,
-    pub vfx_traits_190_bind_group: wgpu::BindGroup,
-    pub human_races_190_bind_group: wgpu::BindGroup,
-    pub worldbox_items_190_bind_group: wgpu::BindGroup,
-    pub exotic_biomes_190_bind_group: wgpu::BindGroup,
-    pub fauna_standalone_190_bind_group: wgpu::BindGroup,
+    // ── V54 §1.1: 190-series spritesheet bind groups with hardcoded grid dimensions ──
+    // Grid constants defined here as documentation; UV math uses float constants in renderer files.
+    pub flora_190_bind_group: wgpu::BindGroup,             // 16×12 grid (CELL_FLORA_W=1/16, CELL_FLORA_H=1/12)
+    pub architecture_190_bind_group: wgpu::BindGroup,      // 8×8 grid   (CELL_190=1/8)
+    pub minerals_190_bind_group: wgpu::BindGroup,          // 8×8 grid   (CELL_MINERALS=1/8)
+    pub fauna_190_bind_group: wgpu::BindGroup,             // 12×12 grid (CELL_FAUNA=1/12)
+    pub consumables_190_bind_group: wgpu::BindGroup,       // 10×12 grid (CELL_CONS_W=1/10, CELL_CONS_H=1/12)
+    pub vfx_traits_190_bind_group: wgpu::BindGroup,        // 10×10 grid (CELL_VFX=1/10)
+    pub human_races_190_bind_group: wgpu::BindGroup,       // 16×12 grid (CELL_HUMAN_W=1/16, CELL_HUMAN_H=1/12)
+    pub worldbox_items_190_bind_group: wgpu::BindGroup,    // 8×8 grid   (CELL_ITEMS=1/8)
+    pub exotic_biomes_190_bind_group: wgpu::BindGroup,     // 8×8 grid   (CELL_EXOTIC=1/8)
+    pub fauna_standalone_190_bind_group: wgpu::BindGroup,  // 12×12 grid (deprecated — use fauna_190)
     /// V1: World objects (resources + structures) — single instanced draw call.
     pub object_pipeline: wgpu::RenderPipeline,
     /// V2: Unified particle system — single instanced draw call for ALL particles.
@@ -561,20 +561,22 @@ impl RenderState {
         });
 
         // ── Terrain pipeline (instanced quad tilemap) ──────────────────────
-        // TerrainInstance: 32 bytes
+        // TerrainInstance: 40 bytes (V54 §4.1 — added density + padding)
         //   0  world_pos      vec2  8B
         //   8  tile_uv        vec2  8B
         //  16  flags          f32   4B
         //  20  elevation      f32   4B
         //  24  structure_type f32   4B
-        //  28  _pad (stride)  f32   4B  ← carries LOD stride for quad scaling
+        //  28  build_progress f32   4B
+        //  32  density        f32   4B  ← V54 §4.1: flora density for canopy shadow
+        //  36  _pad_density   f32   4B
         let terrain_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label:  Some("Terrain Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/terrain.wgsl").into()),
         });
 
         let terrain_instance_layout = wgpu::VertexBufferLayout {
-            array_stride: 32,
+            array_stride: 40,
             step_mode:    wgpu::VertexStepMode::Instance,
             attributes: &[
                 wgpu::VertexAttribute { offset:  0, shader_location: 2, format: wgpu::VertexFormat::Float32x2 }, // world_pos
@@ -583,6 +585,8 @@ impl RenderState {
                 wgpu::VertexAttribute { offset: 20, shader_location: 5, format: wgpu::VertexFormat::Float32   }, // elevation
                 wgpu::VertexAttribute { offset: 24, shader_location: 6, format: wgpu::VertexFormat::Float32   }, // structure_type
                 wgpu::VertexAttribute { offset: 28, shader_location: 7, format: wgpu::VertexFormat::Float32   }, // build_progress
+                wgpu::VertexAttribute { offset: 32, shader_location: 8, format: wgpu::VertexFormat::Float32   }, // density (V54)
+                wgpu::VertexAttribute { offset: 36, shader_location: 9, format: wgpu::VertexFormat::Float32   }, // _pad_density
             ],
         };
 
@@ -664,30 +668,36 @@ impl RenderState {
                 push_constant_ranges: &[],
             });
 
-        // BeingInstance is 64 bytes.
+        // BeingInstance is 80 bytes (V54: added velocity, scale_multiplier, _pad_v54).
         // Offsets:
-        //   0  position      vec2  8B
-        //   8  atlas_uv      vec2  8B
-        //   16 atlas_size    vec2  8B
-        //   24 emotion_tint  vec3  12B
-        //   36 skin_tone     vec3  12B
-        //   48 size          f32   4B
-        //   52 brightness    f32   4B
-        //   56 alpha         f32   4B
-        //   60 _pad          f32   4B  (total 64)
+        //   0  position         vec2  8B
+        //   8  atlas_uv         vec2  8B
+        //   16 atlas_size       vec2  8B
+        //   24 emotion_tint     vec3  12B
+        //   36 skin_tone        vec3  12B
+        //   48 size             f32   4B
+        //   52 brightness       f32   4B
+        //   56 alpha            f32   4B
+        //   60 bob_flip         f32   4B
+        //   64 velocity         vec2  8B
+        //   72 scale_multiplier f32   4B
+        //   76 _pad_v54         f32   4B  (total 80)
         let sprite_instance_layout = wgpu::VertexBufferLayout {
-            array_stride: 64,
+            array_stride: 80,
             step_mode:    wgpu::VertexStepMode::Instance,
             attributes: &[
-                wgpu::VertexAttribute { offset:  0, shader_location: 1, format: wgpu::VertexFormat::Float32x2 }, // world_pos
-                wgpu::VertexAttribute { offset:  8, shader_location: 2, format: wgpu::VertexFormat::Float32x2 }, // atlas_uv
-                wgpu::VertexAttribute { offset: 16, shader_location: 3, format: wgpu::VertexFormat::Float32x2 }, // atlas_size
-                wgpu::VertexAttribute { offset: 24, shader_location: 4, format: wgpu::VertexFormat::Float32x3 }, // emotion_tint
-                wgpu::VertexAttribute { offset: 36, shader_location: 5, format: wgpu::VertexFormat::Float32x3 }, // skin_tone
-                wgpu::VertexAttribute { offset: 48, shader_location: 6, format: wgpu::VertexFormat::Float32   }, // size
-                wgpu::VertexAttribute { offset: 52, shader_location: 7, format: wgpu::VertexFormat::Float32   }, // brightness
-                wgpu::VertexAttribute { offset: 56, shader_location: 8, format: wgpu::VertexFormat::Float32   }, // alpha
-                wgpu::VertexAttribute { offset: 60, shader_location: 9, format: wgpu::VertexFormat::Float32   }, // _pad
+                wgpu::VertexAttribute { offset:  0, shader_location:  1, format: wgpu::VertexFormat::Float32x2 }, // world_pos
+                wgpu::VertexAttribute { offset:  8, shader_location:  2, format: wgpu::VertexFormat::Float32x2 }, // atlas_uv
+                wgpu::VertexAttribute { offset: 16, shader_location:  3, format: wgpu::VertexFormat::Float32x2 }, // atlas_size
+                wgpu::VertexAttribute { offset: 24, shader_location:  4, format: wgpu::VertexFormat::Float32x3 }, // emotion_tint
+                wgpu::VertexAttribute { offset: 36, shader_location:  5, format: wgpu::VertexFormat::Float32x3 }, // skin_tone
+                wgpu::VertexAttribute { offset: 48, shader_location:  6, format: wgpu::VertexFormat::Float32   }, // size
+                wgpu::VertexAttribute { offset: 52, shader_location:  7, format: wgpu::VertexFormat::Float32   }, // brightness
+                wgpu::VertexAttribute { offset: 56, shader_location:  8, format: wgpu::VertexFormat::Float32   }, // alpha
+                wgpu::VertexAttribute { offset: 60, shader_location:  9, format: wgpu::VertexFormat::Float32   }, // bob_flip
+                wgpu::VertexAttribute { offset: 64, shader_location: 10, format: wgpu::VertexFormat::Float32x2 }, // velocity
+                wgpu::VertexAttribute { offset: 72, shader_location: 11, format: wgpu::VertexFormat::Float32   }, // scale_multiplier
+                wgpu::VertexAttribute { offset: 76, shader_location: 12, format: wgpu::VertexFormat::Float32   }, // _pad_v54
             ],
         };
 
@@ -793,21 +803,23 @@ impl RenderState {
             });
 
         // ── Object sprite pipeline (world objects: resources + structures) ──
-        // ObjectInstance: 48 bytes
-        //   0  world_pos   vec2   8B
-        //   8  atlas_uv    vec2   8B
-        //   16 atlas_size  vec2   8B
-        //   24 tint        vec3  12B
-        //   36 size        f32    4B
-        //   40 alpha       f32    4B
-        //   44 _pad        f32    4B
+        // ObjectInstance: 60 bytes (V54)
+        //   0  world_pos        vec2   8B
+        //   8  atlas_uv         vec2   8B
+        //   16 atlas_size       vec2   8B
+        //   24 tint             vec3  12B
+        //   36 size             f32    4B
+        //   40 alpha            f32    4B
+        //   44 velocity         vec2   8B
+        //   52 scale_multiplier f32    4B
+        //   56 _pad_v54         f32    4B
         let object_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label:  Some("Object Sprite Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/object_sprite.wgsl").into()),
         });
 
         let object_instance_layout = wgpu::VertexBufferLayout {
-            array_stride: 48,
+            array_stride: 60,
             step_mode:    wgpu::VertexStepMode::Instance,
             attributes: &[
                 wgpu::VertexAttribute { offset:  0, shader_location: 1, format: wgpu::VertexFormat::Float32x2 }, // world_pos
@@ -816,7 +828,9 @@ impl RenderState {
                 wgpu::VertexAttribute { offset: 24, shader_location: 4, format: wgpu::VertexFormat::Float32x3 }, // tint
                 wgpu::VertexAttribute { offset: 36, shader_location: 5, format: wgpu::VertexFormat::Float32   }, // size
                 wgpu::VertexAttribute { offset: 40, shader_location: 6, format: wgpu::VertexFormat::Float32   }, // alpha
-                wgpu::VertexAttribute { offset: 44, shader_location: 7, format: wgpu::VertexFormat::Float32   }, // _pad
+                wgpu::VertexAttribute { offset: 44, shader_location: 7, format: wgpu::VertexFormat::Float32x2 }, // velocity
+                wgpu::VertexAttribute { offset: 52, shader_location: 8, format: wgpu::VertexFormat::Float32   }, // scale_multiplier
+                wgpu::VertexAttribute { offset: 56, shader_location: 9, format: wgpu::VertexFormat::Float32   }, // _pad_v54
             ],
         };
 
@@ -1123,13 +1137,15 @@ impl RenderState {
         self.queue.write_buffer(&self.water_time_buffer, 0, bytemuck::cast_slice(&data));
     }
 
-    pub fn update_object_time(&self, time: f32) {
-        let data: [f32; 4] = [time, 0.0, 0.0, 0.0];
+    // V54: delta_time is fractional progress into current tick (0..1) for dead-reckoning interpolation
+    pub fn update_object_time(&self, time: f32, delta_time: f32) {
+        let data: [f32; 4] = [time, delta_time, 0.0, 0.0];
         self.queue.write_buffer(&self.object_time_buffer, 0, bytemuck::cast_slice(&data));
     }
 
-    pub fn update_being_time(&self, time: f32) {
-        let data: [f32; 4] = [time, 0.0, 0.0, 0.0];
+    // V54: delta_time is fractional progress into current tick (0..1) for dead-reckoning interpolation
+    pub fn update_being_time(&self, time: f32, delta_time: f32) {
+        let data: [f32; 4] = [time, delta_time, 0.0, 0.0];
         self.queue.write_buffer(&self.being_time_buffer, 0, bytemuck::cast_slice(&data));
     }
 }

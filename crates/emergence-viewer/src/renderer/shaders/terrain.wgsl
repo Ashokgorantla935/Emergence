@@ -39,6 +39,8 @@ struct InstanceInput {
     @location(5) elevation:      f32,       // terrain elevation [0.0, 1.0]
     @location(6) structure_type: f32,       // 0=None, 1=Campfire, 2=LeanTo, 3=Hut, 4=Wall, 5=ResourceCache
     @location(7) build_progress: f32,       // Construction ticks
+    @location(8) density:        f32,       // V54 §4.1: flora/entity density [0.0, 1.0] for canopy shadow
+    @location(9) _pad_density:   f32,       // padding
 };
 
 struct VertexOutput {
@@ -51,6 +53,7 @@ struct VertexOutput {
     @location(5) @interpolate(flat) build_progress: f32,
     @location(6) tile_uv:        vec2<f32>,
     @location(7) uv:             vec2<f32>, // tile-local [0,1] UV — interpolates cleanly inside quad
+    @location(8) @interpolate(flat) density: f32, // V54 §4.1: flora density for canopy shadow
 };
 
 @vertex
@@ -80,6 +83,7 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     out.structure_type = inst.structure_type;
     out.elevation = inst.elevation;
     out.build_progress = inst.build_progress;
+    out.density = inst.density;
     return out;
 }
 
@@ -222,7 +226,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let illumination = clamp(water_time.illumination, 0.0, 1.0);
     let comfort = clamp(water_time.signal_comfort, 0.0, 1.0);
 
-    let base_color = biome_base_color(biome_id);
+    // Sample the 16x16 seamless terrain spritesheet
+    let ATLAS_CELL = 1.0 / 16.0;
+    // Map the local quad UV to the spritesheet cell bounding box
+    let sample_uv = in.tile_uv + in.uv * ATLAS_CELL;
+    let base_color = textureSample(t_atlas, s_atlas, sample_uv);
     let structure_id = u32(in.structure_type + 0.5);
 
     // zoom_blend: 0.0=LOD0, 1.0=LOD1, 2.0=LOD2; fractional = smooth blend between adjacent LODs
@@ -232,6 +240,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var color_lod0 = base_color;
     if (is_water) {
         color_lod0 = water_depth_color(in.elevation);
+    } else {
+        // V54 §4.1: Macro-density canopy shadow for LOD-culled flora.
+        // At macro zoom (LOD0), individual tree sprites are sub-pixel and culled.
+        // Darken terrain proportional to flora/entity density to simulate canopy cover.
+        let canopy_shadow = in.density * smoothstep(1.0, 0.0, zoom) * 0.40;
+        color_lod0 = mix(color_lod0, vec4<f32>(0.05, 0.12, 0.03, 1.0), canopy_shadow);
     }
 
     // ── LOD 1: Medium zoom — base + per-cell brightness + signal tinting ──

@@ -3,7 +3,6 @@ use std::time::Instant;
 
 use emergence_core::save::{self, AUTO_SAVE_INTERVAL};
 use emergence_core::scenario::{ScenarioConfig, ScenarioId};
-use emergence_core::world::map::MapSelection;
 use emergence_core::sim::world_state::World;
 use emergence_core::world::signal::SignalChannel;
 use emergence_viewer::animation::AnimationManager;
@@ -148,10 +147,10 @@ struct App {
     pending_save_slot: Option<u8>,
     pending_new_game: bool,
     pending_quit: bool,
-    pending_scenario: Option<(ScenarioId, MapSelection, u32, FaunaDensity)>,
+    pending_scenario: Option<(ScenarioId, (u32, u32), u32, FaunaDensity, u32)>,
     // Last launched scenario — used by "Regenerate World" to restart with a new seed.
     // Box avoids storing a large Clone inline.
-    last_scenario: Option<Box<(ScenarioId, MapSelection, u32, FaunaDensity)>>,
+    last_scenario: Option<Box<(ScenarioId, (u32, u32), u32, FaunaDensity, u32)>>,
 
     // God tools
     god_tool_state: GodToolState,
@@ -382,17 +381,16 @@ impl App {
     }
 
     /// Launch a new game from a scenario.
-    fn start_scenario(&mut self, id: ScenarioId, map: MapSelection, population: u32, fauna_density: FaunaDensity) {
-        self.last_scenario = Some(Box::new((id, map.clone(), population, fauna_density)));
+    fn start_scenario(&mut self, id: ScenarioId, map_size: (u32, u32), population: u32, fauna_density: FaunaDensity, island_count: u32) {
+        self.last_scenario = Some(Box::new((id, map_size, population, fauna_density, island_count)));
         let mut scenario = ScenarioConfig::new(id);
-        // Apply the map selection chosen in the UI (overrides scenario default).
-        if !matches!(map, MapSelection::Default) {
-            scenario.world.map = map;
-        }
+        // Apply the map size chosen in the UI.
+        scenario.world.size = map_size;
         // Apply population and fauna overrides from the scenario select UI.
         scenario.world.initial_beings = population;
         scenario.world.predator_fraction = fauna_density.predator_density();
         scenario.world.has_predators = fauna_density != FaunaDensity::Low;
+        scenario.world.island_count = island_count.clamp(1, 10);
 
         // Position camera per scenario — use resolved_size() so 4096-wide maps get correct bounds.
         let (resolved_w, resolved_h) = scenario.world.resolved_size();
@@ -645,9 +643,10 @@ impl ApplicationHandler for App {
         if self.world.is_none() {
             self.start_scenario(
                 emergence_core::scenario::ScenarioId::Genesis,
-                emergence_core::world::map::MapSelection::Default,
+                (256, 256),
                 10,
                 FaunaDensity::Low,
+                3,
             );
             // Stay on LaunchOverlay, not Playing.
             self.screen = ScreenState::LaunchOverlay;
@@ -816,10 +815,11 @@ impl ApplicationHandler for App {
                                 if key == KeyCode::Enter || key == KeyCode::NumpadEnter {
                                     let sel = &self.scenario_select_ui;
                                     self.pending_scenario = Some((
-                                        sel.selected,
-                                        sel.map_picker.selected.clone(),
-                                        sel.population,
+                                        ScenarioId::Experiment,
+                                        sel.map_size,
+                                        0,
                                         sel.fauna_density,
+                                        sel.island_count,
                                     ));
                                 } else if key == KeyCode::Escape {
                                     self.screen = ScreenState::MainMenu;
@@ -920,8 +920,8 @@ impl ApplicationHandler for App {
             self.pending_new_game = false;
             self.screen = ScreenState::ScenarioSelect;
         }
-        if let Some((id, map, population, fauna_density)) = self.pending_scenario.take() {
-            self.start_scenario(id, map, population, fauna_density);
+        if let Some((id, map, population, fauna_density, island_count)) = self.pending_scenario.take() {
+            self.start_scenario(id, map, population, fauna_density, island_count);
         }
 
         // --- Timing ---
@@ -1009,8 +1009,8 @@ impl ApplicationHandler for App {
                                     ResetKind::Hard => {
                                         // Re-launch same scenario with a new seed
                                         if let Some(ref last) = self.last_scenario {
-                                            let (id, map, pop, fauna) = *last.clone();
-                                            self.pending_scenario = Some((id, map, pop, fauna));
+                                            let (id, map, pop, fauna, islands) = *last.clone();
+                                            self.pending_scenario = Some((id, map, pop, fauna, islands));
                                         }
                                     }
                                     ResetKind::Soft => {
@@ -1029,9 +1029,9 @@ impl ApplicationHandler for App {
 
                     let mut world = world.write().unwrap();
 
-                    // Time-budgeted ticking: allow 33ms budget for fast speeds
-                    // This lets 10x speed actually hit 10x without getting throttled
-                    const TICK_BUDGET_MS: u128 = 33;
+                    // Time-budgeted ticking: allow 80ms budget for fast speeds
+                    // This lets 50x speed actually hit 50x without getting throttled
+                    const TICK_BUDGET_MS: u128 = 80;
                     let tick_start = std::time::Instant::now();
                     let mut ticked = 0u32;
                     for _ in 0..ticks {
@@ -1660,8 +1660,8 @@ impl ApplicationHandler for App {
             ScreenState::ScenarioSelect => {
                 self.scenario_select_ui.show(&self.egui_ctx);
                 match self.scenario_select_ui.action.clone() {
-                    ScenarioSelectAction::Start { id, map, population, fauna_density } => {
-                        self.pending_scenario = Some((id, map, population, fauna_density));
+                    ScenarioSelectAction::Start { id, map_size, population, fauna_density, island_count } => {
+                        self.pending_scenario = Some((id, map_size, population, fauna_density, island_count));
                     }
                     ScenarioSelectAction::Back => {
                         self.screen = ScreenState::MainMenu;
@@ -2810,7 +2810,7 @@ impl ApplicationHandler for App {
                             }
                             // Pass 2: Fauna — fauna_spritesheet (8x6 grid)
                             if being_r.fauna_instance_count > 0 {
-                                render_pass.set_bind_group(1, &rs.fauna_bind_group, &[]);
+                                render_pass.set_bind_group(1, &rs.fauna_190_bind_group, &[]);
                                 render_pass.set_vertex_buffer(1, being_r.fauna_instance_buffer.slice(..));
                                 render_pass.draw_indexed(0..6, 0, 0..being_r.fauna_instance_count);
                             }
@@ -3096,9 +3096,10 @@ fn main() {
     if autostart {
         app.pending_scenario = Some((
             emergence_core::scenario::ScenarioId::Genesis,
-            emergence_core::world::map::MapSelection::Default,
+            (256u32, 256u32),
             10u32,
             FaunaDensity::Low,
+            3u32,
         ));
     }
     event_loop.run_app(&mut app).unwrap();

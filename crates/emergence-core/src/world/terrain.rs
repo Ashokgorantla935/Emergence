@@ -168,7 +168,7 @@ impl Terrain {
 
         // --- Generate elevation, moisture, temperature arrays ---
         let (elevation, moisture, temperature_base) = match &config.map {
-            MapSelection::Default => super::terrain_gen::generate_triad_world(w, h, config.terrain_seed),
+            MapSelection::Default => super::terrain_gen::generate_triad_world(w, h, config.terrain_seed, config.island_count),
             MapSelection::BuiltIn(id) => {
                 let def = super::map_registry::get(*id);
                 dispatch_elevation_source(&def.elevation_source, w, h, config.terrain_seed)
@@ -609,7 +609,7 @@ fn dispatch_elevation_source(
         ElevationSource::Procedural { params } => {
             // All procedural maps now use the triad generator (elevation × temp × moisture).
             // Each seed produces a dramatically different world.
-            super::terrain_gen::generate_triad_world(w, h, params.seed)
+            super::terrain_gen::generate_triad_world(w, h, params.seed, 3)
         }
         ElevationSource::Baked { data, width: bw, height: bh } => {
             if data.is_empty() {
@@ -1041,6 +1041,7 @@ mod tests {
             seasons: true,
             day_night: true,
             map: MapSelection::Default,
+            island_count: 3,
         }
     }
 

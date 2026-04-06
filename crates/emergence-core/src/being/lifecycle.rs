@@ -338,6 +338,7 @@ mod tests {
             seasons: true,
             day_night: true,
             map: crate::world::map::MapSelection::Default,
+            island_count: 3,
         };
         let climate = crate::world::climate::Climate::new(&config);
 

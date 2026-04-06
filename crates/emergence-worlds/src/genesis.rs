@@ -13,6 +13,7 @@ pub fn genesis_config() -> WorldConfig {
         seasons: true,
         day_night: true,
         map: emergence_core::world::map::MapSelection::Default,
+        island_count: 3,
     }
 }
 

@@ -228,11 +228,11 @@ impl RenderState {
             })
         };
 
-        // ── Terrain texture (Sunnyside 16px tileset, 1024x1024) ──────────
+        // ── Terrain texture (WorldBox 190 16x16 atlas) ──────────
         let terrain_bind_group = {
             let img = image::load_from_memory(include_bytes!(
-                "../../../../assets/sprites/packs/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Tileset/spr_tileset_sunnysideworld_16px.png"
-            )).expect("Failed to load Sunnyside terrain tileset").to_rgba8();
+                "../../../../assets/textures/terrain_spritesheet_190.png"
+            )).expect("Failed to load WorldBox terrain tileset").to_rgba8();
             let (w, h) = img.dimensions();
             eprintln!("[terrain] Loaded Sunnyside tileset {}x{}", w, h);
             let pixels = img.into_raw();

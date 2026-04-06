@@ -480,6 +480,7 @@ impl SaveFile {
             seasons: self.seasons_enabled,
             day_night: self.day_night_enabled,
             map: MapSelection::Default,
+            island_count: 3,
         };
 
         let mut climate = Climate::new(&config);
@@ -818,6 +819,7 @@ mod tests {
             seasons: false,
             day_night: false,
             map: MapSelection::Default,
+            island_count: 3,
         };
         crate::create_world(config)
     }

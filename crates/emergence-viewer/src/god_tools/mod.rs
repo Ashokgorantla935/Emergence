@@ -42,7 +42,7 @@ pub fn handle_input(
 
     let preview = compute_preview(state, cursor_world, world);
 
-    if left_clicked {
+    if left_clicked || (left_held && state.active_power == Some(78)) {
         handle_click(state, cursor_world, shift_held, world);
     }
 
@@ -329,22 +329,21 @@ fn build_action(
         75 => Some(GodAction::Snapshot { slot: 1 }),
         76 => Some(GodAction::Restore  { slot: 0 }),
         77 => Some(GodAction::Restore  { slot: 1 }),
+        78 => Some(GodAction::MagnetPull { pos: safe_pos, radius: brush_radius(state.brush_size) }),
 
         _ => None,
     }
 }
 
-/// Handle keyboard shortcuts: tab switching (B/T/W/D/G/C/K/L) and tool selection (1-0).
+/// Handle keyboard shortcuts: tab switching (S/T/E/N/C/D) and tool selection (1-0).
 pub fn handle_key(state: &mut GodToolState, key: KeyCode) {
     match key {
-        KeyCode::KeyB => state.active_tab = ToolTab::Creation,
+        KeyCode::KeyS => state.active_tab = ToolTab::System,
         KeyCode::KeyT => state.active_tab = ToolTab::Terrain,
-        KeyCode::KeyW => state.active_tab = ToolTab::Weather,
-        KeyCode::KeyD => state.active_tab = ToolTab::Destruction,
-        KeyCode::KeyG => state.active_tab = ToolTab::Blessing,
-        KeyCode::KeyC => state.active_tab = ToolTab::Curse,
-        KeyCode::KeyK => state.active_tab = ToolTab::Kingdom,
-        KeyCode::KeyL => state.active_tab = ToolTab::World,
+        KeyCode::KeyE => state.active_tab = ToolTab::Elements,
+        KeyCode::KeyN => state.active_tab = ToolTab::Nature,
+        KeyCode::KeyC => state.active_tab = ToolTab::Civilizations,
+        KeyCode::KeyD => state.active_tab = ToolTab::Disasters,
         KeyCode::Escape => { state.active_power = None; state.teleport_src = None; state.selection = Default::default(); }
         _ => {
             // 1-0 digit shortcuts select tool within active tab
@@ -459,7 +458,7 @@ fn is_area_power(pid: u8) -> bool {
         30 | 32..=35 | 37 | 39 | 41 | // destruction
         44..=47 | 49 |       // blessing area
         53 | 55 | 58 | 60 | 61 | // curse area
-        64 | 69..=71         // kingdom area
+        64 | 69..=71 | 78    // kingdom area
     )
 }
 

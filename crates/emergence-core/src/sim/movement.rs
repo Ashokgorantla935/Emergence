@@ -597,6 +597,12 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                 // tool_quality speeds up building: each point adds 15% progress per tick
                 let extra = (world.beings.hot.tool_quality[being_index] * 1.5) as u32;
                 world.terrain.build_progress[cidx] += extra;
+                
+                // Clear out flora visually while building so scaffolding isn't inside a tree
+                if world.resources.flora_stage[cidx] > 0 {
+                    world.resources.flora_stage[cidx] = 0;
+                    world.resources.flora_energy[cidx] = 0;
+                }
 
                 if world.terrain.build_progress[cidx] >= build_ticks {
                     // Consume stone
@@ -618,8 +624,10 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     let bx = cx.min(world.terrain.width - 1);
                     let by = cy.min(world.terrain.height - 1);
                     world.terrain.place_structure(bx, by, target_type, being_index as u32);
-                    // Deforestation: violently clear biomass (trees) to make room for solid structure
+                    // Deforestation: violently clear biomass and flora
                     world.terrain.biomass[cidx] = 0.0;
+                    world.resources.flora_stage[cidx] = 0;
+                    world.resources.flora_energy[cidx] = 0;
                     // Structure presence increases mineralize (foundation)
                     world.terrain.mineralize[cidx] = (world.terrain.mineralize[cidx] + 0.5).min(1.0);
                     // Bond builder to this location as home settlement
@@ -1025,12 +1033,20 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
 
     let ncx = new_x as u32;
     let ncy = new_y as u32;
-    let is_water = world.terrain.is_water(ncx.min(world.terrain.width - 1), ncy.min(world.terrain.height - 1));
+    
+    let dest_idx = (ncy.min(world.terrain.height - 1) * world.terrain.width + ncx.min(world.terrain.width - 1)) as usize;
+    let is_water = world.terrain.water[dest_idx];
+    let is_solid_struct = match world.terrain.structure[dest_idx] {
+        0 | 6 | 7 | 20 => false, // Walkable
+        1 | 3 | 4 | 5 | 8 | 9 | 10 | 11 | 12 | 13 | 15 | 16 | 17 | 18 | 19 => true, // Solid structures
+        _ => false,
+    };
+    let is_obstacle = is_water || is_solid_struct;
     let is_fish = world.beings.hot.creature_type[being_index] == CreatureType::Fish as u8;
 
-    const MAX_VEL: f32 = 0.5; // hard per-axis cap — prevents MLP brain explosions
+    const MAX_VEL: f32 = 0.5;
 
-    // Fish move in water; all others avoid water
+    // Fish move in water; all others avoid obstacles (water + solid structures)
     if is_fish {
         if is_water {
             let old_pos = world.beings.hot.positions[being_index];
@@ -1050,7 +1066,7 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
             // Fish hit land boundary — ZERO velocity to prevent ghosting
             world.beings.hot.velocities[being_index] = [0.0, 0.0];
         }
-    } else if !is_water {
+    } else if !is_obstacle {
         let old_pos = world.beings.hot.positions[being_index];
         world.beings.hot.positions[being_index] = [new_x, new_y];
         let vx = (nx * clamped_dist).clamp(-MAX_VEL, MAX_VEL);
@@ -1091,14 +1107,27 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
             }
         }
     } else {
-        // Land being hit water boundary — smart sliding along coastline
+        // Hit obstacle (water or structure) — smart sliding along boundary
         world.beings.hot.velocities[being_index] = [0.0, 0.0];
 
         let try_x = (pos[0] + nx * clamped_dist).clamp(0.0, world.terrain.width as f32 - 1.0);
         let try_y = (pos[1] + ny * clamped_dist).clamp(0.0, world.terrain.height as f32 - 1.0);
 
-        let can_x = !world.terrain.is_water_f(try_x, pos[1]);
-        let can_y = !world.terrain.is_water_f(pos[0], try_y);
+        let cx = pos[0] as u32;
+        let cy = pos[1] as u32;
+
+        let cx_idx = (cy * world.terrain.width + (try_x as u32).min(world.terrain.width - 1)) as usize;
+        let cy_idx = ((try_y as u32).min(world.terrain.height - 1) * world.terrain.width + cx) as usize;
+        
+        let is_solid = |s: u8| -> bool {
+            match s {
+                1 | 3 | 4 | 5 | 8 | 9 | 10 | 11 | 12 | 13 | 15 | 16 | 17 | 18 | 19 => true,
+                _ => false,
+            }
+        };
+
+        let can_x = !world.terrain.water[cx_idx] && !is_solid(world.terrain.structure[cx_idx]);
+        let can_y = !world.terrain.water[cy_idx] && !is_solid(world.terrain.structure[cy_idx]);
 
         if can_x && !can_y {
             // Slide along X axis
@@ -1117,7 +1146,14 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
             let jitter_y = (((world.tick + 1).wrapping_mul(being_index as u32) % 100) as f32 / 50.0) - 1.0;
             let esc_x = (pos[0] + jitter_x * 0.5).clamp(0.0, world.terrain.width as f32 - 1.0);
             let esc_y = (pos[1] + jitter_y * 0.5).clamp(0.0, world.terrain.height as f32 - 1.0);
-            if !world.terrain.is_water_f(esc_x, esc_y) {
+            let esc_idx = ((esc_y as u32).min(world.terrain.height - 1) * world.terrain.width + (esc_x as u32).min(world.terrain.width - 1)) as usize;
+            
+            let is_solid = match world.terrain.structure[esc_idx] {
+                1 | 3 | 4 | 5 | 8 | 9 | 10 | 11 | 12 | 13 | 15 | 16 | 17 | 18 | 19 => true,
+                _ => false,
+            };
+
+            if !world.terrain.water[esc_idx] && !is_solid {
                 world.beings.hot.positions[being_index] = [esc_x, esc_y];
             }
         }

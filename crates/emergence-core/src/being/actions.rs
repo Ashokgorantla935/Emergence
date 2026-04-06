@@ -749,7 +749,8 @@ pub fn score_actions(
         // Triggers when bold human detects enemy territory near home + high danger signal.
         {
             let boldness = beings.hot.personalities[being_index][TRAIT_BOLD];
-            if boldness > 0.6 {
+            let hunger = beings.hot.needs[being_index][super::data::NEED_HUNGER];
+            if boldness > 0.6 && hunger > 0.4 {
                 if let Some(home) = beings.cold.home_settlement_pos[being_index] {
                     let hx = home[0] as usize;
                     let hy = home[1] as usize;
@@ -2282,6 +2283,7 @@ mod tests {
             seasons: true,
             day_night: true,
             map: crate::world::map::MapSelection::Default,
+            island_count: 3,
         }
     }
 

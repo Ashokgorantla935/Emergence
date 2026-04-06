@@ -133,6 +133,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     
     // Magenta chroma-key discard (#FF00FF) — threshold for compression artifacts
     if (texel.r > 0.9 && texel.g < 0.15 && texel.b > 0.9) { discard; }
+    
+    // White background discard for generated fauna assets
+    if (texel.r > 0.95 && texel.g > 0.95 && texel.b > 0.95) { discard; }
 
     let alpha = texel.a;
 

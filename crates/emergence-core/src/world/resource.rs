@@ -86,15 +86,9 @@ impl ResourceLayer {
                     } else {
                         let ft = match biome {
                             Biome::Forest => FoodType::Berries,
-                            Biome::Grassland => FoodType::Berries,
+                            Biome::Grassland => FoodType::Berries, // Replaced Grain with Berries to avoid unnatural wheat
                             Biome::Mountain => FoodType::Stone,
-                            _ => {
-                                if base_cap > 0.0 {
-                                    FoodType::Grain
-                                } else {
-                                    FoodType::None
-                                }
-                            }
+                            _ => FoodType::None, // Wheat/Grain should only be manually farmed
                         };
                         let rg = if ft == FoodType::Stone {
                             0.0 // non-renewable
@@ -440,6 +434,7 @@ mod tests {
             seasons: true,
             day_night: true,
             map: crate::world::map::MapSelection::Default,
+            island_count: 3,
         };
         let terrain = Terrain::generate(&config);
         let mut resources = ResourceLayer::new(&terrain);

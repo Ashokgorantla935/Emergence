@@ -367,6 +367,7 @@ mod tests {
             seasons: true,
             day_night: true,
             map: crate::world::map::MapSelection::Default,
+            island_count: 3,
         };
         let mut climate = Climate::new(&config);
         let mut rng = fastrand::Rng::with_seed(1);

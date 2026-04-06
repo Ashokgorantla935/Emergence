@@ -13,6 +13,10 @@ pub struct WorldConfig {
     pub seasons: bool,
     pub day_night: bool,
     pub map: MapSelection,
+    /// Controls terrain noise frequency for Default map generation.
+    /// Range 1–10. Higher = more islands/landmasses. Default 3.
+    /// Scale formula: noise_scale = 0.005 * island_count.
+    pub island_count: u32,
 }
 
 impl WorldConfig {

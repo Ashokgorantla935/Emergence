@@ -269,8 +269,10 @@ pub fn tick(world: &mut World) {
         let cx = (pos[0] as u32).min(world.signals.width - 1);
         let cy = (pos[1] as u32).min(world.signals.height - 1);
 
-        // Grief signal burst
-        world.signals.deposit(SignalChannel::Grief, cx, cy, 1.0);
+        // Grief signal burst only for humans (otherwise society shuts down mourning dead fish/deer)
+        if world.beings.hot.creature_type[dead_idx] == crate::being::data::CreatureType::Human as u8 {
+            world.signals.deposit(SignalChannel::Grief, cx, cy, 1.0);
+        }
 
         // Drop carried food
         if world.beings.hot.carry[dead_idx][0] > 0.0 {
@@ -1055,8 +1057,20 @@ pub fn tick(world: &mut World) {
                 world.knowledge.deposit_tech(x, y, TECH_FISHING, 8);
             }
 
+            // Check 3x3 area for structures since beings now collide and stand adjacent
+            let mut has_fire = false;
+            let mut has_hut = false;
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let cx = (x as i32 + dx).clamp(0, tw as i32 - 1) as usize;
+                    let cy = (y as i32 + dy).clamp(0, th as i32 - 1) as usize;
+                    let s = world.terrain.structure[cy * tw as usize + cx];
+                    if s == 1 || s == 10 { has_fire = true; } // Campfire or Forge
+                    if s == 3 { has_hut = true; }             // Hut
+                }
+            }
+
             // SMELTING: campfire or forge on mountain biome
-            let has_fire = world.terrain.structure[idx] == 1 || world.terrain.structure[idx] == 10;
             if has_fire
                 && matches!(world.terrain.biome[idx], Biome::Mountain)
                 && !world.knowledge.has_tech(x, y, TECH_SMELTING)
@@ -1065,7 +1079,7 @@ pub fn tick(world: &mut World) {
             }
 
             // MASONRY: hut present + carrying stone
-            if world.terrain.structure[idx] == 3
+            if has_hut
                 && world.beings.hot.carry[i][1] > 0.1
                 && !world.knowledge.has_tech(x, y, TECH_MASONRY)
             {
@@ -1584,6 +1598,7 @@ mod tests {
             seasons: true,
             day_night: true,
             map: crate::world::map::MapSelection::Default,
+            island_count: 3,
         }
     }
 
@@ -1617,6 +1632,7 @@ mod tests {
             seasons: false,
             day_night: false,
             map: crate::world::map::MapSelection::Default,
+            island_count: 3,
         };
         let mut world = crate::create_world(config);
 

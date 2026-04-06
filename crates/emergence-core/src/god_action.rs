@@ -307,6 +307,10 @@ pub enum GodAction {
         index: usize,
         target: [f32; 2],
     },
+    MagnetPull {
+        pos: [f32; 2],
+        radius: f32,
+    },
     AppointLeader {
         index: usize,
     },
@@ -1228,6 +1232,25 @@ fn apply_god_action(world: &mut World, action: GodAction) {
                 let tx = target[0].clamp(0.0, world.config.size.0 as f32 - 1.0);
                 let ty = target[1].clamp(0.0, world.config.size.1 as f32 - 1.0);
                 world.beings.hot.positions[index] = [tx, ty];
+            }
+        }
+
+        GodAction::MagnetPull { pos, radius } => {
+            let r2 = radius * radius;
+            for i in 0..world.beings.hot.count {
+                if world.beings.hot.states[i] != BeingState::Dead {
+                    let p = world.beings.hot.positions[i];
+                    let dx = pos[0] - p[0];
+                    let dy = pos[1] - p[1];
+                    let d2 = dx * dx + dy * dy;
+                    if d2 <= r2 && d2 > 0.01 {
+                        let pull_strength = 0.5; // Drag speed towards cursor
+                        let pdx = dx * pull_strength;
+                        let pdy = dy * pull_strength;
+                        world.beings.hot.positions[i][0] = (p[0] + pdx).clamp(0.0, world.config.size.0 as f32 - 1.0);
+                        world.beings.hot.positions[i][1] = (p[1] + pdy).clamp(0.0, world.config.size.1 as f32 - 1.0);
+                    }
+                }
             }
         }
 

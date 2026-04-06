@@ -765,7 +765,7 @@ fn generate_custom_attempt(
 /// Three independent Fbm<Perlin> layers (elevation × temperature × moisture)
 /// produce dramatically varied biomes across seeds: deserts, snow peaks, marshes, forests.
 /// Returns (elevation, temperature_base, moisture) — same tuple order as other generators.
-pub fn generate_triad_world(w: u32, h: u32, seed: u64) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+pub fn generate_triad_world(w: u32, h: u32, seed: u64, island_count: u32) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let len = (w * h) as usize;
 
     let mut elev_noise: Fbm<Perlin> = Fbm::new(seed as u32);
@@ -786,7 +786,9 @@ pub fn generate_triad_world(w: u32, h: u32, seed: u64) -> (Vec<f32>, Vec<f32>, V
     moist_noise.lacunarity = 2.0;
     moist_noise.persistence = 0.5;
 
-    let scale = 0.015f64;
+    // island_count=3 (default) produces scale=0.015, matching original behavior.
+    // Higher island_count → higher frequency → more fragmented landmasses.
+    let scale = 0.005f64 * island_count.max(1) as f64;
 
     let mut elevation = vec![0.0f32; len];
     let mut temperature = vec![0.0f32; len];
@@ -1071,6 +1073,7 @@ mod tests {
             seasons: false,
             day_night: false,
             map: crate::world::map::MapSelection::Default,
+            island_count: 3,
         };
 
         let terrain = Terrain::generate(&config);

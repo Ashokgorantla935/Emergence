@@ -1,18 +1,16 @@
 use egui::TextureHandle;
 use super::cooldowns::CooldownTracker;
 
-/// The 8 tool tabs.
+/// The 6 tool tabs.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum ToolTab {
-    Creation    = 0,
-    Terrain     = 1,
-    Weather     = 2,
-    Destruction = 3,
-    Blessing    = 4,
-    Curse       = 5,
-    Kingdom     = 6,
-    World       = 7,
+    System        = 0,
+    Terrain       = 1,
+    Elements      = 2,
+    Nature        = 3,
+    Civilizations = 4,
+    Disasters     = 5,
 }
 
 /// Static descriptor for a god power.
@@ -35,7 +33,7 @@ pub struct TwoTargetSelection {
 /// Complete god-tool UI state.
 pub struct GodToolState {
     pub active_tab:    ToolTab,
-    /// 0..=77, None = inspect/navigate
+    /// 0..=78, None = inspect/navigate
     pub active_power:  Option<u8>,
     /// 1 | 3 | 5 | 10 tiles
     pub brush_size:    u8,
@@ -54,16 +52,18 @@ pub struct GodToolState {
     pub god_mode:      bool,
     /// Pending teleport: first click selects being, second click moves
     pub teleport_src:  Option<usize>,
-    /// Lazily-loaded tab icon textures (god_tools_icons.png, 8 icons row 0)
+    /// Lazily-loaded tab icon textures (god_tools_icons.png, 6 icons row 0)
     pub god_icons: Option<Vec<TextureHandle>>,
     /// Lazily-loaded UI icon textures (worldbox_ui_icons.png)
     pub ui_icons: Option<Vec<TextureHandle>>,
+    /// Lazily-loaded power icons (powers_ui_spritesheet_190.png)
+    pub powers_icons: Option<Vec<TextureHandle>>,
 }
 
 impl GodToolState {
     pub fn new() -> Self {
         GodToolState {
-            active_tab:   ToolTab::Creation,
+            active_tab:   ToolTab::Nature,
             active_power: None,
             brush_size:   1,
             selection:    TwoTargetSelection::default(),
@@ -76,6 +76,7 @@ impl GodToolState {
             teleport_src: None,
             god_icons:    None,
             ui_icons:     None,
+            powers_icons: None,
         }
     }
 

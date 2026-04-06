@@ -309,7 +309,7 @@ fn body_build_index(beings: &Beings, i: usize) -> u32 {
 }
 
 /// Atlas UV for a fauna sprite.
-/// fauna_spritesheet.png: 12 cols × 12 rows. 1 species per row, 3 frames per direction.
+/// fauna_and_races_spritesheet_190.png (8×8 grid) / fauna_spritesheet_190.png. 1 species per row, 3 frames per direction.
 ///   Row 0: Rabbit
 ///   Row 1: Deer
 ///   Row 2: Wolf

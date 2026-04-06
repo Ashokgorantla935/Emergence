@@ -10,10 +10,11 @@ Your mission is to perform a surgical strike on `crates/emergence-viewer/src/scr
 Currently, `ScenarioSelectUi` is a generic generic popup with "Choose Your World" and various sliders. 
 Rip it out and rebuild it as a WorldBox-style full-screen overlay:
 1. **Title:** Large Pixel Art style text "CREATE NEW WORLD".
-2. **Map Size:** Instead of a simple dropdown, create visual button boxes for: Tiny (128x128), Small (256x256), Standard (384x384), Huge (512x512).
-3. **Island Density:** A row of visually distinct tiles representing Island Count (1 to 10 noise scaling).
-4. **Action:** A massive, stylized `Generate World` button that dispatches `ScenarioSelectAction::Start` with a zero population canvas. (We already implemented empty canvas support, just bind it).
-_Remove the legacy textual grid cards entirely. WorldBox maps are primarily procedurally generated to a blank slate._
+2. **Map Size:** Instead of a simple dropdown, create visual button boxes spanning up to extensive map scales: Tiny (128x128), Small (256x256), Standard (384x384), Huge (512x512), Titanic (1024x1024), and Extensive World (2048x2048). 
+3. **Special Maps:** Add a distinctly styled God-level image button for "Real World Map" (Earth) to persist our sprawling real-world mapping scenario. 
+4. **Island Density:** A row of visually distinct tiles representing Island Count (1 to 10 noise scaling).
+5. **Action:** A massive, stylized `Generate World` button that dispatches `ScenarioSelectAction::Start` with a zero population canvas (or the loaded image/scenario for the Real World).
+_Do not remove the legacy scenarios completely. Integrate the Real World card as a premium visual map choice._
 
 ## Task 2: The Flat Ribbon God UI Tray
 Currently, our `god_tools/palette.rs` uses a floating 1-row dock and then awkwardly pops up an `egui::Window` for the sub-tray. WorldBox uses a seamless two-tier flat ribbon at the absolute bottom of the screen.

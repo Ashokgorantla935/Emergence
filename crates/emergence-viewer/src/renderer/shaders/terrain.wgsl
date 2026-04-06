@@ -295,5 +295,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Blend LOD 1 → LOD 2 when zoom in [1, 2]
     let blend_12 = zoom - 1.0;
     let blended = mix(color_lod1, color_lod2, blend_12);
-    return apply_illumination(blended, illumination, comfort);
+    let structured = apply_structure(blended, structure_id, in.build_progress, in.world_pos, t, u32(zoom));
+    return apply_illumination(structured, illumination, comfort);
 }

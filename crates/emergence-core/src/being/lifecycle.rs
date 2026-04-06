@@ -211,7 +211,17 @@ pub fn check_death_conditions(beings: &mut Beings, season: Season) -> Vec<usize>
             beings.hot.freeze_ticks[i] -= 1;
         }
 
-        // Starvation death: 10000+ ticks at zero hunger (generous grace period)
+        // Thermodynamic Starvation Death (Axiom 1)
+        if beings.hot.caloric_energy[i] <= 0.0 {
+            beings.hot.states[i] = BeingState::Dead;
+            beings.hot.alive_count -= 1;
+            // Map to starvation cause by pinning hunger ticks high
+            beings.hot.hunger_zero_ticks[i] = 10000;
+            newly_dead.push(i);
+            continue;
+        }
+
+        // Starvation death: 10000+ ticks at zero hunger (legacy generous grace period)
         if beings.hot.hunger_zero_ticks[i] >= 10000 {
             beings.hot.states[i] = BeingState::Dead;
             beings.hot.alive_count -= 1;

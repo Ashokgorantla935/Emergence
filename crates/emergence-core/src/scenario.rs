@@ -224,7 +224,7 @@ fn scenario_paradise() -> ScenarioConfig {
         id: ScenarioId::Paradise,
         world: WorldConfig {
             size: (1024, 1024),
-            initial_beings: 8,
+            initial_beings: 200, // Augmented for God-Simulator testing
             signal_channels: 7,
             terrain_seed: fastrand::u64(..),
             has_water: true,
@@ -233,7 +233,7 @@ fn scenario_paradise() -> ScenarioConfig {
             predator_fraction: 0.0,
             seasons: false,
             day_night: true,
-            map: MapSelection::Default,
+            map: MapSelection::BuiltIn(crate::world::map::MapId::FractalContinent),
             island_count: 3,
         },
         spawn_mode: SpawnMode::Scattered,
@@ -393,7 +393,7 @@ pub fn create_world_from_scenario(scenario: &ScenarioConfig) -> crate::sim::worl
     }
 
     // Spawn fauna (wolves, deer, rabbits, hawks, fish, etc.) distributed by biome
-    crate::spawn_fauna(&mut beings, &terrain, &mut rng);
+    crate::spawn_fauna(&mut beings, &terrain, &mut rng, config.has_predators);
 
     let (w, h) = (config.size.0, config.size.1);
     World {

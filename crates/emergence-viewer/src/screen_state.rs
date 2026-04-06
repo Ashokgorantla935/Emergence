@@ -38,28 +38,27 @@ pub enum SimSpeed {
 
 impl SimSpeed {
     pub fn ticks_per_frame(self) -> u32 {
-        // Assuming ~60 frames per real second, where 1 tick = 1 game minute (60 ticks/s = 1 hr/s).
         match self {
-            SimSpeed::Paused => 0,
-            SimSpeed::Speed1x   => 1,      // 1 hr/s
-            SimSpeed::Speed2x   => 168,    // 1 week/s
-            SimSpeed::Speed5x   => 720,    // 1 month/s
-            SimSpeed::Speed10x  => 8640,   // 1 year/s
-            SimSpeed::Speed50x  => 43200,  // 5 years/s
-            SimSpeed::Speed100x => 86400,  // 10 years/s
-            SimSpeed::Speed200x => 172800, // 20 years/s
-            SimSpeed::Speed500x => 432000, // 50 years/s
+            SimSpeed::Paused    => 0,
+            SimSpeed::Speed1x   => 1,
+            SimSpeed::Speed2x   => 2,
+            SimSpeed::Speed5x   => 5,
+            SimSpeed::Speed10x  => 10,
+            SimSpeed::Speed50x  => 50,
+            SimSpeed::Speed100x => 100,
+            SimSpeed::Speed200x => 200,
+            SimSpeed::Speed500x => 500,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
             SimSpeed::Paused    => "|| Pause",
-            SimSpeed::Speed1x   => "1x (1hr/s)",
-            SimSpeed::Speed2x   => "2x (1wk/s)",
-            SimSpeed::Speed5x   => "5x (1mo/s)",
-            SimSpeed::Speed10x  => "10x(1yr/s)",
-            SimSpeed::Speed50x  => "50x(5yr/s)",
+            SimSpeed::Speed1x   => "1x",
+            SimSpeed::Speed2x   => "2x",
+            SimSpeed::Speed5x   => "5x",
+            SimSpeed::Speed10x  => "10x",
+            SimSpeed::Speed50x  => "50x",
             SimSpeed::Speed100x => "100x",
             SimSpeed::Speed200x => "200x",
             SimSpeed::Speed500x => "500x",
@@ -528,6 +527,13 @@ impl ScenarioSelectUi {
                                 egui::Color32::from_rgba_premultiplied(15, 30, 60, 220),
                                 egui::Color32::from_rgb(40, 100, 180),
                             ),
+                            (
+                                "Paradise",
+                                "paradise",
+                                (2048, 2048),
+                                egui::Color32::from_rgba_premultiplied(20, 60, 30, 220),
+                                egui::Color32::from_rgb(60, 200, 100),
+                            ),
                         ];
                         for &(label, preset_key, size, bg_color, border_color) in presets {
                             let is_selected = self.selected_preset == Some(preset_key);
@@ -595,6 +601,15 @@ impl ScenarioSelectUi {
                                                     p.circle_filled(center, 3.5, land);
                                                 }
                                             }
+                                            "paradise" => {
+                                                // Fractal continent asymmetric preview
+                                                let r = preview_rect;
+                                                let cx = r.center();
+                                                p.circle_filled(cx + egui::vec2(-r.width()*0.1, 0.0), r.height()*0.4, land);
+                                                p.circle_filled(cx + egui::vec2(r.width()*0.15, r.height()*0.1), r.height()*0.3, land);
+                                                p.circle_filled(cx + egui::vec2(-r.width()*0.2, -r.height()*0.2), r.height()*0.25, land);
+                                                p.circle_filled(cx + egui::vec2(r.width()*0.3, -r.height()*0.15), r.height()*0.2, sand);
+                                            }
                                             _ => {}
                                         }
                                         ui.add_space(6.0);
@@ -640,8 +655,12 @@ impl ScenarioSelectUi {
                         )
                         .clicked()
                     {
+                        let scenario_id = match self.selected_preset.as_deref() {
+                            Some("paradise") => ScenarioId::Paradise,
+                            _ => ScenarioId::Experiment,
+                        };
                         self.action = ScenarioSelectAction::Start {
-                            id: ScenarioId::Experiment,
+                            id: scenario_id,
                             map_size: self.map_size,
                             population: 0,
                             fauna_density: self.fauna_density,

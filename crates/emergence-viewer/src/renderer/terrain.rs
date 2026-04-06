@@ -106,7 +106,7 @@ impl TerrainRenderer {
             TerrainVertex { position: [1.0, 1.0], uv: [1.0, 1.0] }, // 2 = TR
             TerrainVertex { position: [0.0, 1.0], uv: [0.0, 1.0] }, // 3 = TL
         ];
-        let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
+        let indices: [u16; 6] = [0, 1, 2, 2, 3, 0];
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Terrain Vertices"),

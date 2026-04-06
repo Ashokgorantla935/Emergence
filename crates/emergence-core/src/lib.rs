@@ -105,7 +105,7 @@ pub fn create_world(config: WorldConfig) -> World {
     }
 
     // Spawn fauna distributed by biome (~280 total)
-    spawn_fauna(&mut beings, &terrain, &mut rng);
+    spawn_fauna(&mut beings, &terrain, &mut rng, config.has_predators);
 
     World {
         terrain,
@@ -133,7 +133,7 @@ pub fn create_world(config: WorldConfig) -> World {
 /// Forest: 15 wolves, 45 deer, 10 bears, 60 rabbits, 15 hawks, 6 snakes.
 /// Grassland: 30 deer, 35 rabbits, 5 hawks, 5 wolves, 5 snakes.
 /// Water: 50 fish.
-pub fn spawn_fauna(beings: &mut Beings, terrain: &Terrain, rng: &mut fastrand::Rng) {
+pub fn spawn_fauna(beings: &mut Beings, terrain: &Terrain, rng: &mut fastrand::Rng, has_predators: bool) {
     // Personality presets per fauna type [bold, social, curious, generous, diurnal]
     let wolf_personality: [f32; 5] = [0.9, 0.7, 0.3, -0.5, 0.5];
     let deer_personality: [f32; 5] = [- 0.8, 0.6, -0.4, 0.0, 0.9];
@@ -203,22 +203,31 @@ pub fn spawn_fauna(beings: &mut Beings, terrain: &Terrain, rng: &mut fastrand::R
     let max_x = terrain.width as f32 - 1.0;
     let max_y = terrain.height as f32 - 1.0;
 
-    // Forest/wetland spawn: ~151 beings
-    spawn_batch(beings, &forest_cells, 15, CreatureType::Wolf,   wolf_personality,   rng, max_x, max_y);
-    spawn_batch(beings, &forest_cells, 45, CreatureType::Deer,   deer_personality,   rng, max_x, max_y);
-    spawn_batch(beings, &forest_cells, 10, CreatureType::Bear,   bear_personality,   rng, max_x, max_y);
-    spawn_batch(beings, &forest_cells, 60, CreatureType::Rabbit, rabbit_personality, rng, max_x, max_y);
-    spawn_batch(beings, &forest_cells, 15, CreatureType::Hawk,   hawk_personality,   rng, max_x, max_y);
-    spawn_batch(beings, &forest_cells, 6,  CreatureType::Snake,  snake_personality,  rng, max_x, max_y);
+    if has_predators {
+        // Forest/wetland spawn: default mix
+        spawn_batch(beings, &forest_cells, 15, CreatureType::Wolf,   wolf_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &forest_cells, 45, CreatureType::Deer,   deer_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &forest_cells, 10, CreatureType::Bear,   bear_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &forest_cells, 60, CreatureType::Rabbit, rabbit_personality, rng, max_x, max_y);
+        spawn_batch(beings, &forest_cells, 15, CreatureType::Hawk,   hawk_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &forest_cells, 6,  CreatureType::Snake,  snake_personality,  rng, max_x, max_y);
 
-    // Grassland spawn: ~80 beings
-    spawn_batch(beings, &grassland_cells, 30, CreatureType::Deer,   deer_personality,   rng, max_x, max_y);
-    spawn_batch(beings, &grassland_cells, 35, CreatureType::Rabbit, rabbit_personality, rng, max_x, max_y);
-    spawn_batch(beings, &grassland_cells, 5,  CreatureType::Hawk,   hawk_personality,   rng, max_x, max_y);
-    spawn_batch(beings, &grassland_cells, 5,  CreatureType::Wolf,   wolf_personality,   rng, max_x, max_y);
-    spawn_batch(beings, &grassland_cells, 5,  CreatureType::Snake,  snake_personality,  rng, max_x, max_y);
+        // Grassland spawn: default mix
+        spawn_batch(beings, &grassland_cells, 30, CreatureType::Deer,   deer_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &grassland_cells, 35, CreatureType::Rabbit, rabbit_personality, rng, max_x, max_y);
+        spawn_batch(beings, &grassland_cells, 5,  CreatureType::Hawk,   hawk_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &grassland_cells, 5,  CreatureType::Wolf,   wolf_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &grassland_cells, 5,  CreatureType::Snake,  snake_personality,  rng, max_x, max_y);
+    } else {
+        // Paradise Mode: Herbivores completely overrun the world without predators
+        spawn_batch(beings, &forest_cells, 100, CreatureType::Deer,   deer_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &forest_cells, 120, CreatureType::Rabbit, rabbit_personality, rng, max_x, max_y);
+        
+        spawn_batch(beings, &grassland_cells, 80, CreatureType::Deer,   deer_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &grassland_cells, 100, CreatureType::Rabbit, rabbit_personality, rng, max_x, max_y);
+    }
 
-    // Water spawn: ~50 fish
+    // Water spawn: ~50 fish (always safe)
     spawn_batch(beings, &water_cells, 50, CreatureType::Fish, fish_personality, rng, max_x, max_y);
 
     // Rebuild partition indices now that fauna are spawned

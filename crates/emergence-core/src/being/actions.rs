@@ -461,6 +461,17 @@ pub fn score_actions(
             q_values[Action::SeekShelter as usize] += grief * 50.0;
         }
 
+        // Settlement Tether: drastically limit Wander/Explore if too far from home.
+        if let Some(home) = beings.cold.home_settlement_pos[being_index] {
+            let dx = pos[0] - home[0] as f32;
+            let dy = pos[1] - home[1] as f32;
+            if dx*dx + dy*dy > 256.0 { // outside 16 hex radius
+                q_values[Action::Wander as usize] *= 0.05;
+                q_values[Action::Explore as usize] *= 0.05;
+                q_values[Action::SeekShelter as usize] *= 5.0; // Prio return
+            }
+        }
+
         // ACTION MASKING: Restrict to species-specific allowed actions.
         let allowed_actions = Action::allowed_actions(beings.hot.creature_type[being_index]);
         let mut allowed_indices: Vec<u8> = allowed_actions.iter()

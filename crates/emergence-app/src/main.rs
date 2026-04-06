@@ -385,18 +385,20 @@ impl App {
     fn start_scenario(&mut self, id: ScenarioId, map_size: (u32, u32), population: u32, fauna_density: FaunaDensity, island_count: u32, map_preset: Option<String>) {
         self.last_scenario = Some(Box::new((id, map_size, population, fauna_density, island_count, map_preset.clone())));
         let mut scenario = ScenarioConfig::new(id);
-        // Apply preset map or custom map size.
         if let Some(ref preset) = map_preset {
             scenario.world.map = match preset.as_str() {
-                "real_earth" => MapSelection::BuiltIn(MapId::RealEarth),
-                "pangaea" => MapSelection::BuiltIn(MapId::Pangaea),
-                "archipelago" => MapSelection::BuiltIn(MapId::Archipelago),
-                _ => MapSelection::Default,
+                "real_earth" => emergence_core::world::map::MapSelection::BuiltIn(emergence_core::world::map::MapId::RealEarth),
+                "pangaea" => emergence_core::world::map::MapSelection::BuiltIn(emergence_core::world::map::MapId::Pangaea),
+                "archipelago" => emergence_core::world::map::MapSelection::BuiltIn(emergence_core::world::map::MapId::Archipelago),
+                "paradise" => emergence_core::world::map::MapSelection::BuiltIn(emergence_core::world::map::MapId::FractalContinent),
+                _ => emergence_core::world::map::MapSelection::Default,
             };
         }
         scenario.world.size = map_size;
         // Apply population and fauna overrides from the scenario select UI.
-        scenario.world.initial_beings = population;
+        if population > 0 {
+            scenario.world.initial_beings = population;
+        }
         scenario.world.predator_fraction = fauna_density.predator_density();
         scenario.world.has_predators = fauna_density != FaunaDensity::Low;
         scenario.world.island_count = island_count.clamp(1, 10);
@@ -1040,9 +1042,9 @@ impl ApplicationHandler for App {
 
                     let mut world = world.write().unwrap();
 
-                    // Time-budgeted ticking: allow 80ms budget for fast speeds
-                    // This lets 50x speed actually hit 50x without getting throttled
-                    const TICK_BUDGET_MS: u128 = 80;
+                    // Time-budgeted ticking: allow 24ms budget for fast speeds
+                    // This lets the simulation run fast but keeps the UI responsive (max ~40ms full frame -> ~25 FPS minimum)
+                    const TICK_BUDGET_MS: u128 = 24;
                     let tick_start = std::time::Instant::now();
                     let mut ticked = 0u32;
                     for _ in 0..ticks {

@@ -411,7 +411,9 @@ pub fn tick_human_breeding(beings: &mut Beings, terrain: &crate::world::terrain:
         
         // Basic conditions for reproduction: adult phase, fully fed, comfortable, connected
         if beings.life_phase(i) != LifePhase::Adult { continue; }
-        if beings.hot.needs[i][crate::being::data::NEED_HUNGER] < 0.8 { continue; }
+        let high_calories = beings.hot.caloric_energy[i] > 30.0;
+        let high_hunger = beings.hot.needs[i][crate::being::data::NEED_HUNGER] > 0.5;
+        if !(high_calories || high_hunger) { continue; }
         if beings.hot.needs[i][crate::being::data::NEED_WARMTH] < 0.6 { continue; }
         if beings.hot.needs[i][crate::being::data::NEED_BELONGING] < 0.5 { continue; }
         

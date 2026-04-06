@@ -175,23 +175,25 @@ fn apply_illumination(color: vec4<f32>, illumination: f32, comfort: f32) -> vec4
 // Structure overlays. Mixes building color onto the base biome color based on cell distance and LOD
 fn apply_structure(base: vec4<f32>, structure_type: u32, build_progress: f32, world_pos: vec2<f32>, time: f32, lod: u32) -> vec4<f32> {
     let cell_frac = fract(world_pos) - vec2<f32>(0.5, 0.5); // [-0.5, 0.5]
-    let dist = length(cell_frac);
+    
+    // Create a smooth squircle mask to confine the road to the cell geometry without hitting triangle edges
+    let rect_dist = max(abs(cell_frac.x), abs(cell_frac.y));
+    let mask = smoothstep(0.50, 0.40, rect_dist);
 
     // 1-5, 8-20 are handled by 3D object sprites (objects.rs)
 
     // DirtPath (6) — worn earth trail
     if (structure_type == 6u) {
         let dirt = vec4<f32>(0.62, 0.49, 0.32, 1.0);
-        return mix(base, dirt, 0.70);
+        return mix(base, dirt, mask * 0.70);
     }
 
     // StoneRoad (7) — cobblestone road
     if (structure_type == 7u) {
         let stone_road = vec4<f32>(0.55, 0.55, 0.53, 1.0);
-        let cell_frac2 = fract(world_pos);
-        let grid = step(0.08, fract(cell_frac2.x * 3.0)) * step(0.08, fract(cell_frac2.y * 3.0));
+        let grid = step(0.08, fract(world_pos.x * 4.0)) * step(0.08, fract(world_pos.y * 4.0));
         let cobble = mix(vec4<f32>(0.45, 0.45, 0.43, 1.0), stone_road, grid);
-        return mix(base, cobble, 0.80);
+        return mix(base, cobble, mask * 0.90);
     }
 
     // FarmField (20) — handled by 3D object sprites

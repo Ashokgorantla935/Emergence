@@ -729,6 +729,7 @@ dependencies = [
  "emergence-core",
  "emergence-viewer",
  "emergence-worlds",
+ "libc",
  "pollster",
  "wgpu",
  "winit",

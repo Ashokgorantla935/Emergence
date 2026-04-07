@@ -33,22 +33,20 @@ for path in files:
         structure = np.ones((3,3), dtype=int)
         labeled, ncomponents = label(is_magenta, structure)
         
-        # Find which components touch the corners (the true background)
-        h, w = arr.shape[:2]
-        corners = [(0,0), (0,w-1), (h-1,0), (h-1,w-1)]
-        bg_labels = set()
-        for r, c in corners:
-            if is_magenta[r,c]:
-                bg_labels.add(labeled[r,c])
+        # Find the largest connected component of magenta (which must be the background)
+        sizes = np.bincount(labeled.flat)
+        if len(sizes) > 1:
+            bg_label = sizes[1:].argmax() + 1
+        else:
+            continue # No magenta found
                 
-        # Set alpha=0 and RGB = (0,0,0) for all pixels in bg_labels to prevent artifacts
+        # Set alpha=0 and RGB = (0,0,0) for all pixels in bg_label to prevent artifacts
         arr = np.array(img) # revert to uint8 original
-        for l in bg_labels:
-            mask = labeled == l
-            arr[mask, 0] = 0
-            arr[mask, 1] = 0
-            arr[mask, 2] = 0
-            arr[mask, 3] = 0 # ZERO ALPHA
+        mask = labeled == bg_label
+        arr[mask, 0] = 0
+        arr[mask, 1] = 0
+        arr[mask, 2] = 0
+        arr[mask, 3] = 0 # ZERO ALPHA
             
         final_img = Image.fromarray(arr)
         final_img.save(path, format="PNG")

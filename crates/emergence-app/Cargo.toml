@@ -8,6 +8,7 @@ emergence-core = { workspace = true }
 emergence-viewer = { workspace = true }
 emergence-worlds = { workspace = true }
 pollster = { workspace = true }
+libc = "0.2"
 winit = { workspace = true }
 wgpu = { workspace = true }
 egui = { workspace = true }

@@ -3215,6 +3215,13 @@ fn apply_viewer_laws_to_engine(
 // ---------------------------------------------------------------------------
 
 fn main() {
+    // V59: Signal handlers to catch silent kills
+    unsafe {
+        libc::signal(libc::SIGTERM, sighandler as libc::sighandler_t);
+        libc::signal(libc::SIGHUP, sighandler as libc::sighandler_t);
+        libc::signal(libc::SIGINT, sighandler as libc::sighandler_t);
+    }
+
     let autostart = std::env::args().any(|a| a == "--autostart");
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
@@ -3229,5 +3236,19 @@ fn main() {
             None,
         ));
     }
-    event_loop.run_app(&mut app).unwrap();
+    eprintln!("[LIFECYCLE] Event loop starting");
+    let result = event_loop.run_app(&mut app);
+    eprintln!("[LIFECYCLE] Event loop ended: {:?}", result);
+}
+
+extern "C" fn sighandler(sig: libc::c_int) {
+    eprintln!("[LIFECYCLE] Received signal {} ({})", sig,
+        match sig {
+            15 => "SIGTERM",
+            1 => "SIGHUP",
+            2 => "SIGINT",
+            9 => "SIGKILL",
+            _ => "UNKNOWN",
+        });
+    std::process::exit(128 + sig);
 }

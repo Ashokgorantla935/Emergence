@@ -86,7 +86,7 @@ impl Camera {
                     let max_zoom = self.world_height
                         .max(self.world_width / self.aspect.max(0.01))
                         .max(512.0);
-                    self.target_zoom = self.target_zoom.clamp(10.0, max_zoom);
+                    self.target_zoom = self.target_zoom.clamp(2.0, max_zoom);
                 }
                 true
             }
@@ -96,7 +96,7 @@ impl Camera {
                 let max_zoom = self.world_height
                     .max(self.world_width / self.aspect.max(0.01))
                     .max(512.0);
-                self.target_zoom = self.target_zoom.clamp(10.0, max_zoom);
+                self.target_zoom = self.target_zoom.clamp(2.0, max_zoom);
                 true
             }
             WindowEvent::ModifiersChanged(mods) => {

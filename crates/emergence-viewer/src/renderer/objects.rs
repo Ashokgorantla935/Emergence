@@ -105,8 +105,8 @@ const fn uv_190(col: u8, row: u8) -> [f32; 2] {
 }
 
 // ── V57: ALL spritesheet grid constants (USER CONFIRMED) ──────────────────
-/// V57: Global visual scalar applied after sqrt(mass) to prevent Godzilla-scale sprites.
-const ATLAS_VISUAL_SCALAR: f32 = 0.05;
+/// V59: Global visual scalar reduced to drop structures into macro scale
+const ATLAS_VISUAL_SCALAR: f32 = 0.01;
 // Flora spritesheet: 10×12 grid (flora_spritesheet_190.png — 10 cols, 12 rows)
 const CELL_FLORA_W: f32 = 1.0 / 10.0;
 const CELL_FLORA_H: f32 = 1.0 / 12.0;
@@ -952,70 +952,70 @@ fn collect_chunk_decor(
             let (atlas_uv, size, atlas_cell, scale_mult_hint) = if temp < 0.2 {
                 // Cold: snow pines and conifers (row 1)
                 let v = FLORA_190_SNOW[hash % FLORA_190_SNOW.len()];
-                (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell, 2.0f32)
+                (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell, 0.2f32)
             } else if biome == Biome::Wetland {
                 // Wetland ONLY: mushrooms + crystal mix (row 4)
                 if hash % 3 == 0 {
                     let v = FLORA_190_FUNGI[hash % FLORA_190_FUNGI.len()];
-                    (v, 3.0 + (hash % 3) as f32 * 0.2, flora_cell, 1.0f32)
+                    (v, 3.0 + (hash % 3) as f32 * 0.2, flora_cell, 0.1f32)
                 } else {
                     let v = FLORA_190_CRYSTAL[hash % FLORA_190_CRYSTAL.len()];
-                    (v, 3.5 + (hash % 3) as f32 * 0.3, flora_cell, 1.0f32)
+                    (v, 3.5 + (hash % 3) as f32 * 0.3, flora_cell, 0.1f32)
                 }
             } else if biome == Biome::Desert {
                 // Desert: dead trees (row 3), sparse shrubs and ground
                 if hash % 3 == 0 {
                     let v = FLORA_190_DEAD[hash % FLORA_190_DEAD.len()];
-                    (v, 3.0 + (hash % 3) as f32 * 0.2, flora_cell, 2.0f32)
+                    (v, 3.0 + (hash % 3) as f32 * 0.2, flora_cell, 0.2f32)
                 } else if hash % 3 == 1 {
                     let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()];
-                    (v, 2.0 + (hash % 2) as f32 * 0.2, flora_cell, 1.0f32)
+                    (v, 2.0 + (hash % 2) as f32 * 0.2, flora_cell, 0.1f32)
                 } else {
                     let v = FLORA_190_EXOTIC[hash % FLORA_190_EXOTIC.len()];
-                    (v, 1.5, flora_cell, 2.0f32)
+                    (v, 1.5, flora_cell, 0.2f32)
                 }
             } else if biome == Biome::Mountain {
                 // Mountain: mostly sparse, some bushes/shrubs
                 if hash % 3 == 0 {
                     let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
-                    (v, 2.5 + (hash % 2) as f32 * 0.3, flora_cell, 1.0f32)
+                    (v, 2.5 + (hash % 2) as f32 * 0.3, flora_cell, 0.1f32)
                 } else if hash % 3 == 1 {
                     let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()];
-                    (v, 2.0 + (hash % 2) as f32 * 0.2, flora_cell, 1.0f32)
+                    (v, 2.0 + (hash % 2) as f32 * 0.2, flora_cell, 0.1f32)
                 } else {
                     let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()]; // use shrub instead of corrupt ground row
-                    (v, 1.5, flora_cell, 0.5f32)
+                    (v, 1.5, flora_cell, 0.05f32)
                 }
             } else if biome == Biome::Forest {
                 // Forest: 70% temperate trees, 20% bushes, 10% flowers
                 if hash % 10 < 7 {
                     let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
-                    (v, 2.5 + (hash % 3) as f32 * 0.3, flora_cell, 2.0f32)
+                    (v, 2.5 + (hash % 3) as f32 * 0.3, flora_cell, 0.2f32)
                 } else if hash % 10 < 9 {
                     let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
-                    (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell, 1.0f32)
+                    (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell, 0.1f32)
                 } else {
                     let v = FLORA_190_FLOWERS[hash % FLORA_190_FLOWERS.len()];
-                    (v, 1.5 + (hash % 2) as f32 * 0.2, flora_cell, 0.3f32)
+                    (v, 1.5 + (hash % 2) as f32 * 0.2, flora_cell, 0.03f32)
                 }
             } else if biome == Biome::Grassland && temp >= 0.65 {
                 // Savannah: exotic palms and tropical trees (row 2)
                 let v = FLORA_190_EXOTIC[hash % FLORA_190_EXOTIC.len()];
-                (v, 2.5 + (hash % 3) as f32 * 0.4, flora_cell, 2.0f32)
+                (v, 2.5 + (hash % 3) as f32 * 0.4, flora_cell, 0.2f32)
             } else {
                 // Temperate grassland: mix of trees, bushes, flowers
                 if hash % 8 < 1 { // Only 1/8 trees in grassland to make it cleaner
                     let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
-                    (v, 4.0, [CELL_FLORA_W, CELL_FLORA_H], 2.0f32)
+                    (v, 4.0, [CELL_FLORA_W, CELL_FLORA_H], 0.2f32)
                 } else if hash % 8 < 3 {
                     let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
-                    (v, 2.5, flora_cell, 1.0f32)
+                    (v, 2.5, flora_cell, 0.1f32)
                 } else if hash % 8 < 6 {
                     let v = FLORA_190_FLOWERS[hash % FLORA_190_FLOWERS.len()];
-                    (v, 1.5, flora_cell, 0.3f32)
+                    (v, 1.5, flora_cell, 0.03f32)
                 } else {
                     let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()]; // use shrub instead of corrupt grass row
-                    (v, 1.5, flora_cell, 1.0f32)
+                    (v, 1.5, flora_cell, 0.1f32)
                 }
             };
 

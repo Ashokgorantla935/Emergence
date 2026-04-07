@@ -400,6 +400,7 @@ pub fn tick(world: &mut World) {
             &mut world.rng,
             world.tick,
             energy_available,
+            &world.spatial,
         );
     }
 
@@ -847,23 +848,24 @@ pub fn tick(world: &mut World) {
     }
 
     // 5f-1b. Spatial separation: gentle anti-piling for humans only
+    // V55: O(N) via SpatialIndex queries (replaces O(N²) brute force)
     {
-        let count = world.beings.hot.count;
+        let separation_radius = 0.4f32;
         let tw = world.terrain.width as f32;
         let th = world.terrain.height as f32;
 
-        for i in 0..count {
+        for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] != BeingState::Awake { continue; }
             if world.beings.hot.creature_type[i] != 0 { continue; } // humans only
 
             let pos_i = world.beings.hot.positions[i];
+            let nearby = world.spatial.query_radius(pos_i[0], pos_i[1], separation_radius);
             let mut push_x = 0.0f32;
             let mut push_y = 0.0f32;
             let mut neighbors = 0u32;
 
-            for j in 0..count {
-                if i == j { continue; }
-                if world.beings.hot.states[j] != BeingState::Awake { continue; }
+            for j in nearby {
+                if j == i { continue; }
                 if world.beings.hot.creature_type[j] != 0 { continue; } // humans only
 
                 let pos_j = world.beings.hot.positions[j];
@@ -875,13 +877,12 @@ pub fn tick(world: &mut World) {
                 if dist_sq <= 0.0001 {
                     dx = (world.rng.f32() - 0.5) * 0.02;
                     dy = (world.rng.f32() - 0.5) * 0.02;
-                    // Provide a minimum non-zero distance squared so it processes
                     dist_sq = dx * dx + dy * dy;
                 }
 
-                if dist_sq < 0.16 { // within 0.4 units
+                if dist_sq < separation_radius * separation_radius {
                     let dist = dist_sq.sqrt().max(0.01);
-                    let strength = 0.02 * (0.4 - dist) / 0.4;
+                    let strength = 0.02 * (separation_radius - dist) / separation_radius;
                     push_x += dx / dist * strength;
                     push_y += dy / dist * strength;
                     neighbors += 1;
@@ -895,6 +896,21 @@ pub fn tick(world: &mut World) {
                     world.beings.hot.positions[i] = [new_x, new_y];
                 }
             }
+        }
+    }
+
+    // 5f-1c. Mass dynamics: eating grows mass, starvation shrinks mass (V55 §4)
+    for i in 0..world.beings.hot.count {
+        if world.beings.hot.states[i] == BeingState::Dead { continue; }
+        let ct = world.beings.hot.creature_type[i];
+        let max_mass = crate::being::data::init_mass(ct) * 4.0;
+        // Well-fed: caloric_energy > 0.7 means the being is eating enough
+        if world.beings.hot.caloric_energy[i] > 0.7 {
+            world.beings.hot.mass[i] = (world.beings.hot.mass[i] + 0.5).min(max_mass);
+        }
+        // Starvation: hunger_zero_ticks > 0 means hunger has hit 0
+        if world.beings.hot.hunger_zero_ticks[i] > 0 {
+            world.beings.hot.mass[i] = (world.beings.hot.mass[i] - 0.1).max(1.0);
         }
     }
 
@@ -1270,6 +1286,11 @@ pub fn tick(world: &mut World) {
                 world.beings.hot.last_fire_tick[i] = 0; // Reset so we don't keep decaying
             }
         }
+    }
+
+    // V55 §2: Recalculate total energy every 100 ticks to keep conservation gate accurate.
+    if world.tick % 100 == 0 {
+        world.total_energy = crate::sim::world_state::recalculate_total_energy(world);
     }
 
     // Settlement detection every 50 ticks (was 600). Amortized ~0.002ms/tick.

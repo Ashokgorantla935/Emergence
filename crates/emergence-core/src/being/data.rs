@@ -167,8 +167,8 @@ pub fn init_mass(creature_type: u8) -> f32 {
         CreatureType::Human  => 64.0,
         CreatureType::Wolf   => 16.0,
         CreatureType::Deer   => 16.0,
-        CreatureType::Rabbit =>  4.0,
-        CreatureType::Fish   =>  4.0,
+        CreatureType::Rabbit =>  9.0,  // spec: mass=9 → scale=0.3
+        CreatureType::Fish   =>  9.0,
         CreatureType::Hawk   =>  9.0,
         CreatureType::Bear   => 36.0,
         CreatureType::Snake  =>  9.0,

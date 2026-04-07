@@ -144,6 +144,18 @@ pub fn tick_physics(terrain: &mut Terrain, signals: &mut SignalGrid, energy_avai
         }
     }
 
+    // --- Phase 4b: Shade Projection ---
+    // V55 §1 T-Field: High-mass entities cast shade → negative thermal gradient.
+    // Forest cells with biomass > 0.5 and structures cool this cell.
+    for idx in 0..len {
+        if terrain.biome[idx] == crate::world::terrain::Biome::Forest && terrain.biomass[idx] > 0.5 {
+            terrain.thermal_energy[idx] = (terrain.thermal_energy[idx] - 0.02).max(0.0);
+        }
+        if terrain.structure[idx] != 0 {
+            terrain.thermal_energy[idx] = (terrain.thermal_energy[idx] - 0.01).max(0.0);
+        }
+    }
+
     // --- Phase 5: Signal Coupling ---
     // Emit terrain physics state into SignalGrid so beings can navigate via gradients.
     // thermal_energy → Comfort channel (beings seek warmth when cold)

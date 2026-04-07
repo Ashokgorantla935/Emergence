@@ -396,7 +396,7 @@ mod tests {
 }
 
 /// `energy_available`: V55 §2 gate — if false, reproduction is suppressed (energy cap reached).
-pub fn tick_human_breeding(beings: &mut Beings, terrain: &crate::world::terrain::Terrain, rng: &mut fastrand::Rng, world_tick: u32, energy_available: bool) {
+pub fn tick_human_breeding(beings: &mut Beings, terrain: &crate::world::terrain::Terrain, rng: &mut fastrand::Rng, world_tick: u32, energy_available: bool, spatial: &crate::sim::spatial::SpatialIndex) {
     // V55 §2: Conservation — no reproduction if energy cap is reached
     if !energy_available { return; }
     let mut spawns = Vec::new();
@@ -425,23 +425,21 @@ pub fn tick_human_breeding(beings: &mut Beings, terrain: &crate::world::terrain:
         if world_tick.saturating_sub(beings.cold.last_birth_tick[i]) < 4000 { continue; }
         
         // Need another adult human nearby with whom they have a bond
+        // V55: O(1) partner search via SpatialIndex (replaces O(H²) brute force)
         let pos = beings.hot.positions[i];
         let mut partner = None;
-        for &j in &beings.hot.human_indices {
-            if i == j || beings.hot.states[j] == BeingState::Dead { continue; }
+        let nearby = spatial.query_radius_with_positions(pos[0], pos[1], 4.0, &beings.hot.positions);
+        for j in nearby {
+            if j == i { continue; }
+            if beings.hot.states[j] == BeingState::Dead { continue; }
+            if beings.hot.creature_type[j] != CreatureType::Human as u8 { continue; }
             if beings.life_phase(j) != LifePhase::Adult { continue; }
             if world_tick.saturating_sub(beings.cold.last_birth_tick[j]) < 4000 { continue; }
-            
-            let pos2 = beings.hot.positions[j];
-            let dx = pos[0] - pos2[0];
-            let dy = pos[1] - pos2[1];
-            if dx*dx + dy*dy < 16.0 {
-                // Must have trust relationship
-                if let Some(imp) = beings.cold.relationships[i].find(j as u32) {
-                    if imp.trust > 0.4 {
-                        partner = Some(j);
-                        break;
-                    }
+            // Must have trust relationship
+            if let Some(imp) = beings.cold.relationships[i].find(j as u32) {
+                if imp.trust > 0.4 {
+                    partner = Some(j);
+                    break;
                 }
             }
         }

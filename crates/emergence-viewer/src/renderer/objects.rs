@@ -792,7 +792,7 @@ fn collect_chunk_decor(
             if s == 0 { continue; }
             let struct_hash = cell_hash(x, y);
 
-            let (atlas_uv, tint, size, alpha) = match StructureType::from_u8(s) {
+            let (_atlas_uv, tint, size, alpha) = match StructureType::from_u8(s) {
                 StructureType::Campfire => {
                     let a = if terrain.build_progress[idx] < StructureType::Campfire.build_ticks() { 0.5 } else { 1.0 };
                     (ARCH_190_CAMPFIRE, [1.0, 1.0, 1.0], 2.5, a)
@@ -869,6 +869,22 @@ fn collect_chunk_decor(
                 _ => (ARCH_190_HUT, [0.7, 0.7, 0.7], 1.0, 1.0),
             };
 
+            // V55 §3: T-Mass drives architecture column (tech tier 0-7)
+            let tech_tier = terrain.tech_tier.get(idx).copied().unwrap_or(0);
+            let race_row = 0u8; // TODO: race-based row selection
+            let atlas_uv = uv_190(tech_tier, race_row);
+
+            // V55 §2: sqrt(mass) scale for buildings
+            let building_mass = match StructureType::from_u8(s) {
+                StructureType::Campfire     => 25.0f32,
+                StructureType::LeanTo       => 100.0,
+                StructureType::Hut          => 400.0,
+                StructureType::Wall         => 225.0,
+                StructureType::ResourceCache => 100.0,
+                _                           => 100.0,
+            };
+            let building_scale = 0.1 * building_mass.sqrt();
+
             building_out.push(ObjectInstance {
                 position:         [x as f32 + 0.5, y as f32 + 0.5],
                 atlas_uv,
@@ -877,7 +893,7 @@ fn collect_chunk_decor(
                 size,
                 alpha,
                 velocity:         [0.0, 0.0],
-                scale_multiplier: 3.0,
+                scale_multiplier: building_scale,
                 _pad_v54:         0.0,
             });
         }
@@ -913,7 +929,7 @@ fn collect_chunk_decor(
             // 98% sampling bound to prevent subpixel edge bleed from neighbors
             let flora_cell = [CELL_FLORA_W * 0.98, CELL_FLORA_H * 0.98];
 
-            let (atlas_uv, size, atlas_cell, scale_mult) = if temp < 0.2 {
+            let (atlas_uv, size, atlas_cell, _) = if temp < 0.2 {
                 // Cold: snow pines and conifers (row 1)
                 let v = FLORA_190_SNOW[hash % FLORA_190_SNOW.len()];
                 (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell, 2.0f32)
@@ -982,6 +998,10 @@ fn collect_chunk_decor(
                     (v, 1.5, flora_cell, 1.0f32)
                 }
             };
+
+            // V55 §2: sqrt(mass) scale for flora — biomass drives size
+            let flora_mass = biomass * 400.0;
+            let scale_mult = 0.1 * flora_mass.sqrt().max(2.0);
 
             if pixels_per_unit < 5.0 && size < 2.0 { continue; }
 

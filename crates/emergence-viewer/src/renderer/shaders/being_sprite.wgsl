@@ -65,10 +65,12 @@ struct VertexOutput {
 };
 
 fn is_magenta(c: vec3<f32>) -> bool {
-    // V57: Extremely aggressive magenta discard for JPEG-compressed sprites.
+    // V57: Nuclear magenta discard — matches object_sprite.wgsl
     let rb_avg = (c.r + c.b) * 0.5;
-    if (rb_avg > 0.40 && c.g < rb_avg * 0.65) { return true; }
-    if (distance(c, vec3<f32>(1.0, 0.0, 1.0)) < 0.5) { return true; }
+    if (rb_avg > 0.35 && c.g < rb_avg * 0.70) { return true; }
+    if (distance(c, vec3<f32>(1.0, 0.0, 1.0)) < 0.6) { return true; }
+    if (distance(c, vec3<f32>(0.7, 0.0, 0.7)) < 0.4) { return true; }
+    if (c.r > 0.4 && c.b > 0.4 && c.g < 0.25) { return true; }
     return false;
 }
 

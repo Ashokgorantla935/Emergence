@@ -932,7 +932,7 @@ fn collect_chunk_decor(
             // 98% sampling bound to prevent subpixel edge bleed from neighbors
             let flora_cell = [CELL_FLORA_W * 0.98, CELL_FLORA_H * 0.98];
 
-            let (atlas_uv, size, atlas_cell, _) = if temp < 0.2 {
+            let (atlas_uv, size, atlas_cell, scale_mult_hint) = if temp < 0.2 {
                 // Cold: snow pines and conifers (row 1)
                 let v = FLORA_190_SNOW[hash % FLORA_190_SNOW.len()];
                 (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell, 2.0f32)
@@ -1002,9 +1002,10 @@ fn collect_chunk_decor(
                 }
             };
 
-            // V55 §2: sqrt(mass) scale for flora — biomass drives size
-            let flora_mass = biomass * 400.0;
-            let scale_mult = ATLAS_VISUAL_SCALAR * flora_mass.sqrt().max(2.0);
+            // V57: Use the type-specific scale hint from the biome match (4th tuple element).
+            // Trees=2.0, bushes=1.0, flowers=0.3, mushrooms=1.0, etc.
+            // Modulate slightly by biomass for organic variation, but keep type hierarchy.
+            let scale_mult = scale_mult_hint * (0.7 + biomass * 0.3);
 
             if pixels_per_unit < 5.0 && size < 2.0 { continue; }
 

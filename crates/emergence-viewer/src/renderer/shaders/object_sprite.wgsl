@@ -98,13 +98,17 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
 }
 
 fn is_magenta(c: vec3<f32>) -> bool {
-    // V57: Extremely aggressive magenta discard for JPEG-compressed sprites.
-    // JPEG creates anti-aliased pink/rose fringes around magenta backgrounds.
-    // Discard anything where red+blue dominate green significantly.
+    // V57: Nuclear magenta discard for JPEG-compressed sprites.
+    // Catches pure magenta, anti-aliased pink fringes, and sRGB gamma shifts.
+    // Test 1: red+blue dominate green (catches pink/rose/purple fringes)
     let rb_avg = (c.r + c.b) * 0.5;
-    if (rb_avg > 0.40 && c.g < rb_avg * 0.65) { return true; }
-    // Also catch near-magenta with distance check
-    if (distance(c, vec3<f32>(1.0, 0.0, 1.0)) < 0.5) { return true; }
+    if (rb_avg > 0.35 && c.g < rb_avg * 0.70) { return true; }
+    // Test 2: distance from pure magenta (catches near-magenta with any compression)
+    if (distance(c, vec3<f32>(1.0, 0.0, 1.0)) < 0.6) { return true; }
+    // Test 3: distance from dark magenta (JPEG darkens edges)
+    if (distance(c, vec3<f32>(0.7, 0.0, 0.7)) < 0.4) { return true; }
+    // Test 4: purple hue detector (r and b both high relative to g)
+    if (c.r > 0.4 && c.b > 0.4 && c.g < 0.25) { return true; }
     return false;
 }
 

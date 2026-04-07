@@ -2,6 +2,9 @@ use noise::{Fbm, NoiseFn, OpenSimplex, Perlin};
 
 use super::map::ProceduralParams;
 
+/// V57: Sea-level cutoff for coherent continents. Below this = water.
+const SEA_LEVEL: f32 = 0.35;
+
 /// Generates terrain for Pangaea: single radial continent with mountain ridges.
 /// Returns (elevation, moisture, temperature_base).
 pub fn generate_pangaea(w: u32, h: u32, seed: u64) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
@@ -96,7 +99,7 @@ pub fn generate_pangaea(w: u32, h: u32, seed: u64) -> (Vec<f32>, Vec<f32>, Vec<f
         for y in 0..h {
             for x in 0..w {
                 let idx = (y * w + x) as usize;
-                if elevation[idx] < 0.25 {
+                if elevation[idx] < SEA_LEVEL {
                     dist[idx] = 0;
                     queue.push_back((x, y));
                 }

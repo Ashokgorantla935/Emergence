@@ -21,10 +21,10 @@ struct ObjectTimeUniform {
 };
 @group(2) @binding(0) var<uniform> obj_time: ObjectTimeUniform;
 
-// Atlas UV row for decorative objects (row 21, tree/bush sprites).
-// Trees occupy UV y in [21/32, 22/32). We treat anything in that row as swayable.
-const TREE_ROW_MIN: f32 = 21.0 / 32.0;
-const TREE_ROW_MAX: f32 = 22.0 / 32.0;
+// Atlas UV row for decorative objects (row 0, tree/bush sprites in 10×10 flora sheet).
+// Trees occupy UV y in [0, 1/10). V57: updated from legacy 32×32 atlas.
+const TREE_ROW_MIN: f32 = 0.0;
+const TREE_ROW_MAX: f32 = 1.0 / 10.0;
 
 struct VertexInput {
     @location(0) vertex_pos: vec2<f32>,
@@ -93,8 +93,8 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
 }
 
 fn is_magenta(c: vec3<f32>) -> bool {
-    // Only detect pure JPEG magenta artifacts: extreme R & B, low G.
-    return (c.r > 0.8 && c.b > 0.8 && c.g < 0.25) || distance(c, vec3<f32>(1.0, 0.0, 1.0)) < 0.3;
+    // Aggressively discard sRGB gamma-compressed magenta (#FF00FF) backgrounds
+    return c.r > 0.60 && c.b > 0.60 && c.g < 0.40;
 }
 
 @fragment

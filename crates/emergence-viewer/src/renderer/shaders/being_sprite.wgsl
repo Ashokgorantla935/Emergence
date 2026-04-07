@@ -65,8 +65,8 @@ struct VertexOutput {
 };
 
 fn is_magenta(c: vec3<f32>) -> bool {
-    // Only detect pure JPEG magenta artifacts: extreme R & B, low G.
-    return (c.r > 0.8 && c.b > 0.8 && c.g < 0.25) || distance(c, vec3<f32>(1.0, 0.0, 1.0)) < 0.3;
+    // Aggressively discard sRGB gamma-compressed magenta (#FF00FF) backgrounds
+    return c.r > 0.60 && c.b > 0.60 && c.g < 0.40;
 }
 
 // ── Vertex shader ────────────────────────────────────────────────────────────

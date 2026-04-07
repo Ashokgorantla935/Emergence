@@ -143,8 +143,8 @@ impl BeingRenderer {
             let mut atlas_uv = anim.atlas_uv(beings, i);
             let is_human = beings.hot.creature_type[i] == CreatureType::Human as u8;
             // Fauna uses fauna_and_races_spritesheet_190 (12×12 grid per V54 §1.1).
-            let cell_u = if is_human { ENTITY_CELL_U } else { (1.0 / 12.0) };
-            let cell_v = if is_human { ENTITY_CELL_V } else { (1.0 / 12.0) };
+            let cell_u = if is_human { ENTITY_CELL_U } else { 1.0 / 10.0 };
+            let cell_v = if is_human { ENTITY_CELL_V } else { 1.0 / 10.0 };
             
             let atlas_size = [cell_u, cell_v];
 
@@ -158,7 +158,8 @@ impl BeingRenderer {
             );
             // V55 §4: Mass-to-Scale — visual radius = sqrt(mass)
             let mass = if i < beings.hot.mass.len() { beings.hot.mass[i] } else { 64.0 };
-            let mut size = 0.1 * mass.sqrt();
+            const ATLAS_VISUAL_SCALAR: f32 = 0.05; // V57: prevents Godzilla-scale sprites
+            let mut size = ATLAS_VISUAL_SCALAR * mass.sqrt();
 
             let mut skin_tone = personality_skin_tone(&beings.hot.personalities[i]);
 
@@ -241,7 +242,7 @@ impl BeingRenderer {
                 alpha,
                 bob_flip,
                 velocity: beings.hot.velocities[i],
-                scale_multiplier: 0.1 * mass.sqrt(), // V55 §4
+                scale_multiplier: ATLAS_VISUAL_SCALAR * mass.sqrt(), // V57
                 _pad_v54: 0.0,
             };
             if is_human {

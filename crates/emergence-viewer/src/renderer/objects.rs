@@ -103,15 +103,17 @@ const fn uv_190(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * CELL_190, row as f32 * CELL_190]
 }
 
-// ── V54 §1.1: ALL spritesheet grid constants (HARDCODED) ──────────────────
-// Flora spritesheet: 16×12 grid (non-square cells)
-const CELL_FLORA_W: f32 = 1.0 / 16.0;   // 16 columns
-const CELL_FLORA_H: f32 = 1.0 / 12.0;   // 12 rows
+// ── V57: ALL spritesheet grid constants (USER CONFIRMED) ──────────────────
+/// V57: Global visual scalar applied after sqrt(mass) to prevent Godzilla-scale sprites.
+const ATLAS_VISUAL_SCALAR: f32 = 0.05;
+// Flora spritesheet: 10×10 grid (102.4px square cells on 1024×1024) — V57 user confirmed
+const CELL_FLORA_W: f32 = 1.0 / 10.0;
+const CELL_FLORA_H: f32 = 1.0 / 10.0;
 const fn uv_flora(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * CELL_FLORA_W, row as f32 * CELL_FLORA_H]
 }
-// Fauna & Races: 12×12 grid
-const CELL_FAUNA: f32 = 1.0 / 12.0;
+// Fauna & Races: 10×10 grid — V57 user confirmed
+const CELL_FAUNA: f32 = 1.0 / 10.0;
 // Human Races: 16×12 grid (non-square)
 const CELL_HUMAN_W: f32 = 1.0 / 16.0;   // 16 columns
 const CELL_HUMAN_H: f32 = 1.0 / 12.0;   // 12 rows
@@ -883,7 +885,7 @@ fn collect_chunk_decor(
                 StructureType::ResourceCache => 100.0,
                 _                           => 100.0,
             };
-            let building_scale = 0.1 * building_mass.sqrt();
+            let building_scale = ATLAS_VISUAL_SCALAR * building_mass.sqrt();
 
             building_out.push(ObjectInstance {
                 position:         [x as f32 + 0.5, y as f32 + 0.5],
@@ -1001,7 +1003,7 @@ fn collect_chunk_decor(
 
             // V55 §2: sqrt(mass) scale for flora — biomass drives size
             let flora_mass = biomass * 400.0;
-            let scale_mult = 0.1 * flora_mass.sqrt().max(2.0);
+            let scale_mult = ATLAS_VISUAL_SCALAR * flora_mass.sqrt().max(2.0);
 
             if pixels_per_unit < 5.0 && size < 2.0 { continue; }
 

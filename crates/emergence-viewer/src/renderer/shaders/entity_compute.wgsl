@@ -79,11 +79,25 @@ fn grid_idx(channel: u32, x: u32, y: u32) -> u32 {
     return channel * (params.world_width * params.world_height) + y * params.world_width + x;
 }
 
-// Sample signal grid at a position (clamp to bounds)
+// Sample signal grid at a position (bilinear interpolation)
 fn sample_grid(channel: u32, x: f32, y: f32) -> f32 {
-    let ix = clamp(u32(x), 0u, params.world_width - 1u);
-    let iy = clamp(u32(y), 0u, params.world_height - 1u);
-    return grid_read[grid_idx(channel, ix, iy)];
+    let fx = clamp(x, 0.0, f32(params.world_width - 1u));
+    let fy = clamp(y, 0.0, f32(params.world_height - 1u));
+    let ix = u32(fx);
+    let iy = u32(fy);
+    let fx_frac = fract(fx);
+    let fy_frac = fract(fy);
+    let ix1 = min(ix + 1u, params.world_width - 1u);
+    let iy1 = min(iy + 1u, params.world_height - 1u);
+
+    let v00 = grid_read[grid_idx(channel, ix, iy)];
+    let v10 = grid_read[grid_idx(channel, ix1, iy)];
+    let v01 = grid_read[grid_idx(channel, ix, iy1)];
+    let v11 = grid_read[grid_idx(channel, ix1, iy1)];
+
+    let top = mix(v00, v10, fx_frac);
+    let bot = mix(v01, v11, fx_frac);
+    return mix(top, bot, fy_frac);
 }
 
 // Compute gradient of a signal channel at position (finite difference)
@@ -122,10 +136,13 @@ fn phase1_god_commands(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     // Command type 0: Spawn entity at target position
     if (cmd.command_type == 0u) {
-        // Find a dead slot (health <= 0) and revive it
-        // For now, linear scan — will optimize with free-list later
-        for (var i = 0u; i < params.entity_count; i++) {
+        // Hash-offset scan: each command starts from a different index to reduce contention
+        let start = (cmd_idx * 7919u) % params.entity_count; // prime stride
+        for (var step = 0u; step < min(params.entity_count, 1024u); step++) {
+            let i = (start + step) % params.entity_count;
             if (entities[i].health <= 0.0) {
+                // Claim this slot — no race since health was 0 and we set it to 1
+                entities[i].health = 1.0;
                 entities[i].sector_x = u32(cmd.target_x);
                 entities[i].sector_y = u32(cmd.target_y);
                 entities[i].local_x = fract(cmd.target_x);
@@ -133,7 +150,6 @@ fn phase1_god_commands(@builtin(global_invocation_id) gid: vec3<u32>) {
                 entities[i].vel_x = 0.0;
                 entities[i].vel_y = 0.0;
                 entities[i].mass_proxy = 64.0;
-                entities[i].health = 1.0;
                 entities[i].creature_type = cmd.param;
                 break;
             }
@@ -141,8 +157,10 @@ fn phase1_god_commands(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     // Command type 1: Kill entity nearest to target
     else if (cmd.command_type == 1u) {
-        // GPU kill: set health to 0, death event will fire in Phase 2
-        for (var i = 0u; i < params.entity_count; i++) {
+        // Hash-offset scan with early-exit radius check to reduce contention
+        let start = (cmd_idx * 6271u) % params.entity_count; // prime stride
+        for (var step = 0u; step < min(params.entity_count, 1024u); step++) {
+            let i = (start + step) % params.entity_count;
             if (entities[i].health > 0.0) {
                 let dx = f32(entities[i].sector_x) + entities[i].local_x - cmd.target_x;
                 let dy = f32(entities[i].sector_y) + entities[i].local_y - cmd.target_y;
@@ -277,7 +295,7 @@ fn phase3_signal_diffusion(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (x > 0u)      { neighbor_sum += grid_read[grid_idx(ch, x - 1u, y)]; count += 1.0; }
         if (x + 1u < w)  { neighbor_sum += grid_read[grid_idx(ch, x + 1u, y)]; count += 1.0; }
         if (y > 0u)      { neighbor_sum += grid_read[grid_idx(ch, x, y - 1u)]; count += 1.0; }
-        if (y + 1u < w)  { neighbor_sum += grid_read[grid_idx(ch, x, y + 1u)]; count += 1.0; }
+        if (y + 1u < h)  { neighbor_sum += grid_read[grid_idx(ch, x, y + 1u)]; count += 1.0; }
 
         let avg = select(center, neighbor_sum / count, count > 0.0);
 

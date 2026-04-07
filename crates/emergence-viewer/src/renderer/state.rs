@@ -156,6 +156,8 @@ pub struct RenderState {
     pub gpu_entity_count: u32,
     /// V56: 3-phase GPU compute pipeline (god commands, fluid physics, diffusion).
     pub entity_compute: EntityComputePipeline,
+    /// V56 §5: CPU-side thermodynamic grid for conservation validation.
+    pub thermo_grid: super::gpu_sim::ThermodynamicsGrid,
 }
 
 impl RenderState {
@@ -1276,19 +1278,21 @@ impl RenderState {
             gpu_command_bind_group,
             gpu_entity_count: 0,
             entity_compute: v56_entity_compute,
+            thermo_grid: super::gpu_sim::ThermodynamicsGrid::new(1024, 1024),
         }
     }
 
     /// V56: Upload initial entities from CPU world state to GPU VRAM buffer (one-time).
     pub fn upload_entities_to_gpu(&mut self, beings: &emergence_core::being::data::Beings) {
+        use super::gpu_sim::{SOULS, SoulMemory, uuid_from_parts};
         let mut gpu_entities = Vec::with_capacity(beings.hot.count);
         for i in 0..beings.hot.count {
             if beings.hot.states[i] == emergence_core::being::data::BeingState::Dead { continue; }
             let pos = beings.hot.positions[i];
             let ct = beings.hot.creature_type[i];
             let mass = if i < beings.hot.mass.len() { beings.hot.mass[i] } else { 64.0 };
-            let uuid = (i as u64) | ((ct as u64) << 32);
-            let (uuid_high, uuid_low) = super::gpu_sim::uuid_to_parts(uuid);
+            let uuid_raw = (i as u64) | ((ct as u64) << 32);
+            let (uuid_high, uuid_low) = super::gpu_sim::uuid_to_parts(uuid_raw);
             gpu_entities.push(GpuEntity {
                 sector_x: pos[0] as u32,
                 sector_y: pos[1] as u32,
@@ -1302,6 +1306,17 @@ impl RenderState {
                 uuid_low,
                 creature_type: ct as u32,
                 atlas_index: 0,
+            });
+            // Register soul in CPU database
+            let uuid = uuid_from_parts(uuid_high, uuid_low);
+            SOULS.insert(uuid, SoulMemory {
+                display_name: format!("Being #{}", i),
+                creature_type: ct as u8,
+                genetics: [0u8; 16],
+                kills: 0,
+                born_tick: 0,
+                relationships: Vec::new(),
+                memory_events: Vec::new(),
             });
         }
         if !gpu_entities.is_empty() {
@@ -1333,6 +1348,22 @@ impl RenderState {
             );
             self.ping_pong_phase = 1 - self.ping_pong_phase;
         }
+    }
+
+    /// V56 §4: Reset event counter to 0 at the start of each frame.
+    pub fn reset_gpu_event_counter(&self) {
+        self.queue.write_buffer(&self.gpu_event_count, 0, &[0u8; 4]);
+    }
+
+    /// V56 §4: Copy GPU event buffer to staging for async CPU readback.
+    /// Call this AFTER dispatch_gpu_simulation, BEFORE encoder.finish().
+    pub fn copy_events_to_staging(&self, encoder: &mut wgpu::CommandEncoder) {
+        let size = (MAX_EVENTS as u64) * (std::mem::size_of::<GpuEvent>() as u64);
+        encoder.copy_buffer_to_buffer(
+            &self.gpu_event_buffer, 0,
+            &self.gpu_event_staging, 0,
+            size,
+        );
     }
 
     /// Load a PNG from raw bytes and create a wgpu bind group using the given layout.

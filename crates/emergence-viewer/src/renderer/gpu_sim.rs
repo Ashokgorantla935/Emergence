@@ -119,6 +119,40 @@ pub fn uuid_to_parts(uuid: u64) -> (u32, u32) {
     ((uuid >> 32) as u32, uuid as u32)
 }
 
+/// Look up a soul by UUID. Used when God clicks on an entity sprite.
+pub fn lookup_soul(uuid: u64) -> Option<dashmap::mapref::one::Ref<'static, u64, SoulMemory>> {
+    SOULS.get(&uuid)
+}
+
+// ── V56 §5: CPU-side ThermodynamicsGrid ─────────────────────────────────────
+
+/// V56 §5: CPU-side integer-precise thermodynamic grid.
+/// Used for conservation validation when terminal events arrive from GPU.
+pub struct ThermodynamicsGrid {
+    pub width: u32,
+    pub height: u32,
+    pub cells: Vec<CellThermodynamics>,
+    pub total_locked_mass: i64,
+}
+
+impl ThermodynamicsGrid {
+    pub fn new(w: u32, h: u32) -> Self {
+        let len = (w * h) as usize;
+        Self {
+            width: w,
+            height: h,
+            cells: vec![CellThermodynamics::default(); len],
+            total_locked_mass: 0,
+        }
+    }
+
+    /// Validate conservation: sum of all locked mass must equal initial total.
+    pub fn validate_conservation(&self) -> bool {
+        let sum: i64 = self.cells.iter().map(|c| c.locked_soil_mass_i64).sum();
+        sum == self.total_locked_mass
+    }
+}
+
 // ── V56 §1.2: LOD Thresholds ────────────────────────────────────────────────
 pub const LOD_THRESHOLD_MACRO: f32 = 200.0;  // Above this altitude: heatmap only, no entities
 pub const LOD_MACRO_Z_MIN: f32 = 150.0;       // Blend starts

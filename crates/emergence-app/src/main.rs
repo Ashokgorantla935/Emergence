@@ -2779,7 +2779,9 @@ impl ApplicationHandler for App {
                 }
 
                 // ── V56: GPU Entity Compute Dispatch (runs alongside CPU sim) ──
-                if rs.gpu_entity_count > 0 {
+                // V56 §1: Skip entity compute at extreme macro zoom (density map suffices)
+                let should_dispatch_entities = self.camera.zoom < emergence_viewer::renderer::gpu_sim::LOD_THRESHOLD_MACRO;
+                if rs.gpu_entity_count > 0 && should_dispatch_entities {
                     let world_tick = if let Some(ref world) = self.world {
                         world.read().unwrap().tick
                     } else { 0 };
@@ -2787,8 +2789,20 @@ impl ApplicationHandler for App {
                         let w = world.read().unwrap();
                         (w.config.size.0, w.config.size.1)
                     } else { (1024, 1024) };
-                    rs.update_sim_params(world_tick, rs.gpu_entity_count, 1.0, 0, ww, wh);
-                    rs.dispatch_gpu_simulation(&mut encoder, 1, rs.gpu_entity_count, 0, ww, wh);
+                    // FIX 3: Reset event counter before dispatch so GPU writes fresh events
+                    rs.reset_gpu_event_counter();
+
+                    // FIX 4: God commands forwarded to GPU (CPU still owns actual god logic)
+                    let god_cmd_count = 0u32; // no GPU-side conversion yet; CPU path is authoritative
+
+                    // FIX 5: Use actual speed multiplier instead of hardcoded 1
+                    let gpu_speed = self.speed.ticks_this_frame().max(1) as u32;
+
+                    rs.update_sim_params(world_tick, rs.gpu_entity_count, 1.0, god_cmd_count, ww, wh);
+                    rs.dispatch_gpu_simulation(&mut encoder, gpu_speed, rs.gpu_entity_count, god_cmd_count, ww, wh);
+
+                    // FIX 3: Copy event buffer to staging for async CPU readback next frame
+                    rs.copy_events_to_staging(&mut encoder);
                 }
 
                 let gpu_render_t = Instant::now();

@@ -16,17 +16,18 @@ use wgpu::util::DeviceExt;
 /// Max carry indicator instances (2 per being, up to 20K beings)
 const MAX_CARRY_INDICATORS: usize = 40_000;
 
-// Atlas layout constants — rows 18-23 (cell = 1/32 UV)
-const ATLAS_CELL: f32 = 1.0 / 32.0;
+// Legacy atlas cell — resources/carry indicators. Now mapped to consumables_190 (10×12).
+const ATLAS_CELL: f32 = 1.0 / 10.0; // V57: consumables sheet is 10 cols
 
 // Convenience: build a [f32;2] UV top-left from (row, col)
 const fn uv(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * ATLAS_CELL, row as f32 * ATLAS_CELL]
 }
 
-// Flora spritesheet layout (8 cols × 6 rows — verified visually)
-const FLORA_CELL_U: f32 = 1.0 / 8.0;
-const FLORA_CELL_V: f32 = 1.0 / 6.0;
+// Legacy flora (now uses 190-series 10×10 grid — see CELL_FLORA_W/H below).
+// These match the legacy flora_spritesheet.png if still referenced.
+const FLORA_CELL_U: f32 = 1.0 / 10.0; // V57: aligned to 10×10
+const FLORA_CELL_V: f32 = 1.0 / 10.0;
 const fn flora_uv(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * FLORA_CELL_U, row as f32 * FLORA_CELL_V]
 }

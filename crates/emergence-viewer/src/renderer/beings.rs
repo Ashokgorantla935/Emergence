@@ -242,7 +242,7 @@ impl BeingRenderer {
                 alpha,
                 bob_flip,
                 velocity: beings.hot.velocities[i],
-                scale_multiplier: ATLAS_VISUAL_SCALAR * mass.sqrt(), // V57
+                scale_multiplier: 1.0, // V57: size already includes ATLAS_VISUAL_SCALAR
                 _pad_v54: 0.0,
             };
             if is_human {

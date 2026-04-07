@@ -801,8 +801,8 @@ pub fn biome_movement_cost(biome: Biome) -> f32 {
 
 /// Classify biome from elevation, temperature, moisture triad values (all in [0,1]).
 pub(crate) fn classify_biome(e: f32, t: f32, m: f32) -> Biome {
-    // Ocean (handled by water mask, but guard here)
-    if e < 0.30 { return Biome::Water; }
+    // Ocean (handled by water mask, but guard here) — aligned with SEA_LEVEL=0.35
+    if e < 0.35 { return Biome::Water; }
 
     // High elevation: snow peaks or mountain
     if e > 0.80 {

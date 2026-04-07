@@ -21,10 +21,10 @@ struct ObjectTimeUniform {
 };
 @group(2) @binding(0) var<uniform> obj_time: ObjectTimeUniform;
 
-// Atlas UV row for decorative objects (row 0, tree/bush sprites in 10×10 flora sheet).
-// Trees occupy UV y in [0, 1/10). V57: updated from legacy 32×32 atlas.
+// Atlas UV row for decorative objects (row 0, tree sprites in 10×12 flora sheet).
+// Trees occupy UV y in [0, 1/12).
 const TREE_ROW_MIN: f32 = 0.0;
-const TREE_ROW_MAX: f32 = 1.0 / 10.0;
+const TREE_ROW_MAX: f32 = 1.0 / 12.0;
 
 struct VertexInput {
     @location(0) vertex_pos: vec2<f32>,
@@ -83,7 +83,7 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     let depth_bias  = clamp(inst.world_pos.y / 512.0, 0.0, 1.0) * 0.9;
     clip.z          = depth_bias * clip.w;
     out.clip_position = clip;
-    // V57: Half-pixel inset to prevent magenta bleed from atlas cell borders
+    // Half-pixel inset to prevent atlas cell border bleeding
     let half_px = vec2<f32>(0.5 / 1024.0, 0.5 / 1024.0);
     let cell_min = inst.atlas_uv + half_px;
     let cell_max = inst.atlas_uv + inst.atlas_size - half_px;
@@ -97,16 +97,13 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     return out;
 }
 
-// V59: All chromakey logic DELETED. Sprites now have proper RGBA alpha transparency
-// via Gemini's OpenCV flood-fill pre-processing (purge_magenta.py).
-
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (in.screen_size < 2.0) { discard; }
 
     let c = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
 
-    // V59: Pure alpha discard — no more chromakey heuristics
+    // Alpha-tested transparency
     if (c.a < 0.1) {
         // 1px black outline: sample 4 adjacent texels for edge detection
         let px = 1.0 / 1024.0;

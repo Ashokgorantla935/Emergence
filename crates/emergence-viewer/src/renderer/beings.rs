@@ -142,7 +142,7 @@ impl BeingRenderer {
 
             let mut atlas_uv = anim.atlas_uv(beings, i);
             let is_human = beings.hot.creature_type[i] == CreatureType::Human as u8;
-            // Fauna uses fauna_and_races_spritesheet_190 (12×12 grid per V54 §1.1).
+            // Fauna uses fauna_spritesheet_190 (10×10 grid).
             let cell_u = if is_human { ENTITY_CELL_U } else { 1.0 / 10.0 };
             let cell_v = if is_human { ENTITY_CELL_V } else { 1.0 / 10.0 };
             

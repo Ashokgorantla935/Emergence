@@ -50,17 +50,24 @@ const fn tile_uv(col: u8, row: u8) -> [f32; 2] {
 
 // Biome → row mapping for the seamless terrain sheet.
 // Each biome uses columns 0-3 as the seamless 4-cell base pack.
-const BIOME_ROW_GRASSLAND: u8 = 0;  // Rows 0-1: lush green grass
-const BIOME_ROW_FOREST:    u8 = 1;  // Row 1: darker green (forest floor)
-const BIOME_ROW_SAVANNAH:  u8 = 2;  // Row 2: golden brown
-const BIOME_ROW_DIRT:      u8 = 3;  // Row 3: tan earth
-const BIOME_ROW_DESERT:    u8 = 5;  // Row 5: bright sand dunes
-const BIOME_ROW_MOUNTAIN:  u8 = 8;  // Row 8: grey stone
-const BIOME_ROW_VOLCANIC:  u8 = 10; // Row 10: dark basalt/lava
-const BIOME_ROW_SNOW:      u8 = 11; // Row 11: white ice
-const BIOME_ROW_WATER_S:   u8 = 13; // Row 13: shallow tropical water
-const BIOME_ROW_WATER_D:   u8 = 14; // Row 14: deep ocean
-const BIOME_ROW_WETLAND:   u8 = 4;  // Row 4: dark wet soil
+// Row layout confirmed from direct visual inspection of terrain_spritesheet_190_seamless.png:
+// 8 terrain types × 2 rows each (base + variant). Cols 0-3 = seamless base, 4-15 = seasonal.
+const BIOME_ROW_GRASS_LIGHT: u8 = 0;  // Row 0: light green grass
+const BIOME_ROW_GRASS_DARK:  u8 = 1;  // Row 1: dark/lush green (forest floor)
+const BIOME_ROW_SAVANNAH:    u8 = 2;  // Row 2: golden/dry grass
+const BIOME_ROW_SAVANNAH_V:  u8 = 3;  // Row 3: dark olive/autumn grass
+const BIOME_ROW_DIRT_LIGHT:  u8 = 4;  // Row 4: light tan/brown earth
+const BIOME_ROW_DIRT_DARK:   u8 = 5;  // Row 5: dark brown soil
+const BIOME_ROW_SAND:        u8 = 6;  // Row 6: light cream/yellow sand
+const BIOME_ROW_DESERT:      u8 = 7;  // Row 7: orange/red desert dunes
+const BIOME_ROW_RED_CLAY:    u8 = 8;  // Row 8: red-orange clay/terracotta
+const BIOME_ROW_CRACKED:     u8 = 9;  // Row 9: grey cracked dried earth
+const BIOME_ROW_VOLCANIC:    u8 = 10; // Row 10: dark rock with lava veins
+const BIOME_ROW_MOUNTAIN:    u8 = 11; // Row 11: dark slate mountain rock
+const BIOME_ROW_SNOW:        u8 = 12; // Row 12: white/light blue snow
+const BIOME_ROW_ICE:         u8 = 13; // Row 13: blue-white ice
+const BIOME_ROW_WATER_S:     u8 = 14; // Row 14: turquoise shallow water
+const BIOME_ROW_WATER_D:     u8 = 15; // Row 15: deep blue ocean
 
 // Base seamless tiles: columns 0-3 for each biome row
 const SEAMLESS_COLS: usize = 4;
@@ -225,16 +232,40 @@ impl TerrainRenderer {
                             let idx = y * w + x;
                             let biome = terrain.biome[idx];
                             let hash = cell_hash(x, y);
+                            let elevation = terrain.elevation[idx];
+                            let moisture  = terrain.moisture[idx];
 
-                            // V57: Map biome to seamless terrain row, pick from 4-cell base pack
+                            // V59: Map biome to seamless terrain row with elevation/moisture sub-variation.
+                            // Uses all 16 rows of the terrain spritesheet for visual richness.
                             let biome_row = match biome {
-                                Biome::Grassland => BIOME_ROW_GRASSLAND,
-                                Biome::Forest    => BIOME_ROW_FOREST,
-                                Biome::Desert    => BIOME_ROW_DESERT,
-                                Biome::Mountain  => BIOME_ROW_MOUNTAIN,
-                                Biome::Water     => BIOME_ROW_WATER_D,
-                                Biome::Wetland   => BIOME_ROW_WETLAND,
-                                Biome::Snow      => BIOME_ROW_SNOW,
+                                Biome::Grassland => {
+                                    // Dry grassland → savannah (golden), lush → green
+                                    if moisture < 0.35 { BIOME_ROW_SAVANNAH }
+                                    else if moisture > 0.65 { BIOME_ROW_GRASS_DARK }
+                                    else { BIOME_ROW_GRASS_LIGHT }
+                                },
+                                Biome::Forest => BIOME_ROW_GRASS_DARK, // Row 1: dark lush forest floor
+                                Biome::Desert => {
+                                    // Low desert → cream sand, mid → orange dunes, high → red clay
+                                    if elevation > 0.55 { BIOME_ROW_RED_CLAY }
+                                    else if elevation > 0.45 { BIOME_ROW_DESERT }
+                                    else { BIOME_ROW_SAND }
+                                },
+                                Biome::Mountain => {
+                                    // Highest peaks → volcanic, high → dark slate, mid → cracked stone
+                                    if elevation > 0.85 { BIOME_ROW_VOLCANIC }
+                                    else if elevation > 0.72 { BIOME_ROW_MOUNTAIN }
+                                    else { BIOME_ROW_CRACKED }
+                                },
+                                Biome::Water => {
+                                    // Shallow near coast, deep in center
+                                    if elevation > 0.28 { BIOME_ROW_WATER_S } else { BIOME_ROW_WATER_D }
+                                },
+                                Biome::Wetland => BIOME_ROW_DIRT_DARK, // Row 5: dark brown wet soil
+                                Biome::Snow => {
+                                    // High snow → ice, lower → white snow
+                                    if elevation > 0.80 { BIOME_ROW_ICE } else { BIOME_ROW_SNOW }
+                                },
                             };
                             let tile_uv = biome_tile_uv(biome_row, hash);
                             let biome_flag = match biome {
@@ -246,7 +277,6 @@ impl TerrainRenderer {
                                 Biome::Wetland   => 5.0,
                                 Biome::Snow      => 6.0,
                             };
-                            let elevation = terrain.elevation[idx];
                             let structure_type = terrain.structure[idx] as f32;
 
                             // V54 §4.1: biome-based flora density for macro canopy shadow.

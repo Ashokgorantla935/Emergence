@@ -226,7 +226,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let illumination = clamp(water_time.illumination, 0.0, 1.0);
     let comfort = clamp(water_time.signal_comfort, 0.0, 1.0);
 
-    // V57: Sample the 16x16 seamless terrain spritesheet with half-pixel border inset
+    // Sample the 16x16 seamless terrain spritesheet with half-pixel border inset
     let ATLAS_CELL = 1.0 / 16.0;
     let HALF_PX = 0.5 / 1024.0;  // half-pixel inset to prevent cross-cell bleed
     // Clamp UV within cell to avoid sampling neighbor's pixels at edges

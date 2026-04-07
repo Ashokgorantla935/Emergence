@@ -93,16 +93,15 @@ pub struct RenderState {
     pub terrain_bind_group: wgpu::BindGroup,
     // ── V54 §1.1: 190-series spritesheet bind groups with hardcoded grid dimensions ──
     // Grid constants defined here as documentation; UV math uses float constants in renderer files.
-    pub flora_190_bind_group: wgpu::BindGroup,             // 16×12 grid (CELL_FLORA_W=1/16, CELL_FLORA_H=1/12)
+    pub flora_190_bind_group: wgpu::BindGroup,             // 10×12 grid (CELL_FLORA_W=1/10, CELL_FLORA_H=1/12)
     pub architecture_190_bind_group: wgpu::BindGroup,      // 8×8 grid   (CELL_190=1/8)
     pub minerals_190_bind_group: wgpu::BindGroup,          // 8×8 grid   (CELL_MINERALS=1/8)
-    pub fauna_190_bind_group: wgpu::BindGroup,             // 12×12 grid (CELL_FAUNA=1/12)
+    pub fauna_190_bind_group: wgpu::BindGroup,             // 10×10 grid (CELL_FAUNA=1/10)
     pub consumables_190_bind_group: wgpu::BindGroup,       // 10×12 grid (CELL_CONS_W=1/10, CELL_CONS_H=1/12)
     pub vfx_traits_190_bind_group: wgpu::BindGroup,        // 10×10 grid (CELL_VFX=1/10)
     pub human_races_190_bind_group: wgpu::BindGroup,       // 16×12 grid (CELL_HUMAN_W=1/16, CELL_HUMAN_H=1/12)
-    pub worldbox_items_190_bind_group: wgpu::BindGroup,    // 8×8 grid   (CELL_ITEMS=1/8)
-    pub exotic_biomes_190_bind_group: wgpu::BindGroup,     // 8×8 grid   (CELL_EXOTIC=1/8)
-    pub fauna_standalone_190_bind_group: wgpu::BindGroup,  // 12×12 grid (deprecated — use fauna_190)
+    pub crops_190_bind_group: wgpu::BindGroup,             // 10×10 grid (CELL_CROPS=1/10)
+    pub trees_190_bind_group: wgpu::BindGroup,             // 10×10 grid (CELL_TREES=1/10)
     /// V1: World objects (resources + structures) — single instanced draw call.
     pub object_pipeline: wgpu::RenderPipeline,
     /// V2: Unified particle system — single instanced draw call for ALL particles.
@@ -276,7 +275,7 @@ impl RenderState {
         // ── Terrain texture (WorldBox 190 16x16 atlas) ──────────
         let terrain_bind_group = {
             let img = image::load_from_memory(include_bytes!(
-                "../../../../assets/textures/terrain_spritesheet_190.png"
+                "../../../../assets/sprites/190_assets/terrain_spritesheet_190_seamless.png"
             )).expect("Failed to load WorldBox terrain tileset").to_rgba8();
             let (w, h) = img.dimensions();
             eprintln!("[terrain] Loaded Sunnyside tileset {}x{}", w, h);
@@ -330,68 +329,60 @@ impl RenderState {
             })
         };
 
-        // ── Wave 36: 190-series spritesheets (8x8 atlas, magenta chroma-key) ──
+        // ── V59: 190-series spritesheets (pure alpha, no chroma-key) ──
         let flora_190_bind_group = Self::load_png_bind_group(
             &device, &queue,
-            include_bytes!("../../../../assets/textures/flora_spritesheet_190.png"),
+            include_bytes!("../../../../assets/sprites/190_assets/flora_spritesheet_190.png"),
             &atlas.bind_group_layout,
-            "Flora 190 Spritesheet",
+            "Flora 190 Spritesheet",  // 10×12 grid
         );
         let architecture_190_bind_group = Self::load_png_bind_group(
             &device, &queue,
-            include_bytes!("../../../../assets/textures/architecture_spritesheet_190.png"),
+            include_bytes!("../../../../assets/sprites/190_assets/architecture_spritesheet_190.png"),
             &atlas.bind_group_layout,
-            "Architecture 190 Spritesheet",
+            "Architecture 190 Spritesheet",  // 8×8 grid
         );
         let minerals_190_bind_group = Self::load_png_bind_group(
             &device, &queue,
-            include_bytes!("../../../../assets/textures/minerals_spritesheet_190.png"),
+            include_bytes!("../../../../assets/sprites/190_assets/minerals_spritesheet_190.png"),
             &atlas.bind_group_layout,
-            "Minerals 190 Spritesheet",
+            "Minerals 190 Spritesheet",  // 8×8 grid
         );
         let fauna_190_bind_group = Self::load_png_bind_group(
             &device, &queue,
-            include_bytes!("../../../../assets/textures/fauna_and_races_spritesheet_190.png"),
+            include_bytes!("../../../../assets/sprites/190_assets/fauna_spritesheet_190.png"),
             &atlas.bind_group_layout,
-            "Fauna 190 Spritesheet",
+            "Fauna 190 Spritesheet",  // 10×10 grid
         );
-
-        // ── V41: Additional 190-series spritesheets ────────────────────────
         let consumables_190_bind_group = Self::load_png_bind_group(
             &device, &queue,
-            include_bytes!("../../../../assets/textures/consumables_spritesheet_190.png"),
+            include_bytes!("../../../../assets/sprites/190_assets/consumables_spritesheet_190.png"),
             &atlas.bind_group_layout,
-            "Consumables 190 Spritesheet",
+            "Consumables 190 Spritesheet",  // 10×12 grid
         );
         let vfx_traits_190_bind_group = Self::load_png_bind_group(
             &device, &queue,
-            include_bytes!("../../../../assets/textures/vfx_and_traits_spritesheet_190.png"),
+            include_bytes!("../../../../assets/sprites/190_assets/vfx_and_traits_spritesheet_190.png"),
             &atlas.bind_group_layout,
-            "VFX Traits 190 Spritesheet",
+            "VFX Traits 190 Spritesheet",  // 10×10 grid
         );
         let human_races_190_bind_group = Self::load_png_bind_group(
             &device, &queue,
-            include_bytes!("../../../../assets/textures/human_races_190.png"),
+            include_bytes!("../../../../assets/sprites/190_assets/human_races_190.png"),
             &atlas.bind_group_layout,
-            "Human Races 190 Spritesheet",
+            "Human Races 190 Spritesheet",  // 16×12 grid
         );
-        let worldbox_items_190_bind_group = Self::load_png_bind_group(
+        let crops_190_bind_group = Self::load_png_bind_group(
             &device, &queue,
-            include_bytes!("../../../../assets/textures/worldbox_items_spritesheet_190.png"),
+            include_bytes!("../../../../assets/sprites/190_assets/crops_spritesheet_190.png"),
             &atlas.bind_group_layout,
-            "WorldBox Items 190 Spritesheet",
+            "Crops 190 Spritesheet",  // 10×10 grid
         );
-        let exotic_biomes_190_bind_group = Self::load_png_bind_group(
+        let trees_190_bind_group = Self::load_png_bind_group(
             &device, &queue,
-            include_bytes!("../../../../assets/textures/exotic_biomes_spritesheet_190.png"),
+            include_bytes!("../../../../assets/sprites/190_assets/trees_spritesheet_190.png"),
             &atlas.bind_group_layout,
-            "Exotic Biomes 190 Spritesheet",
-        );
-        let fauna_standalone_190_bind_group = Self::load_png_bind_group(
-            &device, &queue,
-            include_bytes!("../../../../assets/textures/fauna_spritesheet_190.png"),
-            &atlas.bind_group_layout,
-            "Fauna Standalone 190 Spritesheet",
+            "Trees 190 Spritesheet",  // 10×10 grid
         );
 
         // ── Camera uniform buffer (extended) ──────────────────────────────
@@ -1251,9 +1242,8 @@ impl RenderState {
             consumables_190_bind_group,
             vfx_traits_190_bind_group,
             human_races_190_bind_group,
-            worldbox_items_190_bind_group,
-            exotic_biomes_190_bind_group,
-            fauna_standalone_190_bind_group,
+            crops_190_bind_group,
+            trees_190_bind_group,
             object_pipeline,
             particle_pipeline,
             postprocess,

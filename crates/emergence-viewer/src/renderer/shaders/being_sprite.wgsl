@@ -64,8 +64,6 @@ struct VertexOutput {
     @location(9) screen_size:  f32,
 };
 
-// V59: is_magenta() DELETED. Sprites now have proper RGBA alpha via Gemini's purge_magenta.py.
-
 // ── Vertex shader ────────────────────────────────────────────────────────────
 
 @vertex
@@ -146,8 +144,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (in.screen_size < 2.0) { discard; }
     var texel = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
     
-    // V59: Pure alpha discard — magenta and white chromakey DELETED (sprites have RGBA now)
-
+    // Alpha-tested transparency
     let alpha = texel.a;
 
     // Pixel size in atlas UV space
@@ -170,7 +167,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let se = textureSampleLevel(sprite_atlas, atlas_sampler, uv_e, 0.0);
         let sw = textureSampleLevel(sprite_atlas, atlas_sampler, uv_w, 0.0);
 
-        // V59: Simple alpha-only neighbor check (no chromakey needed)
         let n = select(0.0, 1.0, sn.a > 0.5);
         let s = select(0.0, 1.0, ss.a > 0.5);
         let e = select(0.0, 1.0, se.a > 0.5);

@@ -107,34 +107,37 @@ const fn uv_190(col: u8, row: u8) -> [f32; 2] {
 // ── V57: ALL spritesheet grid constants (USER CONFIRMED) ──────────────────
 /// V57: Global visual scalar applied after sqrt(mass) to prevent Godzilla-scale sprites.
 const ATLAS_VISUAL_SCALAR: f32 = 0.05;
-// Flora spritesheet: 10×10 grid (102.4px square cells on 1024×1024) — V57 user confirmed
+// Flora spritesheet: 10×12 grid (flora_spritesheet_190.png — 10 cols, 12 rows)
 const CELL_FLORA_W: f32 = 1.0 / 10.0;
-const CELL_FLORA_H: f32 = 1.0 / 10.0;
+const CELL_FLORA_H: f32 = 1.0 / 12.0;
 const fn uv_flora(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * CELL_FLORA_W, row as f32 * CELL_FLORA_H]
 }
-// Fauna & Races: 10×10 grid — V57 user confirmed
+// Crops spritesheet: 10×10 grid (crops_spritesheet_190.png)
+const CELL_CROPS: f32 = 1.0 / 10.0;
+const fn uv_crops(col: usize, row: usize) -> [f32; 2] {
+    [(col as f32) * (1.0 / 10.0), (row as f32) * (1.0 / 10.0)]
+}
+// Trees spritesheet: 10×10 grid (trees_spritesheet_190.png)
+const CELL_TREES: f32 = 1.0 / 10.0;
+const fn uv_trees(col: usize, row: usize) -> [f32; 2] {
+    [(col as f32) * (1.0 / 10.0), (row as f32) * (1.0 / 10.0)]
+}
+// Fauna: 10×10 grid — confirmed
 const CELL_FAUNA: f32 = 1.0 / 10.0;
 // Human Races: 16×12 grid (non-square)
 const CELL_HUMAN_W: f32 = 1.0 / 16.0;   // 16 columns
 const CELL_HUMAN_H: f32 = 1.0 / 12.0;   // 12 rows
 // Minerals: 8×8 grid (same as architecture)
 const CELL_MINERALS: f32 = 1.0 / 8.0;
-// Exotic Biomes: 8×8 grid
-const CELL_EXOTIC: f32 = 1.0 / 8.0;
 // Consumables: 10×12 grid (non-square)
 const CELL_CONS_W: f32 = 1.0 / 10.0;    // 10 columns
 const CELL_CONS_H: f32 = 1.0 / 12.0;    // 12 rows
-// Powers UI: 10×10 grid
-const CELL_POWERS: f32 = 1.0 / 10.0;
 // VFX & Traits: 10×10 grid
 const CELL_VFX: f32 = 1.0 / 10.0;
-// Worldbox Items: 8×8 grid
-#[allow(dead_code)]
-const CELL_ITEMS: f32 = 1.0 / 8.0;
 // Terrain: 16×16 grid (defined in terrain.rs as ATLAS_CELL)
 
-// Flora 190 spritesheet — 16×12 grid per V54 §1.1
+// Flora 190 spritesheet — 12×12 grid (flora_spritesheet_190.png)
 // Row  0: Green deciduous trees (temperate)
 // Row  1: Snow/ice pine trees and conifers
 // Row  2: Palm/tropical trees (exotic/savannah)
@@ -178,6 +181,20 @@ const FLORA_190_GRASS: &[[f32; 2]] = &[
 ];
 const FLORA_190_GROUND: &[[f32; 2]] = &[
     uv_flora(0,9), uv_flora(1,9), uv_flora(2,9), uv_flora(3,9)
+];
+
+// Crops 190 spritesheet — 10×10 grid (crops_spritesheet_190.png)
+// Placeholder: row 0 populated; exact cell mappings TBD when visual content is confirmed
+const CROPS_190: &[[f32; 2]] = &[
+    uv_crops(0,0), uv_crops(1,0), uv_crops(2,0), uv_crops(3,0), uv_crops(4,0),
+    uv_crops(5,0), uv_crops(6,0), uv_crops(7,0), uv_crops(8,0), uv_crops(9,0),
+];
+
+// Trees 190 spritesheet — 10×10 grid (trees_spritesheet_190.png)
+// Placeholder: row 0 populated; exact cell mappings TBD when visual content is confirmed
+const TREES_190: &[[f32; 2]] = &[
+    uv_trees(0,0), uv_trees(1,0), uv_trees(2,0), uv_trees(3,0), uv_trees(4,0),
+    uv_trees(5,0), uv_trees(6,0), uv_trees(7,0), uv_trees(8,0), uv_trees(9,0),
 ];
 
 // Architecture 190 grid (8x8):

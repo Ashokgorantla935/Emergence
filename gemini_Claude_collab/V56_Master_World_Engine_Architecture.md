@@ -144,24 +144,27 @@ Do not map arrows natively to the diffusion grid. Execute an explicit determinis
 
 ---
 
-## 5. Absolute Fixed-Point Thermodynamics
+## 5. Absolute Fixed-Point Mass Conservation (The Open Solar Model)
 
-### 5.1 Entropy Sinks (The 10-Year Constraint)
-Using floating point variables (`f32`) for true Mass/Energy physics introduces deterministic rounding errors. Over billions of simulation ticks, $10.51 + 2.01$ will eventually drop a fundamental bit of data. The simulation will hemorrhage energy into space or inflate infinitely. 
+### 5.1 Open Energy vs. Closed Mass
+The User Architect has mandated an absolute physical truth: **Energy is Open, but Mass is Locked.** 
+- **Solar Energy** flows openly into the system every Tick. Energy (heat/light) is technically infinite.
+- **Physical Mass (Carbon/Minerals)** is strictly finite. 
+Flora acts as the Transducer. Trees absorb infinite Solar Energy, but they *must* extract from the finite reservoir of Map Cell Mass to physically grow. 
+When a civilization hoards all the world's Mass into giant Castles and dense populations, the world enters organic famine. It doesn't matter how much sunlight hits the earth; no new food can grow until a Castle burns down or beings die, releasing Mass back into the grid.
 
-### 5.2 Strict Integer Math Logic
-You must encode all foundational Thermodynamic Grids strictly utilizing 64-bit integers.
+### 5.2 Strict Integer Math Logic for Mass
+Because Physical Mass is finite, it cannot be leaked to floating-point rounding errors over billions of ticks. The Fundamental Soil/Mass Grids MUST be encoded in strict integers.
 ```rust
-const WORLD_ENERGY_CAP: u64 = 1_000_000_000_000;
+const WORLD_MASS_CAP: u64 = 1_000_000_000_000;
 const FIXED_SCALAR: i64 = 1_000_000; // 1 unit representation 
 
 pub struct CellThermodynamics {
-    pub absolute_caloric_i64: i64,
-    pub thermal_pressure_i64: i64,
+    pub locked_soil_mass_i64: i64,      // The Immutable Integer Foundation
+    pub radiant_solar_energy_f32: f32,  // Energy remains open and fuzzy
 }
 ```
-*Rule:* Physical energy transactions between Cells and Entities must be 1:1 precise integer subtractions.
-Visual Scale representations on the GPU can cast these downstream to floats (`let instance.scale = sqrt(entity.absolute_caloric_i64 as f32)`). Floats are for Rendering; Integers are for God's Law.
+*Rule:* Physical Mass transactions between Cells and Entities must be 1:1 precise integer subtractions calculated synchronously on the CPU. Solar Energy distributions can remain as approximate `f32` vectors natively on the GPU. Floats are for Light and Heat; Integers are for matter.
 
 ---
 

@@ -7,6 +7,7 @@ use super::compute::SignalComputePipeline;
 use super::memetic_compute::MemeticComputePipeline;
 use super::climate_compute::ClimateComputePipeline;
 use super::gpu_sim::{GpuEntity, GpuEvent, GodCommand, SimParams, MAX_ENTITIES, MAX_EVENTS, MAX_GOD_COMMANDS};
+use super::entity_compute::EntityComputePipeline;
 
 /// Extended camera uniform including sprite rendering fields.
 /// Kept backward-compatible: the original view_proj is always binding 0.
@@ -153,6 +154,8 @@ pub struct RenderState {
     pub gpu_command_bind_group: wgpu::BindGroup,
     /// Current number of active GPU entities.
     pub gpu_entity_count: u32,
+    /// V56: 3-phase GPU compute pipeline (god commands, fluid physics, diffusion).
+    pub entity_compute: EntityComputePipeline,
 }
 
 impl RenderState {
@@ -1206,6 +1209,14 @@ impl RenderState {
             ],
         });
 
+        // V56: Create entity compute pipeline BEFORE moving layouts into struct
+        let v56_entity_compute = EntityComputePipeline::new(
+            &device,
+            &gpu_sim_bind_group_layout,
+            &gpu_grid_bind_group_layout,
+            &gpu_command_bind_group_layout,
+        );
+
         RenderState {
             device,
             queue,
@@ -1264,6 +1275,63 @@ impl RenderState {
             gpu_grid_bind_group_b,
             gpu_command_bind_group,
             gpu_entity_count: 0,
+            entity_compute: v56_entity_compute,
+        }
+    }
+
+    /// V56: Upload initial entities from CPU world state to GPU VRAM buffer (one-time).
+    pub fn upload_entities_to_gpu(&mut self, beings: &emergence_core::being::data::Beings) {
+        let mut gpu_entities = Vec::with_capacity(beings.hot.count);
+        for i in 0..beings.hot.count {
+            if beings.hot.states[i] == emergence_core::being::data::BeingState::Dead { continue; }
+            let pos = beings.hot.positions[i];
+            let ct = beings.hot.creature_type[i];
+            let mass = if i < beings.hot.mass.len() { beings.hot.mass[i] } else { 64.0 };
+            let uuid = (i as u64) | ((ct as u64) << 32);
+            let (uuid_high, uuid_low) = super::gpu_sim::uuid_to_parts(uuid);
+            gpu_entities.push(GpuEntity {
+                sector_x: pos[0] as u32,
+                sector_y: pos[1] as u32,
+                local_x: pos[0].fract(),
+                local_y: pos[1].fract(),
+                vel_x: beings.hot.velocities[i][0],
+                vel_y: beings.hot.velocities[i][1],
+                mass_proxy: mass,
+                health: beings.hot.caloric_energy[i],
+                uuid_high,
+                uuid_low,
+                creature_type: ct as u32,
+                atlas_index: 0,
+            });
+        }
+        if !gpu_entities.is_empty() {
+            self.queue.write_buffer(&self.gpu_entity_buffer, 0, bytemuck::cast_slice(&gpu_entities));
+        }
+        self.gpu_entity_count = gpu_entities.len() as u32;
+    }
+
+    /// V56: Update simulation parameters uniform each frame.
+    pub fn update_sim_params(&self, tick: u32, entity_count: u32, dt: f32, command_count: u32, w: u32, h: u32) {
+        let params = SimParams {
+            tick, entity_count, world_width: w, world_height: h,
+            dt, command_count, _pad0: 0.0, _pad1: 0.0,
+        };
+        self.queue.write_buffer(&self.gpu_sim_params_buffer, 0, bytemuck::cast_slice(&[params]));
+    }
+
+    /// V56 §7: Dispatch N simulation ticks for time dilation. Do NOT multiply dt.
+    pub fn dispatch_gpu_simulation(&mut self, encoder: &mut wgpu::CommandEncoder, speed: u32, entity_count: u32, cmd_count: u32, w: u32, h: u32) {
+        for _ in 0..speed {
+            let grid_bg = if self.ping_pong_phase == 0 {
+                &self.gpu_grid_bind_group_a
+            } else {
+                &self.gpu_grid_bind_group_b
+            };
+            self.entity_compute.dispatch_tick(
+                encoder, &self.gpu_sim_bind_group, grid_bg, &self.gpu_command_bind_group,
+                entity_count, cmd_count, w, h,
+            );
+            self.ping_pong_phase = 1 - self.ping_pong_phase;
         }
     }
 

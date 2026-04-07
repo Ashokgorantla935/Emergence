@@ -81,11 +81,16 @@ pub struct SimParams {
 pub const WORLD_ENERGY_CAP_V56: u64 = 1_000_000_000_000;
 pub const FIXED_SCALAR: i64 = 1_000_000;
 
-/// CPU-side integer-precise thermodynamic cell. Floats are for rendering; integers are for God's Law.
+/// V56 §5 (Open Solar Model): Two-tier thermodynamics.
+/// - Physical mass (carbon/minerals) is CLOSED — i64 integer-precise, conserved absolutely.
+/// - Solar/thermal energy is OPEN — f32 fluid, streams continuously from sunlight.
+/// Trees absorb infinite sunlight but require locked_soil_mass to generate physical scaling.
 #[derive(Clone, Debug, Default)]
 pub struct CellThermodynamics {
-    pub absolute_caloric_i64: i64,
-    pub thermal_pressure_i64: i64,
+    /// CLOSED: Physical carbon/mineral mass locked in this cell. Integer-precise conservation.
+    pub locked_soil_mass_i64: i64,
+    /// OPEN: Radiant solar energy absorbed. Fluid f32, streams from sun every tick on GPU.
+    pub radiant_solar_energy_f32: f32,
 }
 
 // ── V56 §3: Soul Database (CPU-side) ────────────────────────────────────────

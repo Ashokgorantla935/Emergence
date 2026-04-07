@@ -477,6 +477,12 @@ impl App {
             self.object_renderer = Some(object_renderer);
         }
 
+        // V56: Upload initial entities to GPU VRAM (one-time at genesis)
+        if let Some(ref mut rs) = self.render_state {
+            let w = world.read().unwrap();
+            rs.upload_entities_to_gpu(&w.beings);
+        }
+
         self.inspector = Inspector::new();
         self.settlement_inspect = None;
         self.dashboard = Dashboard::new();
@@ -2770,6 +2776,19 @@ impl ApplicationHandler for App {
                             climate_compute.start_download(&rs.device, &rs.queue);
                         }
                     }
+                }
+
+                // ── V56: GPU Entity Compute Dispatch (runs alongside CPU sim) ──
+                if rs.gpu_entity_count > 0 {
+                    let world_tick = if let Some(ref world) = self.world {
+                        world.read().unwrap().tick
+                    } else { 0 };
+                    let (ww, wh) = if let Some(ref world) = self.world {
+                        let w = world.read().unwrap();
+                        (w.config.size.0, w.config.size.1)
+                    } else { (1024, 1024) };
+                    rs.update_sim_params(world_tick, rs.gpu_entity_count, 1.0, 0, ww, wh);
+                    rs.dispatch_gpu_simulation(&mut encoder, 1, rs.gpu_entity_count, 0, ww, wh);
                 }
 
                 let gpu_render_t = Instant::now();

@@ -98,8 +98,14 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
 }
 
 fn is_magenta(c: vec3<f32>) -> bool {
-    // Aggressively discard sRGB gamma-compressed magenta (#FF00FF) backgrounds
-    return c.r > 0.60 && c.b > 0.60 && c.g < 0.40;
+    // V57: Extremely aggressive magenta discard for JPEG-compressed sprites.
+    // JPEG creates anti-aliased pink/rose fringes around magenta backgrounds.
+    // Discard anything where red+blue dominate green significantly.
+    let rb_avg = (c.r + c.b) * 0.5;
+    if (rb_avg > 0.40 && c.g < rb_avg * 0.65) { return true; }
+    // Also catch near-magenta with distance check
+    if (distance(c, vec3<f32>(1.0, 0.0, 1.0)) < 0.5) { return true; }
+    return false;
 }
 
 @fragment

@@ -65,8 +65,11 @@ struct VertexOutput {
 };
 
 fn is_magenta(c: vec3<f32>) -> bool {
-    // Aggressively discard sRGB gamma-compressed magenta (#FF00FF) backgrounds
-    return c.r > 0.60 && c.b > 0.60 && c.g < 0.40;
+    // V57: Extremely aggressive magenta discard for JPEG-compressed sprites.
+    let rb_avg = (c.r + c.b) * 0.5;
+    if (rb_avg > 0.40 && c.g < rb_avg * 0.65) { return true; }
+    if (distance(c, vec3<f32>(1.0, 0.0, 1.0)) < 0.5) { return true; }
+    return false;
 }
 
 // ── Vertex shader ────────────────────────────────────────────────────────────

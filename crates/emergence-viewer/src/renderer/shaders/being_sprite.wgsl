@@ -64,15 +64,7 @@ struct VertexOutput {
     @location(9) screen_size:  f32,
 };
 
-fn is_magenta(c: vec3<f32>) -> bool {
-    // V57: Nuclear magenta discard — matches object_sprite.wgsl
-    let rb_avg = (c.r + c.b) * 0.5;
-    if (rb_avg > 0.35 && c.g < rb_avg * 0.70) { return true; }
-    if (distance(c, vec3<f32>(1.0, 0.0, 1.0)) < 0.6) { return true; }
-    if (distance(c, vec3<f32>(0.7, 0.0, 0.7)) < 0.4) { return true; }
-    if (c.r > 0.4 && c.b > 0.4 && c.g < 0.25) { return true; }
-    return false;
-}
+// V59: is_magenta() DELETED. Sprites now have proper RGBA alpha via Gemini's purge_magenta.py.
 
 // ── Vertex shader ────────────────────────────────────────────────────────────
 
@@ -154,11 +146,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (in.screen_size < 2.0) { discard; }
     var texel = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
     
-    // Magenta chroma-key discard (#FF00FF) — algorithmic based
-    if (is_magenta(texel.rgb)) { discard; }
-    
-    // White background discard for generated fauna assets
-    if (texel.r > 0.95 && texel.g > 0.95 && texel.b > 0.95) { discard; }
+    // V59: Pure alpha discard — magenta and white chromakey DELETED (sprites have RGBA now)
 
     let alpha = texel.a;
 
@@ -182,20 +170,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let se = textureSampleLevel(sprite_atlas, atlas_sampler, uv_e, 0.0);
         let sw = textureSampleLevel(sprite_atlas, atlas_sampler, uv_w, 0.0);
 
-        let nm = is_magenta(sn.rgb);
-        let sm = is_magenta(ss.rgb);
-        let em = is_magenta(se.rgb);
-        let wm = is_magenta(sw.rgb);
-
-        let nw = sn.r > 0.95 && sn.g > 0.95 && sn.b > 0.95;
-        let sw_w = ss.r > 0.95 && ss.g > 0.95 && ss.b > 0.95;
-        let ew = se.r > 0.95 && se.g > 0.95 && se.b > 0.95;
-        let ww = sw.r > 0.95 && sw.g > 0.95 && sw.b > 0.95;
-
-        let n = select(0.0, 1.0, sn.a > 0.5 && !nm && !nw);
-        let s = select(0.0, 1.0, ss.a > 0.5 && !sm && !sw_w);
-        let e = select(0.0, 1.0, se.a > 0.5 && !em && !ew);
-        let w = select(0.0, 1.0, sw.a > 0.5 && !wm && !ww);
+        // V59: Simple alpha-only neighbor check (no chromakey needed)
+        let n = select(0.0, 1.0, sn.a > 0.5);
+        let s = select(0.0, 1.0, ss.a > 0.5);
+        let e = select(0.0, 1.0, se.a > 0.5);
+        let w = select(0.0, 1.0, sw.a > 0.5);
 
         if (n > 0.5 || s > 0.5 || e > 0.5 || w > 0.5) {
             return vec4<f32>(0.05, 0.03, 0.02, 0.9);

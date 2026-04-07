@@ -97,20 +97,8 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     return out;
 }
 
-fn is_magenta(c: vec3<f32>) -> bool {
-    // V57: Nuclear magenta discard for JPEG-compressed sprites.
-    // Catches pure magenta, anti-aliased pink fringes, and sRGB gamma shifts.
-    // Test 1: red+blue dominate green (catches pink/rose/purple fringes)
-    let rb_avg = (c.r + c.b) * 0.5;
-    if (rb_avg > 0.35 && c.g < rb_avg * 0.70) { return true; }
-    // Test 2: distance from pure magenta (catches near-magenta with any compression)
-    if (distance(c, vec3<f32>(1.0, 0.0, 1.0)) < 0.6) { return true; }
-    // Test 3: distance from dark magenta (JPEG darkens edges)
-    if (distance(c, vec3<f32>(0.7, 0.0, 0.7)) < 0.4) { return true; }
-    // Test 4: purple hue detector (r and b both high relative to g)
-    if (c.r > 0.4 && c.b > 0.4 && c.g < 0.25) { return true; }
-    return false;
-}
+// V59: All chromakey logic DELETED. Sprites now have proper RGBA alpha transparency
+// via Gemini's OpenCV flood-fill pre-processing (purge_magenta.py).
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
@@ -118,15 +106,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let c = textureSampleLevel(sprite_atlas, atlas_sampler, in.uv, 0.0);
 
-    // Magenta chroma-key discard (#FF00FF) — algorithm based
-    if (is_magenta(c.rgb)) { discard; }
-    // White background discard for generated assets (AI makes off-white).
-    if (c.r > 0.90 && c.g > 0.90 && c.b > 0.90) { discard; }
-    // Pixel size in atlas UV space (atlas is 1024x1024)
-    let px = 1.0 / 1024.0;
-
-    if c.a < 0.1 {
-        // 1px black outline: sample 4 adjacent texels, clamped to this atlas cell.
+    // V59: Pure alpha discard — no more chromakey heuristics
+    if (c.a < 0.1) {
+        // 1px black outline: sample 4 adjacent texels for edge detection
+        let px = 1.0 / 1024.0;
         let cell_min = in.atlas_uv;
         let cell_max = in.atlas_uv + in.atlas_size;
         let uv_n = clamp(in.uv + vec2<f32>( 0.0, -px), cell_min, cell_max);
@@ -139,10 +122,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let se = textureSampleLevel(sprite_atlas, atlas_sampler, uv_e, 0.0);
         let sw = textureSampleLevel(sprite_atlas, atlas_sampler, uv_w, 0.0);
 
-        let n = select(0.0, 1.0, sn.a > 0.5 && !is_magenta(sn.rgb));
-        let s = select(0.0, 1.0, ss.a > 0.5 && !is_magenta(ss.rgb));
-        let e = select(0.0, 1.0, se.a > 0.5 && !is_magenta(se.rgb));
-        let w = select(0.0, 1.0, sw.a > 0.5 && !is_magenta(sw.rgb));
+        let n = select(0.0, 1.0, sn.a > 0.5);
+        let s = select(0.0, 1.0, ss.a > 0.5);
+        let e = select(0.0, 1.0, se.a > 0.5);
+        let w = select(0.0, 1.0, sw.a > 0.5);
 
         if (n > 0.5 || s > 0.5 || e > 0.5 || w > 0.5) {
             return vec4<f32>(0.05, 0.03, 0.02, 0.9);

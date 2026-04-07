@@ -39,39 +39,36 @@ fn cell_hash(x: usize, y: usize) -> usize {
     h
 }
 
-// Atlas tile UV origins (col, row) → [f32; 2] UV top-left in the Sunnyside tileset.
-// Sunnyside 1024x1024, 16px tiles → 64 tiles per row.
+// V57: Seamless terrain spritesheet (16×16 grid, 64px cells on 1024×1024).
+// Each ROW = unique biome. Columns 0-3 = seamless base pack (tile with hash % 4).
+// Columns 4-15 = seasonal/planetary variants (future weather engine).
 const fn tile_uv(col: u8, row: u8) -> [f32; 2] {
-    [col as f32 * ATLAS_CELL, row as f32 * ATLAS_CELL]
+    // Half-pixel inset to prevent sampling across cell boundaries (seamless border fix)
+    let half_px = 0.5 / 1024.0;
+    [col as f32 * ATLAS_CELL + half_px, row as f32 * ATLAS_CELL + half_px]
 }
 
-const GRASS_TILES: &[[f32; 2]] = &[
-    tile_uv(1, 1), tile_uv(1, 2), tile_uv(2, 1), tile_uv(2, 2),
-];
+// Biome → row mapping for the seamless terrain sheet.
+// Each biome uses columns 0-3 as the seamless 4-cell base pack.
+const BIOME_ROW_GRASSLAND: u8 = 0;  // Rows 0-1: lush green grass
+const BIOME_ROW_FOREST:    u8 = 1;  // Row 1: darker green (forest floor)
+const BIOME_ROW_SAVANNAH:  u8 = 2;  // Row 2: golden brown
+const BIOME_ROW_DIRT:      u8 = 3;  // Row 3: tan earth
+const BIOME_ROW_DESERT:    u8 = 5;  // Row 5: bright sand dunes
+const BIOME_ROW_MOUNTAIN:  u8 = 8;  // Row 8: grey stone
+const BIOME_ROW_VOLCANIC:  u8 = 10; // Row 10: dark basalt/lava
+const BIOME_ROW_SNOW:      u8 = 11; // Row 11: white ice
+const BIOME_ROW_WATER_S:   u8 = 13; // Row 13: shallow tropical water
+const BIOME_ROW_WATER_D:   u8 = 14; // Row 14: deep ocean
+const BIOME_ROW_WETLAND:   u8 = 4;  // Row 4: dark wet soil
 
-const FOREST_TILES: &[[f32; 2]] = &[
-    tile_uv(4, 1), tile_uv(4, 2), tile_uv(5, 1), tile_uv(5, 2),
-];
+// Base seamless tiles: columns 0-3 for each biome row
+const SEAMLESS_COLS: usize = 4;
 
-const DESERT_TILES: &[[f32; 2]] = &[
-    tile_uv(8, 1), tile_uv(8, 2), tile_uv(9, 1), tile_uv(9, 2),
-];
-
-const MOUNTAIN_TILES: &[[f32; 2]] = &[
-    tile_uv(2, 15), tile_uv(3, 15), tile_uv(4, 15), tile_uv(5, 15),
-];
-
-const WATER_TILES: &[[f32; 2]] = &[
-    tile_uv(3, 15), tile_uv(3, 16), tile_uv(4, 15), tile_uv(4, 16),
-];
-
-const WETLAND_TILES: &[[f32; 2]] = &[
-    tile_uv(10, 1), tile_uv(10, 2), tile_uv(11, 1), tile_uv(11, 2),
-];
-
-const SNOW_TILES: &[[f32; 2]] = &[
-    tile_uv(12, 1), tile_uv(12, 2), tile_uv(13, 1), tile_uv(13, 2),
-];
+fn biome_tile_uv(biome_row: u8, cell_hash: usize) -> [f32; 2] {
+    let col = (cell_hash % SEAMLESS_COLS) as u8;
+    tile_uv(col, biome_row)
+}
 
 use std::collections::HashMap;
 
@@ -229,18 +226,17 @@ impl TerrainRenderer {
                             let biome = terrain.biome[idx];
                             let hash = cell_hash(x, y);
 
-                            let tiles = match biome {
-                                Biome::Grassland => GRASS_TILES,
-                                Biome::Forest    => FOREST_TILES,
-                                Biome::Desert    => DESERT_TILES,
-                                Biome::Mountain  => MOUNTAIN_TILES,
-                                Biome::Water     => WATER_TILES,
-                                Biome::Wetland   => WETLAND_TILES,
-                                Biome::Snow      => SNOW_TILES,
+                            // V57: Map biome to seamless terrain row, pick from 4-cell base pack
+                            let biome_row = match biome {
+                                Biome::Grassland => BIOME_ROW_GRASSLAND,
+                                Biome::Forest    => BIOME_ROW_FOREST,
+                                Biome::Desert    => BIOME_ROW_DESERT,
+                                Biome::Mountain  => BIOME_ROW_MOUNTAIN,
+                                Biome::Water     => BIOME_ROW_WATER_D,
+                                Biome::Wetland   => BIOME_ROW_WETLAND,
+                                Biome::Snow      => BIOME_ROW_SNOW,
                             };
-
-                            let variant = hash % tiles.len();
-                            let tile_uv = tiles[variant];
+                            let tile_uv = biome_tile_uv(biome_row, hash);
                             let biome_flag = match biome {
                                 Biome::Grassland => 0.0f32,
                                 Biome::Water     => 1.0,

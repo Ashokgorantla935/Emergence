@@ -226,10 +226,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let illumination = clamp(water_time.illumination, 0.0, 1.0);
     let comfort = clamp(water_time.signal_comfort, 0.0, 1.0);
 
-    // Sample the 16x16 seamless terrain spritesheet
+    // V57: Sample the 16x16 seamless terrain spritesheet with half-pixel border inset
     let ATLAS_CELL = 1.0 / 16.0;
-    // Map the local quad UV to the spritesheet cell bounding box
-    let sample_uv = in.tile_uv + in.uv * ATLAS_CELL;
+    let HALF_PX = 0.5 / 1024.0;  // half-pixel inset to prevent cross-cell bleed
+    // Clamp UV within cell to avoid sampling neighbor's pixels at edges
+    let clamped_uv = clamp(in.uv, vec2<f32>(0.01, 0.01), vec2<f32>(0.99, 0.99));
+    let cell_size = ATLAS_CELL - HALF_PX * 2.0;  // shrink cell by 1px total
+    let sample_uv = in.tile_uv + clamped_uv * cell_size;
     let base_color = textureSample(t_atlas, s_atlas, sample_uv);
     let structure_id = u32(in.structure_type + 0.5);
 

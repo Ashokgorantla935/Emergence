@@ -83,7 +83,12 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     let depth_bias  = clamp(inst.world_pos.y / 512.0, 0.0, 1.0) * 0.9;
     clip.z          = depth_bias * clip.w;
     out.clip_position = clip;
-    out.uv        = inst.atlas_uv + (vertex.vertex_pos + 0.5) * inst.atlas_size;
+    // V57: Half-pixel inset to prevent magenta bleed from atlas cell borders
+    let half_px = vec2<f32>(0.5 / 1024.0, 0.5 / 1024.0);
+    let cell_min = inst.atlas_uv + half_px;
+    let cell_max = inst.atlas_uv + inst.atlas_size - half_px;
+    let raw_uv = inst.atlas_uv + (vertex.vertex_pos + 0.5) * inst.atlas_size;
+    out.uv        = clamp(raw_uv, cell_min, cell_max);
     out.tint      = inst.tint;
     out.alpha     = inst.alpha;
     out.atlas_uv   = inst.atlas_uv;

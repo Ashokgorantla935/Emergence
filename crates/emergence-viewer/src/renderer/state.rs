@@ -6,6 +6,7 @@ use crate::atlas::Atlas;
 use super::compute::SignalComputePipeline;
 use super::memetic_compute::MemeticComputePipeline;
 use super::climate_compute::ClimateComputePipeline;
+use super::gpu_sim::{GpuEntity, GpuEvent, GodCommand, SimParams, MAX_ENTITIES, MAX_EVENTS, MAX_GOD_COMMANDS};
 
 /// Extended camera uniform including sprite rendering fields.
 /// Kept backward-compatible: the original view_proj is always binding 0.
@@ -115,6 +116,43 @@ pub struct RenderState {
     /// GPU compute pipeline for the downsampled ClimateGrid (Toxin diffusion).
     /// Tiny buffers (~16KB) — runs at chunk resolution to avoid Metal's 128MB limit.
     pub climate_compute: Option<ClimateComputePipeline>,
+
+    // ── V56: Zero-Copy VRAM Simulation Infrastructure ──────────────────────
+    /// Master entity buffer — lives permanently in VRAM.
+    /// STORAGE | VERTEX | COPY_DST. Shared between Compute and Render pipelines.
+    pub gpu_entity_buffer: wgpu::Buffer,
+    /// Ping-pong signal grid buffers for race-condition-free diffusion.
+    /// 4 channels × world_width × world_height × f32.
+    pub signal_grid_a: wgpu::Buffer,
+    pub signal_grid_b: wgpu::Buffer,
+    /// Which grid is the "read" source this tick (alternates 0/1).
+    pub ping_pong_phase: u32,
+    /// GPU→CPU event buffer. Compute shader writes terminal events via atomics.
+    pub gpu_event_buffer: wgpu::Buffer,
+    /// CPU-readable staging buffer for async event readback.
+    pub gpu_event_staging: wgpu::Buffer,
+    /// Atomic event counter (single u32 in a storage buffer).
+    pub gpu_event_count: wgpu::Buffer,
+    /// CPU→GPU god command buffer. Small, written by CPU, read by compute Phase 1.
+    pub gpu_god_command_buffer: wgpu::Buffer,
+    /// Simulation parameters uniform (tick, entity_count, dt, etc.).
+    pub gpu_sim_params_buffer: wgpu::Buffer,
+    /// Bind group layout for entity simulation compute.
+    pub gpu_sim_bind_group_layout: wgpu::BindGroupLayout,
+    /// Bind group layout for signal grid ping-pong.
+    pub gpu_grid_bind_group_layout: wgpu::BindGroupLayout,
+    /// Bind group layout for god commands + sim params.
+    pub gpu_command_bind_group_layout: wgpu::BindGroupLayout,
+    /// Bind group for entity simulation (group 0).
+    pub gpu_sim_bind_group: wgpu::BindGroup,
+    /// Bind group for signal grids — phase A (read A, write B).
+    pub gpu_grid_bind_group_a: wgpu::BindGroup,
+    /// Bind group for signal grids — phase B (read B, write A).
+    pub gpu_grid_bind_group_b: wgpu::BindGroup,
+    /// Bind group for god commands + sim params (group 2).
+    pub gpu_command_bind_group: wgpu::BindGroup,
+    /// Current number of active GPU entities.
+    pub gpu_entity_count: u32,
 }
 
 impl RenderState {
@@ -975,6 +1013,199 @@ impl RenderState {
         ];
         let signal_compute = SignalComputePipeline::new(&device, 128, 128, &default_channel_params);
 
+        // ── V56: Zero-Copy VRAM Simulation Buffers ─────────────────────────
+        let entity_buffer_size = (MAX_ENTITIES as u64) * (std::mem::size_of::<GpuEntity>() as u64);
+        let gpu_entity_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("V56 Entity VRAM Store"),
+            size: entity_buffer_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Ping-pong signal grids: 4 channels × 1024 × 1024 × f32 = 16MB each
+        let grid_size = 4u64 * 1024 * 1024 * std::mem::size_of::<f32>() as u64;
+        let signal_grid_a = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("V56 Signal Grid A"),
+            size: grid_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let signal_grid_b = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("V56 Signal Grid B"),
+            size: grid_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // GPU event buffer + atomic counter
+        let event_buffer_size = (MAX_EVENTS as u64) * (std::mem::size_of::<GpuEvent>() as u64);
+        let gpu_event_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("V56 Event Buffer"),
+            size: event_buffer_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let gpu_event_staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("V56 Event Staging"),
+            size: event_buffer_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let gpu_event_count = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("V56 Event Count"),
+            size: 4, // single u32
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // God command buffer
+        let cmd_buffer_size = (MAX_GOD_COMMANDS as u64) * (std::mem::size_of::<GodCommand>() as u64);
+        let gpu_god_command_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("V56 God Commands"),
+            size: cmd_buffer_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Sim params uniform
+        let gpu_sim_params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("V56 Sim Params"),
+            size: std::mem::size_of::<SimParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // ── V56 Bind Group Layouts ─────────────────────────────────────────
+        // Group 0: Entity simulation
+        let gpu_sim_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("V56 Sim BG Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry { // entities
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry { // event_queue
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry { // event_count (atomic)
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        // Group 1: Signal grids (two bind groups for ping-pong, one layout)
+        let gpu_grid_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("V56 Grid BG Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry { // grid_read
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry { // grid_write
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        // Group 2: God commands + sim params
+        let gpu_command_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("V56 Command BG Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry { // god_commands
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry { // sim_params
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        // ── V56 Bind Groups ────────────────────────────────────────────────
+        let gpu_sim_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("V56 Sim BG"),
+            layout: &gpu_sim_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: gpu_entity_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: gpu_event_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: gpu_event_count.as_entire_binding() },
+            ],
+        });
+
+        // Phase A: read from grid_a, write to grid_b
+        let gpu_grid_bind_group_a = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("V56 Grid BG (A→B)"),
+            layout: &gpu_grid_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: signal_grid_a.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: signal_grid_b.as_entire_binding() },
+            ],
+        });
+        // Phase B: read from grid_b, write to grid_a
+        let gpu_grid_bind_group_b = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("V56 Grid BG (B→A)"),
+            layout: &gpu_grid_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: signal_grid_b.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: signal_grid_a.as_entire_binding() },
+            ],
+        });
+
+        let gpu_command_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("V56 Command BG"),
+            layout: &gpu_command_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: gpu_god_command_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: gpu_sim_params_buffer.as_entire_binding() },
+            ],
+        });
+
         RenderState {
             device,
             queue,
@@ -1016,6 +1247,23 @@ impl RenderState {
             signal_compute,
             memetic_compute: None,
             climate_compute: None,
+            gpu_entity_buffer,
+            signal_grid_a,
+            signal_grid_b,
+            ping_pong_phase: 0,
+            gpu_event_buffer,
+            gpu_event_staging,
+            gpu_event_count,
+            gpu_god_command_buffer,
+            gpu_sim_params_buffer,
+            gpu_sim_bind_group_layout,
+            gpu_grid_bind_group_layout,
+            gpu_command_bind_group_layout,
+            gpu_sim_bind_group,
+            gpu_grid_bind_group_a,
+            gpu_grid_bind_group_b,
+            gpu_command_bind_group,
+            gpu_entity_count: 0,
         }
     }
 
@@ -1147,5 +1395,20 @@ impl RenderState {
     pub fn update_being_time(&self, time: f32, delta_time: f32) {
         let data: [f32; 4] = [time, delta_time, 0.0, 0.0];
         self.queue.write_buffer(&self.being_time_buffer, 0, bytemuck::cast_slice(&data));
+    }
+
+    /// V56 §7: Dispatch N simulation ticks per frame for time dilation.
+    /// Do NOT multiply dt — dispatch compute kernels multiple times.
+    pub fn swap_ping_pong(&mut self) {
+        self.ping_pong_phase = 1 - self.ping_pong_phase;
+    }
+
+    /// Get the current tick's grid bind group (alternates A/B).
+    pub fn current_grid_bind_group(&self) -> &wgpu::BindGroup {
+        if self.ping_pong_phase == 0 {
+            &self.gpu_grid_bind_group_a
+        } else {
+            &self.gpu_grid_bind_group_b
+        }
     }
 }

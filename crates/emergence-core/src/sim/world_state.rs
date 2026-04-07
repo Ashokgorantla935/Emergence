@@ -229,4 +229,55 @@ pub struct World {
     pub kingdoms: Vec<super::kingdom::Kingdom>,
     /// Active wars between kingdoms.
     pub wars: Vec<super::kingdom::WarState>,
+    /// V55 §2: Conservation of Energy — current total energy in the system.
+    /// Recalculated every 100 ticks. Gates biomass regrowth and reproduction.
+    pub total_energy: u64,
+    /// V55 §2: Maximum energy cap set from config at genesis.
+    pub energy_cap: u64,
+}
+
+/// Energy cost (in abstract units) per structure type for energy accounting.
+/// Used by recalculate_total_energy to tally locked energy.
+pub fn structure_energy_cost(structure_type: u8) -> u64 {
+    match structure_type {
+        0 => 0,   // no structure
+        1 => 20,  // LeanTo
+        2 => 30,  // Campfire
+        3 => 50,  // Hut
+        4 => 30,  // Wall
+        5 => 100, // WoodenHouse
+        6 => 200, // StoneHouse
+        7 => 250, // Keep
+        8 => 400, // Castle
+        9 => 20,  // DirtPath
+        10 => 40, // StoneRoad
+        11 => 30, // NomadTent
+        12 => 150, // Windmill
+        13 => 200, // Mine
+        14 => 200, // Forge
+        15 => 300, // Factory
+        16 => 120, // Automobile
+        17 => 180, // OilPump
+        _ => 50,  // unknown: moderate cost
+    }
+}
+
+/// V55 §2: Sum all energy in the world system.
+/// Includes terrain biomass, being caloric energy, and locked structural mass.
+/// Biomass range is 0.0–1.0 per cell; we scale by 100 for integer accounting.
+pub fn recalculate_total_energy(world: &World) -> u64 {
+    let biomass_energy: u64 = world.terrain.biomass.iter()
+        .map(|&b| (b * 100.0) as u64)
+        .sum();
+
+    let being_energy: u64 = (0..world.beings.hot.count)
+        .filter(|&i| world.beings.hot.states[i] != crate::being::data::BeingState::Dead)
+        .map(|i| (world.beings.hot.caloric_energy[i] * 1000.0) as u64)
+        .sum();
+
+    let structure_energy: u64 = world.terrain.structure.iter()
+        .map(|&s| structure_energy_cost(s))
+        .sum();
+
+    biomass_energy + being_energy + structure_energy
 }

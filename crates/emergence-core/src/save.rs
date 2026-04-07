@@ -476,6 +476,7 @@ impl SaveFile {
             thermal_energy: if self.terrain_thermal_energy.len() == len { self.terrain_thermal_energy.clone() } else { vec![0.3; len] },
             nutrient_density: if self.terrain_nutrient_density.len() == len { self.terrain_nutrient_density.clone() } else { vec![0.3; len] },
             pathogen: if self.terrain_pathogen.len() == len { self.terrain_pathogen.clone() } else { vec![0.0; len] },
+            tech_tier: vec![0u8; len],
         };
 
         // Reconstruct ResourceLayer
@@ -500,6 +501,7 @@ impl SaveFile {
             has_shelters: self.has_shelters,
             has_predators: self.has_predators,
             predator_fraction: self.predator_fraction,
+            energy_cap: 500_000,
             seasons: self.seasons_enabled,
             day_night: self.day_night_enabled,
             map: MapSelection::Default,
@@ -564,9 +566,14 @@ impl SaveFile {
             beings.hot.caloric_energy.push(
                 if i < self.being_caloric_energy.len() { self.being_caloric_energy[i] } else { 0.8 }
             );
+            // V55 fields — transient state, not persisted in save
+            beings.hot.mass.push(crate::being::data::init_mass(self.creature_type[i]));
             beings.hot.last_fire_tick.push(
                 if i < self.being_last_fire_tick.len() { self.being_last_fire_tick[i] } else { 0u32 }
             );
+            beings.hot.target_pos.push(self.positions[i]);
+            beings.hot.last_cognitive_tick.push(0u32);
+            beings.hot.current_action.push(0u8);
             beings.cold.parent_ids.push(self.parent_ids[i]);
             beings.cold.traits.push(if i < self.traits.len() { self.traits[i] } else { 0 });
             beings.cold.kill_count.push(if i < self.kill_count.len() { self.kill_count[i] } else { 0 });
@@ -691,6 +698,8 @@ impl SaveFile {
                 }
                 kg
             },
+            total_energy: 0,
+            energy_cap: 500_000,
         }
     }
 }
@@ -850,6 +859,7 @@ mod tests {
             has_shelters: false,
             has_predators: false,
             predator_fraction: 0.0,
+            energy_cap: 500_000,
             seasons: false,
             day_night: false,
             map: MapSelection::Default,

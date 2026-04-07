@@ -345,6 +345,7 @@ mod tests {
             has_shelters: true,
             has_predators: false,
             predator_fraction: 0.0,
+            energy_cap: 500_000,
             seasons: true,
             day_night: true,
             map: crate::world::map::MapSelection::Default,
@@ -394,7 +395,10 @@ mod tests {
     }
 }
 
-pub fn tick_human_breeding(beings: &mut Beings, terrain: &crate::world::terrain::Terrain, rng: &mut fastrand::Rng, world_tick: u32) {
+/// `energy_available`: V55 §2 gate — if false, reproduction is suppressed (energy cap reached).
+pub fn tick_human_breeding(beings: &mut Beings, terrain: &crate::world::terrain::Terrain, rng: &mut fastrand::Rng, world_tick: u32, energy_available: bool) {
+    // V55 §2: Conservation — no reproduction if energy cap is reached
+    if !energy_available { return; }
     let mut spawns = Vec::new();
     
     // Only breed if total alive humans is less than 10,000 for safety

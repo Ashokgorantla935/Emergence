@@ -6,6 +6,9 @@ use crate::sim::spatial::SpatialIndex;
 use crate::world::signal::{SignalChannel, SignalGrid};
 use crate::world::terrain::{StructureType, Terrain};
 
+/// V55 §3: Maximum technological wealth a settlement can accumulate.
+pub const MAX_WEALTH: f32 = 10_000.0;
+
 #[derive(Clone)]
 pub struct Settlement {
     pub id: u32,
@@ -22,6 +25,8 @@ pub struct Settlement {
     pub lean_to_count: u32,
     /// Number of huts placed for this settlement.
     pub hut_count: u32,
+    /// V55 §3: Technological wealth from built structures. [0.0, MAX_WEALTH]
+    pub t_mass: f32,
 }
 
 impl Settlement {
@@ -37,6 +42,7 @@ impl Settlement {
             has_campfire: false,
             lean_to_count: 0,
             hut_count: 0,
+            t_mass: 0.0,
         }
     }
 
@@ -174,6 +180,7 @@ pub fn detect_settlements(
             s.has_campfire = existing[ei].has_campfire;
             s.lean_to_count = existing[ei].lean_to_count;
             s.hut_count = existing[ei].hut_count;
+            s.t_mass = existing[ei].t_mass;
             s
         } else {
             let s = Settlement::new(next_id, tick);
@@ -226,6 +233,7 @@ pub fn update_settlement_construction(
             if !terrain.has_structure(bx, by) {
                 terrain.place_structure(bx, by, StructureType::Campfire, 0);
                 s.has_campfire = true;
+                s.t_mass = (s.t_mass + StructureType::Campfire.wealth_value()).min(MAX_WEALTH);
                 placed.push((StructureType::Campfire, bx, by, s.id));
             } else {
                 // Mark as having campfire even if we didn't place (already there)
@@ -248,6 +256,7 @@ pub fn update_settlement_construction(
                     if !terrain.has_structure(lx, ly) && !terrain.water[(ly * tw + lx) as usize] {
                         terrain.place_structure(lx, ly, StructureType::LeanTo, 0);
                         s.lean_to_count += 1;
+                        s.t_mass = (s.t_mass + StructureType::LeanTo.wealth_value()).min(MAX_WEALTH);
                         placed.push((StructureType::LeanTo, lx, ly, s.id));
                         if s.lean_to_count >= target_lean_tos {
                             break;
@@ -274,12 +283,36 @@ pub fn update_settlement_construction(
                         if !terrain.water[(hy * tw + hx) as usize] {
                             terrain.place_structure(hx, hy, StructureType::Hut, 0);
                             s.hut_count += 1;
+                            let delta = if existing == StructureType::LeanTo {
+                                StructureType::Hut.wealth_value() - StructureType::LeanTo.wealth_value()
+                            } else {
+                                StructureType::Hut.wealth_value()
+                            };
+                            s.t_mass = (s.t_mass + delta).clamp(0.0, MAX_WEALTH);
                             placed.push((StructureType::Hut, hx, hy, s.id));
                             if s.hut_count >= target_huts {
                                 break;
                             }
                         }
                     }
+                }
+            }
+        }
+        // V55 §3: Paint tech_tier onto terrain cells within settlement radius.
+        let normalized = (s.t_mass / MAX_WEALTH).clamp(0.0, 1.0);
+        let tier = (normalized * 7.0).floor() as u8;
+        let cx_i = s.center[0] as i32;
+        let cy_i = s.center[1] as i32;
+        let tw_i = terrain.width as i32;
+        let th_i = terrain.height as i32;
+        const RADIUS: i32 = 12;
+        for dy in -RADIUS..=RADIUS {
+            for dx in -RADIUS..=RADIUS {
+                if dx * dx + dy * dy > RADIUS * RADIUS { continue; }
+                let px = cx_i + dx;
+                let py = cy_i + dy;
+                if px >= 0 && py >= 0 && px < tw_i && py < th_i {
+                    terrain.tech_tier[(py * tw_i + px) as usize] = tier;
                 }
             }
         }

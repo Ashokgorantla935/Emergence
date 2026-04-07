@@ -364,6 +364,7 @@ mod tests {
             has_shelters: true,
             has_predators: false,
             predator_fraction: 0.0,
+            energy_cap: 500_000,
             seasons: true,
             day_night: true,
             map: crate::world::map::MapSelection::Default,

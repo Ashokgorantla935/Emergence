@@ -80,7 +80,9 @@ pub fn tick(world: &mut World) {
 
     // 2f. Thermodynamic physics — combustion, diffusion, moisture, nutrients, signal coupling (every 30 ticks)
     if world.tick % 30 == 0 {
-        crate::world::physics::tick_physics(&mut world.terrain, &mut world.signals);
+        // V55 §2: Conservation — suppress biomass regrowth if energy cap is reached
+        let energy_available = world.total_energy < world.energy_cap;
+        crate::world::physics::tick_physics(&mut world.terrain, &mut world.signals, energy_available);
     }
 
     // 2h. Pathogen exposure — beings on high-pathogen cells lose caloric energy (every 30 ticks)
@@ -390,11 +392,14 @@ pub fn tick(world: &mut World) {
     
     // Human breeding check (every 300 ticks)
     if world.tick % 300 == 0 {
+        // V55 §2: Conservation — no reproduction if energy cap is reached
+        let energy_available = world.total_energy < world.energy_cap;
         crate::being::lifecycle::tick_human_breeding(
             &mut world.beings,
             &world.terrain,
             &mut world.rng,
             world.tick,
+            energy_available,
         );
     }
 
@@ -548,8 +553,13 @@ pub fn tick(world: &mut World) {
     for i in 0..being_count {
         if world.beings.hot.flee_ticks[i] > 0 {
             world.beings.hot.action_lock_ticks[i] = 0;
+            world.beings.hot.last_cognitive_tick[i] = 0; // V55 §5: force cognitive re-eval on flee
         }
     }
+
+    // V55 §5: Cognitive interval — stagger AI across beings (each runs every ~60 ticks).
+    const COGNITIVE_INTERVAL: u32 = 60;
+    let current_tick = world.tick;
 
     let decisions: Vec<Option<ScoredAction>> = (0..being_count)
         .into_par_iter()
@@ -557,9 +567,15 @@ pub fn tick(world: &mut World) {
             if world.beings.hot.states[i] != BeingState::Awake {
                 return None;
             }
-            // Only re-score when lock has expired
+            // Inner gate: action lock still active
             if world.beings.hot.action_lock_ticks[i] > 0 {
                 return None; // use locked action (handled in execute phase)
+            }
+            // V55 §5: Outer gate — cognitive stagger
+            let ticks_since = current_tick.saturating_sub(world.beings.hot.last_cognitive_tick[i]);
+            let slot = (current_tick.wrapping_add(i as u32)) % COGNITIVE_INTERVAL;
+            if world.beings.hot.last_cognitive_tick[i] != 0 && slot != 0 && ticks_since < COGNITIVE_INTERVAL {
+                return None; // not this being's cognitive tick
             }
             let mut rng = fastrand::Rng::with_seed(base_seed.wrapping_add(i as u64));
             Some(score_actions(
@@ -590,6 +606,12 @@ pub fn tick(world: &mut World) {
 
         // Build the action to execute: either newly scored or locked from previous tick.
         let action_to_execute: ScoredAction = if let Some(ref new_action) = decision {
+            // V55 §5: Cache cognitive result for kinetic loop
+            world.beings.hot.last_cognitive_tick[i] = world.tick;
+            world.beings.hot.current_action[i] = new_action.action as u8;
+            if let Some(tgt) = new_action.target_pos {
+                world.beings.hot.target_pos[i] = tgt;
+            }
             // New decision: store it and set the lock duration.
             world.beings.hot.pending_action[i] = new_action.action as u8;
             world.beings.hot.action_target_pos[i] = new_action.target_pos;
@@ -789,6 +811,38 @@ pub fn tick(world: &mut World) {
                 nearby_count,
                 world.climate.day_phase(),
             );
+        }
+    }
+
+    // V55 §5: Kinetic loop — lightweight every-tick push toward cached target
+    {
+        let tw = world.terrain.width as f32;
+        let th = world.terrain.height as f32;
+        for i in 0..being_count {
+            if world.beings.hot.states[i] != BeingState::Awake { continue; }
+            if world.beings.hot.flee_ticks[i] > 0 { continue; }
+            if world.beings.hot.last_cognitive_tick[i] == world.tick { continue; }
+            let target = world.beings.hot.target_pos[i];
+            let pos = world.beings.hot.positions[i];
+            let dx = target[0] - pos[0];
+            let dy = target[1] - pos[1];
+            let dist_sq = dx * dx + dy * dy;
+            if dist_sq > 0.25 {
+                let dist = dist_sq.sqrt();
+                let speed = 0.05;
+                let vx = (dx / dist) * speed;
+                let vy = (dy / dist) * speed;
+                let new_x = (pos[0] + vx).clamp(0.0, tw - 1.0);
+                let new_y = (pos[1] + vy).clamp(0.0, th - 1.0);
+                if !world.terrain.is_water_f(new_x, new_y) {
+                    world.beings.hot.positions[i] = [new_x, new_y];
+                    world.beings.hot.velocities[i] = [vx, vy];
+                } else {
+                    world.beings.hot.velocities[i] = [0.0, 0.0];
+                }
+            } else {
+                world.beings.hot.velocities[i] = [0.0, 0.0];
+            }
         }
     }
 
@@ -1084,7 +1138,13 @@ pub fn tick(world: &mut World) {
             let y = (idx as u32) / world.terrain.width;
             // Signal grief at destroyed structure
             world.signals.deposit(SignalChannel::Grief, x.min(world.signals.width - 1), y.min(world.signals.height - 1), 0.3);
-            let _ = st;
+            // V55 §2: Release locked energy back into local biomass field
+            let released_energy = crate::sim::world_state::structure_energy_cost(st as u8);
+            if released_energy > 0 {
+                // Convert released energy back to biomass (scale: 100 energy units = 1.0 biomass)
+                let biomass_gain = released_energy as f32 / 100.0;
+                world.terrain.biomass[idx] = (world.terrain.biomass[idx] + biomass_gain).min(1.0);
+            }
         }
     }
 
@@ -1679,6 +1739,7 @@ mod tests {
             has_shelters: true,
             has_predators: true,
             predator_fraction: 0.04,
+            energy_cap: 500_000,
             seasons: true,
             day_night: true,
             map: crate::world::map::MapSelection::Default,
@@ -1713,6 +1774,7 @@ mod tests {
             has_shelters: false,
             has_predators: false,
             predator_fraction: 0.0,
+            energy_cap: 500_000,
             seasons: false,
             day_night: false,
             map: crate::world::map::MapSelection::Default,

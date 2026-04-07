@@ -72,6 +72,28 @@ impl StructureType {
         }
     }
 
+    /// V55 §3: Technological wealth contributed by this structure type.
+    pub fn wealth_value(self) -> f32 {
+        match self {
+            StructureType::None | StructureType::DirtPath => 0.0,
+            StructureType::Campfire => 50.0,
+            StructureType::LeanTo => 150.0,
+            StructureType::ResourceCache => 100.0,
+            StructureType::Hut | StructureType::NomadTent => 300.0,
+            StructureType::Wall | StructureType::StoneRoad => 200.0,
+            StructureType::SignalBeacon => 250.0,
+            StructureType::WoodenHouse => 500.0,
+            StructureType::StoneHouse => 800.0,
+            StructureType::Mine | StructureType::OilPump => 600.0,
+            StructureType::Forge => 1000.0,
+            StructureType::Windmill | StructureType::Keep => 1200.0,
+            StructureType::Factory => 2000.0,
+            StructureType::Castle => 3000.0,
+            StructureType::Automobile => 500.0,
+            StructureType::FarmField | StructureType::Canal => 100.0,
+        }
+    }
+
     pub fn from_u8(v: u8) -> Self {
         match v {
             1 => StructureType::Campfire,
@@ -155,6 +177,9 @@ pub struct Terrain {
     pub nutrient_density: Vec<f32>,
     /// Pathogen field: microbiological decay. Blooms near rotting biomass in stagnant moisture. 0.0-1.0
     pub pathogen: Vec<f32>,
+    /// V55 §3: Technology tier per cell (0-7), painted by settlement detection.
+    /// Drives architecture spritesheet column selection in the renderer.
+    pub tech_tier: Vec<u8>,
 }
 
 impl Terrain {
@@ -358,6 +383,7 @@ impl Terrain {
             thermal_energy,
             nutrient_density,
             pathogen: vec![0.0f32; len],
+            tech_tier: vec![0u8; len],
         }
     }
 
@@ -1050,6 +1076,7 @@ mod tests {
             has_shelters: true,
             has_predators: false,
             predator_fraction: 0.0,
+            energy_cap: 500_000,
             seasons: true,
             day_night: true,
             map: MapSelection::Default,

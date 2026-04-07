@@ -160,6 +160,21 @@ pub fn init_fauna_params(creature_type: u8) -> [f32; 6] {
     }
 }
 
+/// V55 §4: Initial biological mass per creature type.
+/// Chosen so `0.1 * sqrt(mass)` matches V54 visual sizes.
+pub fn init_mass(creature_type: u8) -> f32 {
+    match CreatureType::from_u8(creature_type) {
+        CreatureType::Human  => 64.0,
+        CreatureType::Wolf   => 16.0,
+        CreatureType::Deer   => 16.0,
+        CreatureType::Rabbit =>  4.0,
+        CreatureType::Fish   =>  4.0,
+        CreatureType::Hawk   =>  9.0,
+        CreatureType::Bear   => 36.0,
+        CreatureType::Snake  =>  9.0,
+    }
+}
+
 /// Initial insulation factor per creature type.
 /// Wolf=2.0, Bear=3.0, Deer=1.5, Rabbit=1.2, Hawk=1.3, Fish=0.5, Snake=0.8, Human=1.0
 pub fn init_insulation(creature_type: u8) -> f32 {
@@ -211,8 +226,17 @@ pub struct BeingsHot {
     pub body_temp: Vec<f32>,
     /// Internal caloric energy reserve. Eating increases, movement/heat loss decreases.
     pub caloric_energy: Vec<f32>,
+    /// V55 §4: Biological mass (kg equivalent). Drives visual scale via `0.1 * sqrt(mass)`.
+    pub mass: Vec<f32>,
     /// Last tick when this being performed a Build/fire action. For memetic decay tracking.
     pub last_fire_tick: Vec<u32>,
+    // V55 §5: Cognitive/Kinetic split — tick staggering
+    /// Cached pathfinding target from the cognitive loop.
+    pub target_pos: Vec<[f32; 2]>,
+    /// Tick when this being's cognitive AI last ran.
+    pub last_cognitive_tick: Vec<u32>,
+    /// Cached chosen action from last cognitive loop.
+    pub current_action: Vec<u8>,
 
     /// Per-human MLP brain weights for Q-value action scoring.
     /// Architecture: 14 input → 8 hidden (tanh) → 22 output (Q-values)
@@ -347,7 +371,11 @@ impl Beings {
                 insulation: Vec::new(),
                 body_temp: Vec::new(),
                 caloric_energy: Vec::new(),
+                mass: Vec::new(),
                 last_fire_tick: Vec::new(),
+                target_pos: Vec::new(),
+                last_cognitive_tick: Vec::new(),
+                current_action: Vec::new(),
                 brain_weights: Vec::new(),
                 dread_ratio: Vec::new(),
                 boredom_entropy: Vec::new(),
@@ -419,7 +447,11 @@ impl Beings {
         self.hot.insulation.push(1.0); // human default; call init_insulation after setting creature_type
         self.hot.body_temp.push(1.0);
         self.hot.caloric_energy.push(0.8);
+        self.hot.mass.push(init_mass(CreatureType::Human as u8));
         self.hot.last_fire_tick.push(0u32);
+        self.hot.target_pos.push(position);
+        self.hot.last_cognitive_tick.push(0u32);
+        self.hot.current_action.push(0u8);
         self.hot.brain_weights.push([0.0; 318]); // zeroed by default; init_human_brain called for humans after spawn
         self.hot.dread_ratio.push(0.0);
         self.hot.boredom_entropy.push(0.0);

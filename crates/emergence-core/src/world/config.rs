@@ -17,6 +17,10 @@ pub struct WorldConfig {
     /// Range 1–10. Higher = more islands/landmasses. Default 3.
     /// Scale formula: noise_scale = 0.005 * island_count.
     pub island_count: u32,
+    /// V55 §2: Total energy budget for the world. No energy can be created beyond this cap.
+    /// Energy locked in structures prevents biomass regrowth and reproduction.
+    /// Default: 500_000.
+    pub energy_cap: u64,
 }
 
 impl WorldConfig {

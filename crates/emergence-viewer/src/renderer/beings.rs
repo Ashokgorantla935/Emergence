@@ -148,7 +148,7 @@ impl BeingRenderer {
             
             let atlas_size = [cell_u, cell_v];
 
-            let (emotion_tint, mut size) = state_color_and_size(
+            let (emotion_tint, _size_legacy) = state_color_and_size(
                 i,
                 &beings.hot.needs[i],
                 &beings.hot.emotions[i],
@@ -156,6 +156,9 @@ impl BeingRenderer {
                 beings.hot.creature_type[i],
                 beings.life_phase(i),
             );
+            // V55 §4: Mass-to-Scale — visual radius = sqrt(mass)
+            let mass = if i < beings.hot.mass.len() { beings.hot.mass[i] } else { 64.0 };
+            let mut size = 0.1 * mass.sqrt();
 
             let mut skin_tone = personality_skin_tone(&beings.hot.personalities[i]);
 
@@ -238,7 +241,7 @@ impl BeingRenderer {
                 alpha,
                 bob_flip,
                 velocity: beings.hot.velocities[i],
-                scale_multiplier: creature_scale_multiplier(beings.hot.creature_type[i]),
+                scale_multiplier: 0.1 * mass.sqrt(), // V55 §4
                 _pad_v54: 0.0,
             };
             if is_human {

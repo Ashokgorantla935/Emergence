@@ -107,7 +107,8 @@ pub fn create_world(config: WorldConfig) -> World {
     // Spawn fauna distributed by biome (~280 total)
     spawn_fauna(&mut beings, &terrain, &mut rng, config.has_predators);
 
-    World {
+    let energy_cap = config.energy_cap;
+    let mut world = World {
         terrain,
         resources,
         climate,
@@ -126,7 +127,12 @@ pub fn create_world(config: WorldConfig) -> World {
         settlements: Vec::new(),
         kingdoms: Vec::new(),
         wars: Vec::new(),
-    }
+        total_energy: 0,
+        energy_cap,
+    };
+    // V55 §2: Calculate initial energy after world is fully constructed
+    world.total_energy = crate::sim::world_state::recalculate_total_energy(&world);
+    world
 }
 
 /// Spawn ~280 fauna distributed by biome.

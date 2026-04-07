@@ -10,6 +10,7 @@ pub fn genesis_config() -> WorldConfig {
         has_shelters: true,
         has_predators: true,
         predator_fraction: 0.04,
+        energy_cap: 500_000,
         seasons: true,
         day_night: true,
         map: emergence_core::world::map::MapSelection::Default,

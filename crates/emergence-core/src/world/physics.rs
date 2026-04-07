@@ -4,7 +4,8 @@ use crate::world::terrain::Terrain;
 /// Thermodynamic physics tick — runs every 30 ticks.
 /// Manages combustion, moisture dynamics, thermal diffusion, and signal coupling.
 /// All operations are mass-conserving: matter transforms, never disappears.
-pub fn tick_physics(terrain: &mut Terrain, signals: &mut SignalGrid) {
+/// `energy_available`: V55 §2 gate — if false, biomass regrowth is suppressed (energy cap reached).
+pub fn tick_physics(terrain: &mut Terrain, signals: &mut SignalGrid, energy_available: bool) {
     let w = terrain.width as usize;
     let h = terrain.height as usize;
     let len = w * h;
@@ -118,8 +119,9 @@ pub fn tick_physics(terrain: &mut Terrain, signals: &mut SignalGrid) {
         }
 
         // Biomass regrowth from nutrients + moisture (slow ecological recovery)
+        // V55 §2: Conservation — skip regrowth if energy cap is reached
         let moist = terrain.moisture_dynamic[idx];
-        if nutrient > 0.3 && moist > 0.3 && bio < 0.8 {
+        if energy_available && nutrient > 0.3 && moist > 0.3 && bio < 0.8 {
             let growth = nutrient * moist * 0.002;
             terrain.biomass[idx] = (bio + growth).min(1.0);
         }

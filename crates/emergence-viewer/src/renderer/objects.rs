@@ -107,11 +107,17 @@ const fn uv_190(col: u8, row: u8) -> [f32; 2] {
 // ── V57: ALL spritesheet grid constants (USER CONFIRMED) ──────────────────
 /// V59: Global visual scalar reduced to drop structures into macro scale
 const ATLAS_VISUAL_SCALAR: f32 = 0.01;
-// Flora spritesheet: 10×12 grid (flora_spritesheet_190.png — 10 cols, 12 rows)
+// Flora spritesheet: 10×10 grid (flora_spritesheet_190.png — trees, growth + decay)
 const CELL_FLORA_W: f32 = 1.0 / 10.0;
-const CELL_FLORA_H: f32 = 1.0 / 12.0;
+const CELL_FLORA_H: f32 = 1.0 / 10.0;
 const fn uv_flora(col: u8, row: u8) -> [f32; 2] {
     [col as f32 * CELL_FLORA_W, row as f32 * CELL_FLORA_H]
+}
+// Small plant spritesheet: 10×12 grid (small_plant_spritesheet_190.png — bushes, shrubs, flowers)
+const CELL_SMALL_W: f32 = 1.0 / 10.0;
+const CELL_SMALL_H: f32 = 1.0 / 12.0;
+const fn uv_small(col: u8, row: u8) -> [f32; 2] {
+    [col as f32 * CELL_SMALL_W, row as f32 * CELL_SMALL_H]
 }
 // Crops spritesheet: 10×10 grid (crops_spritesheet_190.png)
 const CELL_CROPS: f32 = 1.0 / 10.0;
@@ -137,50 +143,115 @@ const CELL_CONS_H: f32 = 1.0 / 12.0;    // 12 rows
 const CELL_VFX: f32 = 1.0 / 10.0;
 // Terrain: 16×16 grid (defined in terrain.rs as ATLAS_CELL)
 
-// Flora 190 spritesheet — 12×12 grid (flora_spritesheet_190.png)
-// Row  0: Green deciduous trees (temperate)
-// Row  1: Snow/ice pine trees and conifers
-// Row  2: Palm/tropical trees (exotic/savannah)
-// Row  3: Dead/brown trees, driftwood, dried palms
-// Row  4: Pink mushrooms (cols 0-5) + Cyan crystals (cols 6-11) — Gemini confirmed
-// Row  5: Round green bushes and hedges
-// Row  6: Colorful flowers and small plants
-// Row  7: Shrubs, cacti, tall grass, autumn bushes
-// Row  8: Green/brown grass patches, ground cover
-// Row  9: Stumps, logs, tiny plants, rocks
-// Rows 10-11: Sparse/empty
+// Flora 190 spritesheet — generated_flora_transparent.png (10×10 grid, CLEAN alpha)
+// Visual catalog from image inspection of CLEAN sheet:
+//   Col 0-1: Seeds, nuts, sprouts, leaves (tiny decorative items)
+//   Col 2-5: ACTUAL TREES (big sprites — the forest canopy)
+//   Col 6-9: Logs, stumps, driftwood, dead wood
+//   Row 0: Temperate/conifer trees — pinecone, bare tree, conifer, big green, cherry blossom, autumn, tall pine, snow pine, snow fir, small fir
+//   Row 1: Tropical — acorn, small palm, palm, palm, coconut palm, stump, driftwood, fallen log, bamboo, log
+//   Row 2: Deciduous — seed, sprout, big deciduous, cherry blossom, gray dead, gnarled dead, log, green log, twigs, bark
+//   Row 3: Exotic — seed, plant, willow, weeping willow, mangrove, twisted dead, dead bare, log pile, vines, roots
+//   Row 4: Oak/mature — leaf, seedling, big oak, big canopy, brown dead, skeleton tree, fallen log, moss log, branch, twig
+//   Row 5: Crystals/minerals (NOT flora — skip for forests)
+//   Row 6: Cacti + desert plants
+//   Row 7: Bushes and hedges
+//   Row 8: Mushrooms and root vegetables
+//   Row 9: Ground cover (moss, grass patches)
+
+// ── TEMPERATE FOREST TREES — green canopy (forest backbone)
 const FLORA_190_TEMPERATE: &[[f32; 2]] = &[
-    uv_flora(0,0), uv_flora(1,0), uv_flora(2,0), uv_flora(3,0), uv_flora(4,0)
+    uv_flora(7,0), uv_flora(8,0),                   // green round trees row 0
+    uv_flora(5,1), uv_flora(6,1), uv_flora(7,1), uv_flora(8,1), uv_flora(9,1), // green round row 1
+    uv_flora(4,2),                                    // green tree row 2
+    uv_flora(4,6), uv_flora(5,6), uv_flora(6,6), uv_flora(7,6), // green trees row 6
+    uv_flora(7,5), uv_flora(8,5), uv_flora(9,5),    // green trees row 5
 ];
+// ── SNOW/CONIFER TREES
 const FLORA_190_SNOW: &[[f32; 2]] = &[
-    uv_flora(0,1), uv_flora(1,1), uv_flora(2,1), uv_flora(3,1), uv_flora(4,1)
+    uv_flora(0,3), uv_flora(1,3), uv_flora(2,3), // snow pines row 3
+    uv_flora(3,3), uv_flora(4,3),                 // tall conifers row 3
+    uv_flora(9,0),                                  // conifer row 0
+    uv_flora(0,6), uv_flora(1,6),                  // pines row 6
 ];
-const FLORA_190_EXOTIC: &[[f32; 2]] = &[
-    uv_flora(0,2), uv_flora(1,2), uv_flora(2,2), uv_flora(3,2), uv_flora(4,2)
+// ── TROPICAL/PALM TREES
+const FLORA_190_TROPICAL: &[[f32; 2]] = &[
+    uv_flora(0,1), uv_flora(1,1), uv_flora(2,1), // palms row 1
+    uv_flora(3,5), uv_flora(4,5),                 // palms row 5
 ];
+// ── CHERRY BLOSSOM / SEASONAL accent
+const FLORA_190_SEASONAL: &[[f32; 2]] = &[
+    uv_flora(0,0), uv_flora(1,0), uv_flora(2,0), // cherry blossoms row 0
+    uv_flora(0,2), uv_flora(1,2), uv_flora(2,2), // autumn trees row 2
+    uv_flora(5,2), uv_flora(6,2),                 // autumn yellow/gold row 2
+];
+// ── DEAD / BARE TREES
 const FLORA_190_DEAD: &[[f32; 2]] = &[
-    uv_flora(0,3), uv_flora(1,3), uv_flora(2,3), uv_flora(3,3), uv_flora(4,3)
+    uv_flora(0,4), uv_flora(1,4), uv_flora(2,4), // dead trees row 4
 ];
-const FLORA_190_FUNGI: &[[f32; 2]] = &[
-    uv_flora(0,4), uv_flora(1,4), uv_flora(2,4), uv_flora(3,4)
+// ── WILLOW / WETLAND TREES
+const FLORA_190_WETLAND: &[[f32; 2]] = &[
+    uv_flora(4,0), uv_flora(5,0), uv_flora(6,0), // willows row 0
+    uv_flora(5,3), uv_flora(6,3), uv_flora(7,3), // bamboo row 3
 ];
-const FLORA_190_CRYSTAL: &[[f32; 2]] = &[
-    uv_flora(6,4), uv_flora(7,4), uv_flora(8,4)
+// ── BAOBAB / LARGE EXOTIC (savannah, tropical)
+const FLORA_190_BAOBAB: &[[f32; 2]] = &[
+    uv_flora(3,4), uv_flora(6,4),                 // baobab row 4
+    uv_flora(0,5), uv_flora(1,5), uv_flora(2,5), // tropical row 5
 ];
+// ── FRUIT TREES
+const FLORA_190_FRUIT: &[[f32; 2]] = &[
+    uv_flora(3,1), uv_flora(4,1),                 // fruit trees row 1
+    uv_flora(5,5), uv_flora(6,5),                 // fruit trees row 5
+];
+// ── BUSHES (small round green)
 const FLORA_190_BUSH: &[[f32; 2]] = &[
-    uv_flora(0,5), uv_flora(1,5), uv_flora(2,5), uv_flora(3,5)
+    uv_flora(3,2),                                  // topiary row 2
+    uv_flora(4,4), uv_flora(5,4),                  // pines (used as bush-scale) row 4
+    uv_flora(2,6), uv_flora(3,6),                  // christmas pines row 6
 ];
-const FLORA_190_FLOWERS: &[[f32; 2]] = &[
-    uv_flora(0,6), uv_flora(1,6), uv_flora(2,6), uv_flora(3,6)
+
+// Small plant 190 spritesheet — 10×12 grid (small_plant_spritesheet_190.png)
+// All 120 cells populated — green vegetation of varying density and type
+
+// Rows 0-2: Dense leafy bushes (30 variants) — forest undergrowth, wetlands
+const SMALL_190_BUSH_DENSE: &[[f32; 2]] = &[
+    uv_small(0,0), uv_small(1,0), uv_small(2,0), uv_small(3,0), uv_small(4,0),
+    uv_small(5,0), uv_small(6,0), uv_small(7,0), uv_small(8,0), uv_small(9,0),
+    uv_small(0,1), uv_small(1,1), uv_small(2,1), uv_small(3,1), uv_small(4,1),
+    uv_small(5,1), uv_small(6,1), uv_small(7,1), uv_small(8,1), uv_small(9,1),
+    uv_small(0,2), uv_small(1,2), uv_small(2,2), uv_small(3,2), uv_small(4,2),
+    uv_small(5,2), uv_small(6,2), uv_small(7,2), uv_small(8,2), uv_small(9,2),
 ];
-const FLORA_190_SHRUB: &[[f32; 2]] = &[
-    uv_flora(0,7), uv_flora(1,7), uv_flora(2,7), uv_flora(3,7)
+// Rows 3-4: Sparse/thin shrubs (20 variants) — desert, mountain, dry grassland
+const SMALL_190_SHRUB_SPARSE: &[[f32; 2]] = &[
+    uv_small(0,3), uv_small(1,3), uv_small(2,3), uv_small(3,3), uv_small(4,3),
+    uv_small(5,3), uv_small(6,3), uv_small(7,3), uv_small(8,3), uv_small(9,3),
+    uv_small(0,4), uv_small(1,4), uv_small(2,4), uv_small(3,4), uv_small(4,4),
+    uv_small(5,4), uv_small(6,4), uv_small(7,4), uv_small(8,4), uv_small(9,4),
 ];
-const FLORA_190_GRASS: &[[f32; 2]] = &[
-    uv_flora(0,8), uv_flora(1,8), uv_flora(2,8), uv_flora(3,8)
+// Rows 5-7: Medium bushes (30 variants) — general purpose, all biomes
+const SMALL_190_BUSH_MEDIUM: &[[f32; 2]] = &[
+    uv_small(0,5), uv_small(1,5), uv_small(2,5), uv_small(3,5), uv_small(4,5),
+    uv_small(5,5), uv_small(6,5), uv_small(7,5), uv_small(8,5), uv_small(9,5),
+    uv_small(0,6), uv_small(1,6), uv_small(2,6), uv_small(3,6), uv_small(4,6),
+    uv_small(5,6), uv_small(6,6), uv_small(7,6), uv_small(8,6), uv_small(9,6),
+    uv_small(0,7), uv_small(1,7), uv_small(2,7), uv_small(3,7), uv_small(4,7),
+    uv_small(5,7), uv_small(6,7), uv_small(7,7), uv_small(8,7), uv_small(9,7),
 ];
-const FLORA_190_GROUND: &[[f32; 2]] = &[
-    uv_flora(0,9), uv_flora(1,9), uv_flora(2,9), uv_flora(3,9)
+// Rows 8-9: Mixed olive/brown shrubs (20 variants) — savannah, autumn, dry
+const SMALL_190_SHRUB_DRY: &[[f32; 2]] = &[
+    uv_small(0,8), uv_small(1,8), uv_small(2,8), uv_small(3,8), uv_small(4,8),
+    uv_small(5,8), uv_small(6,8), uv_small(7,8), uv_small(8,8), uv_small(9,8),
+    uv_small(0,9), uv_small(1,9), uv_small(2,9), uv_small(3,9), uv_small(4,9),
+    uv_small(5,9), uv_small(6,9), uv_small(7,9), uv_small(8,9), uv_small(9,9),
+];
+// Rows 10-11: Ground cover and grass (20 variants) — grassland fill
+const SMALL_190_GROUND: &[[f32; 2]] = &[
+    uv_small(0,10), uv_small(1,10), uv_small(2,10), uv_small(3,10), uv_small(4,10),
+    uv_small(5,10), uv_small(6,10), uv_small(7,10), uv_small(8,10), uv_small(9,10),
+    uv_small(0,11), uv_small(1,11), uv_small(2,11), uv_small(3,11), uv_small(4,11),
+    uv_small(5,11), uv_small(6,11), uv_small(7,11), uv_small(8,11), uv_small(9,11),
 ];
 
 // Crops 190 spritesheet — 10×10 grid (crops_spritesheet_190.png)
@@ -372,9 +443,11 @@ const HUT_VARIANTS: &[[f32; 2]] = &[
 const UV_MW_DECOR_30: [f32; 2] = UV_STONE;
 
 /// Max decorative terrain objects per chunk
-const MAX_DECORATIONS_PER_CHUNK: usize = 800;
+const MAX_DECORATIONS_PER_CHUNK: usize = 3000;
 /// Max global flora instances (visible range: ~100 chunks × 800 = 80K, rounded up)
-const MAX_GLOBAL_FLORA: usize = 100_000;
+const MAX_GLOBAL_FLORA: usize = 300_000;
+/// Max global small plant instances (bushes/shrubs — denser than trees)
+const MAX_GLOBAL_SMALL_PLANTS: usize = 200_000;
 /// Max global building instances
 const MAX_GLOBAL_BUILDINGS: usize = 25_000;
 
@@ -426,6 +499,9 @@ pub struct ChunkedObjectRenderer {
     /// Global flora instances (trees/bushes) — bound with flora_spritesheet
     pub flora_instance_buffer: wgpu::Buffer,
     pub flora_instance_count: u32,
+    /// Global small plant instances (bushes/shrubs) — bound with small_plant_spritesheet
+    pub small_plant_instance_buffer: wgpu::Buffer,
+    pub small_plant_instance_count: u32,
     /// Global building instances (structures) — bound with building_spritesheet
     pub building_instance_buffer: wgpu::Buffer,
     pub building_instance_count: u32,
@@ -500,6 +576,13 @@ impl ChunkedObjectRenderer {
             mapped_at_creation: false,
         });
 
+        let small_plant_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label:              Some("SmallPlantInstances"),
+            size:               (MAX_GLOBAL_SMALL_PLANTS * std::mem::size_of::<ObjectInstance>()) as u64,
+            usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let building_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label:              Some("BuildingInstances"),
             size:               (MAX_GLOBAL_BUILDINGS * std::mem::size_of::<ObjectInstance>()) as u64,
@@ -519,6 +602,8 @@ impl ChunkedObjectRenderer {
             carry_instance_count: 0,
             flora_instance_buffer,
             flora_instance_count: 0,
+            small_plant_instance_buffer,
+            small_plant_instance_count: 0,
             building_instance_buffer,
             building_instance_count: 0,
             last_cam_x: f32::NAN,
@@ -617,6 +702,7 @@ impl ChunkedObjectRenderer {
         // Always rebuild global flora + building buffers from all visible chunks.
         // Flora/buildings are sparse and rarely change — full rebuild is acceptable.
         let mut flora_instances: Vec<ObjectInstance> = Vec::new();
+        let mut small_plant_instances: Vec<ObjectInstance> = Vec::new();
         let mut building_instances: Vec<ObjectInstance> = Vec::new();
         for cy in cy_min..cy_max {
             for cx in cx_min..cx_max {
@@ -624,7 +710,7 @@ impl ChunkedObjectRenderer {
                     collect_chunk_decor(
                         cx, cy, terrain, resources, signals, climate,
                         self.pixels_per_unit, self.frame_tick,
-                        &mut flora_instances, &mut building_instances,
+                        &mut flora_instances, &mut small_plant_instances, &mut building_instances,
                     );
                 }
             }
@@ -633,6 +719,11 @@ impl ChunkedObjectRenderer {
         if !flora_instances.is_empty() {
             flora_instances.truncate(MAX_GLOBAL_FLORA);
             queue.write_buffer(&self.flora_instance_buffer, 0, bytemuck::cast_slice(&flora_instances));
+        }
+        self.small_plant_instance_count = small_plant_instances.len().min(MAX_GLOBAL_SMALL_PLANTS) as u32;
+        if !small_plant_instances.is_empty() {
+            small_plant_instances.truncate(MAX_GLOBAL_SMALL_PLANTS);
+            queue.write_buffer(&self.small_plant_instance_buffer, 0, bytemuck::cast_slice(&small_plant_instances));
         }
         self.building_instance_count = building_instances.len().min(MAX_GLOBAL_BUILDINGS) as u32;
         if !building_instances.is_empty() {
@@ -773,6 +864,13 @@ impl ChunkedObjectRenderer {
         render_pass.draw_indexed(0..6, 0, 0..self.flora_instance_count);
     }
 
+    /// Draw global small plant instances — caller must bind small_plant_spritesheet before calling.
+    pub fn draw_small_plants<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
+        if self.small_plant_instance_count == 0 { return; }
+        render_pass.set_vertex_buffer(1, self.small_plant_instance_buffer.slice(..));
+        render_pass.draw_indexed(0..6, 0, 0..self.small_plant_instance_count);
+    }
+
     /// Draw global building instances — caller must bind building_spritesheet before calling.
     pub fn draw_buildings<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
         if self.building_instance_count == 0 { return; }
@@ -793,6 +891,7 @@ fn collect_chunk_decor(
     pixels_per_unit: f32,
     frame_tick: u32,
     flora_out: &mut Vec<ObjectInstance>,
+    small_plant_out: &mut Vec<ObjectInstance>,
     building_out: &mut Vec<ObjectInstance>,
 ) {
     let w = terrain.width as usize;
@@ -929,15 +1028,27 @@ fn collect_chunk_decor(
             let biomass = terrain.biomass[idx];
             let moisture = terrain.moisture_dynamic[idx];
 
-            if biomass < 0.4 { continue; }
+            if biomass < 0.55 { continue; } // raised from 0.4 — skip sparse cells
 
             let biome = terrain.biome[idx];
             if biome == Biome::Water { continue; }
 
             let hash = cell_hash(x, y);
 
-            let density_threshold = if biomass > 0.8 { 200 } else if biomass > 0.6 { 100 } else { 50 };
-            if (hash % 1000) >= density_threshold { continue; }
+            // Density reduced ~70% from previous values. Flora follows biomass/biome strictly.
+            // High biomass forests get dense canopy; low biomass gets sparse or nothing.
+            let density_threshold = if biomass > 0.85 { 180 } else if biomass > 0.7 { 100 } else { 40 };
+            let biome_density_mult = match biome {
+                Biome::Forest => 1.5,         // forests are dense but not wall-to-wall
+                Biome::Wetland => 1.2,        // moderate
+                Biome::Grassland => 0.6,      // sparse trees, mostly ground
+                Biome::Desert => 0.15,        // very sparse — cacti only
+                Biome::Mountain => 0.2,       // thin alpine
+                Biome::Snow => 0.25,          // sparse conifers
+                _ => 0.5,
+            };
+            let adjusted_threshold = (density_threshold as f32 * biome_density_mult) as usize;
+            if (hash % 1000) >= adjusted_threshold { continue; }
 
             if decor_count >= MAX_DECORATIONS_PER_CHUNK { break 'outer; }
 
@@ -945,86 +1056,103 @@ fn collect_chunk_decor(
             let jitter_y = ((hash >> 10) % 13) as f32 * 0.05 - 0.30;
 
             let temp = terrain.temperature_base[idx];
-            // Flora atlas is 16 cols × 12 rows — use non-square cell sizes (V54 §1.1)
             // 98% sampling bound to prevent subpixel edge bleed from neighbors
             let flora_cell = [CELL_FLORA_W * 0.98, CELL_FLORA_H * 0.98];
+            let small_cell = [CELL_SMALL_W * 0.98, CELL_SMALL_H * 0.98];
 
-            let (atlas_uv, size, atlas_cell, scale_mult_hint) = if temp < 0.2 {
-                // Cold: snow pines and conifers (row 1)
-                let v = FLORA_190_SNOW[hash % FLORA_190_SNOW.len()];
-                (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell, 0.2f32)
-            } else if biome == Biome::Wetland {
-                // Wetland ONLY: mushrooms + crystal mix (row 4)
-                if hash % 3 == 0 {
-                    let v = FLORA_190_FUNGI[hash % FLORA_190_FUNGI.len()];
-                    (v, 3.0 + (hash % 3) as f32 * 0.2, flora_cell, 0.1f32)
+            // Scale reference: ATLAS_VISUAL_SCALAR=0.01, beings mass~64 → size~0.08
+            // Trees must be 5-15x bigger than beings to create canopy. Bushes 2-5x.
+            // scale_mult_hint is multiplied by ATLAS_VISUAL_SCALAR later.
+            // Target: canopy trees ~0.8-1.5 world units, bushes ~0.3-0.5, ground ~0.1-0.2
+
+            let (atlas_uv, size, atlas_cell, scale_mult_hint, is_small_plant) = if temp < 0.2 {
+                // Snow/Cold: snow conifers + sparse bushes
+                if hash % 4 < 3 {
+                    let v = FLORA_190_SNOW[hash % FLORA_190_SNOW.len()];
+                    (v, 3.0 + (hash % 3) as f32 * 0.5, flora_cell, 1.0f32, false)
                 } else {
-                    let v = FLORA_190_CRYSTAL[hash % FLORA_190_CRYSTAL.len()];
-                    (v, 3.5 + (hash % 3) as f32 * 0.3, flora_cell, 0.1f32)
+                    let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
+                    (v, 1.5, flora_cell, 0.4f32, false)
+                }
+            } else if biome == Biome::Wetland {
+                // Wetland: willows/mangroves + dense small bushes
+                if hash % 3 == 0 {
+                    let v = FLORA_190_WETLAND[hash % FLORA_190_WETLAND.len()];
+                    (v, 3.5 + (hash % 2) as f32 * 0.5, flora_cell, 1.2f32, false)
+                } else {
+                    let v = SMALL_190_BUSH_DENSE[hash % SMALL_190_BUSH_DENSE.len()];
+                    (v, 1.8 + (hash % 3) as f32 * 0.3, small_cell, 0.4f32, true)
                 }
             } else if biome == Biome::Desert {
-                // Desert: dead trees (row 3), sparse shrubs and ground
-                if hash % 3 == 0 {
+                // Desert: cacti + dead trees + sparse shrubs
+                if hash % 5 == 0 {
                     let v = FLORA_190_DEAD[hash % FLORA_190_DEAD.len()];
-                    (v, 3.0 + (hash % 3) as f32 * 0.2, flora_cell, 0.2f32)
-                } else if hash % 3 == 1 {
-                    let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()];
-                    (v, 2.0 + (hash % 2) as f32 * 0.2, flora_cell, 0.1f32)
+                    (v, 2.5, flora_cell, 0.7f32, false)
+                } else if hash % 5 < 3 {
+                    let v = FLORA_190_DEAD[hash % FLORA_190_DEAD.len()]; // desert: dead trees instead of cacti
+                    (v, 2.0, flora_cell, 0.5f32, false)
                 } else {
-                    let v = FLORA_190_EXOTIC[hash % FLORA_190_EXOTIC.len()];
-                    (v, 1.5, flora_cell, 0.2f32)
+                    let v = SMALL_190_SHRUB_SPARSE[hash % SMALL_190_SHRUB_SPARSE.len()];
+                    (v, 1.2, small_cell, 0.25f32, true)
                 }
             } else if biome == Biome::Mountain {
-                // Mountain: mostly sparse, some bushes/shrubs
-                if hash % 3 == 0 {
+                // Mountain: sparse conifers + bushes
+                if hash % 4 == 0 {
+                    let v = FLORA_190_SNOW[hash % FLORA_190_SNOW.len()];
+                    (v, 2.5, flora_cell, 0.6f32, false)
+                } else if hash % 4 == 1 {
                     let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
-                    (v, 2.5 + (hash % 2) as f32 * 0.3, flora_cell, 0.1f32)
-                } else if hash % 3 == 1 {
-                    let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()];
-                    (v, 2.0 + (hash % 2) as f32 * 0.2, flora_cell, 0.1f32)
+                    (v, 1.5, flora_cell, 0.3f32, false)
                 } else {
-                    let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()]; // use shrub instead of corrupt ground row
-                    (v, 1.5, flora_cell, 0.05f32)
+                    let v = SMALL_190_SHRUB_SPARSE[hash % SMALL_190_SHRUB_SPARSE.len()];
+                    (v, 1.2, small_cell, 0.2f32, true)
                 }
             } else if biome == Biome::Forest {
-                // Forest: 70% temperate trees, 20% bushes, 10% flowers
-                if hash % 10 < 7 {
+                // Forest: DENSE overlapping canopy trees + small undergrowth
+                // Trees must be BIG and overlap to create a continuous green mass
+                if hash % 20 < 15 {
+                    // 75% canopy trees — BIG, overlapping, the forest itself
                     let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
-                    (v, 2.5 + (hash % 3) as f32 * 0.3, flora_cell, 0.2f32)
-                } else if hash % 10 < 9 {
-                    let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
-                    (v, 2.5 + (hash % 3) as f32 * 0.2, flora_cell, 0.1f32)
+                    (v, 3.0 + (hash % 5) as f32 * 0.4, flora_cell, 1.2 + (hash % 3) as f32 * 0.3, false)
+                } else if hash % 20 < 16 {
+                    // 5% seasonal accent (cherry blossom, autumn) — same big size
+                    let v = FLORA_190_SEASONAL[hash % FLORA_190_SEASONAL.len()];
+                    (v, 3.0, flora_cell, 1.0f32, false)
+                } else if hash % 20 < 17 {
+                    // 5% forest floor (logs, stumps) — small ground items
+                    let v = FLORA_190_DEAD[hash % FLORA_190_DEAD.len()]; // forest floor: dead trees
+                    (v, 1.5, flora_cell, 0.3f32, false)
                 } else {
-                    let v = FLORA_190_FLOWERS[hash % FLORA_190_FLOWERS.len()];
-                    (v, 1.5 + (hash % 2) as f32 * 0.2, flora_cell, 0.03f32)
+                    // 15% undergrowth (small plants) — medium bushes under canopy
+                    let v = SMALL_190_BUSH_DENSE[hash % SMALL_190_BUSH_DENSE.len()];
+                    (v, 1.5 + (hash % 3) as f32 * 0.3, small_cell, 0.35f32, true)
                 }
             } else if biome == Biome::Grassland && temp >= 0.65 {
-                // Savannah: exotic palms and tropical trees (row 2)
-                let v = FLORA_190_EXOTIC[hash % FLORA_190_EXOTIC.len()];
-                (v, 2.5 + (hash % 3) as f32 * 0.4, flora_cell, 0.2f32)
-            } else {
-                // Temperate grassland: mix of trees, bushes, flowers
-                if hash % 8 < 1 { // Only 1/8 trees in grassland to make it cleaner
-                    let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
-                    (v, 4.0, [CELL_FLORA_W, CELL_FLORA_H], 0.2f32)
-                } else if hash % 8 < 3 {
-                    let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
-                    (v, 2.5, flora_cell, 0.1f32)
-                } else if hash % 8 < 6 {
-                    let v = FLORA_190_FLOWERS[hash % FLORA_190_FLOWERS.len()];
-                    (v, 1.5, flora_cell, 0.03f32)
+                // Savannah: scattered big palms + dry shrubs
+                if hash % 5 == 0 {
+                    let v = FLORA_190_TROPICAL[hash % FLORA_190_TROPICAL.len()];
+                    (v, 3.5 + (hash % 3) as f32 * 0.5, flora_cell, 1.0f32, false)
                 } else {
-                    let v = FLORA_190_SHRUB[hash % FLORA_190_SHRUB.len()]; // use shrub instead of corrupt grass row
-                    (v, 1.5, flora_cell, 0.1f32)
+                    let v = SMALL_190_SHRUB_DRY[hash % SMALL_190_SHRUB_DRY.len()];
+                    (v, 1.2 + (hash % 2) as f32 * 0.3, small_cell, 0.25f32, true)
+                }
+            } else {
+                // Temperate grassland: scattered trees + bushes + ground cover
+                if hash % 10 < 1 {
+                    let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
+                    (v, 3.0, flora_cell, 0.8f32, false)
+                } else if hash % 10 < 3 {
+                    let v = SMALL_190_BUSH_MEDIUM[hash % SMALL_190_BUSH_MEDIUM.len()];
+                    (v, 1.5, small_cell, 0.3f32, true)
+                } else {
+                    let v = SMALL_190_GROUND[hash % SMALL_190_GROUND.len()];
+                    (v, 1.0 + (hash % 3) as f32 * 0.2, small_cell, 0.15f32, true)
                 }
             };
 
-            // V57: Use the type-specific scale hint from the biome match (4th tuple element).
-            // Trees=2.0, bushes=1.0, flowers=0.3, mushrooms=1.0, etc.
-            // Modulate slightly by biomass for organic variation, but keep type hierarchy.
             let scale_mult = scale_mult_hint * (0.7 + biomass * 0.3);
 
-            if pixels_per_unit < 5.0 && size < 2.0 { continue; }
+            if pixels_per_unit < 1.0 && size < 0.5 { continue; }
 
             let wx = x as f32 + 0.5;
             let wy = y as f32 + 0.5;
@@ -1044,7 +1172,7 @@ fn collect_chunk_decor(
                 tint[2] = tint[2] * (1.0 - c * 0.3) + 0.5 * c * 0.3;
             }
 
-            flora_out.push(ObjectInstance {
+            let instance = ObjectInstance {
                 position:         [wx + jitter_x, wy + jitter_y],
                 atlas_uv,
                 atlas_size:       atlas_cell,
@@ -1054,7 +1182,12 @@ fn collect_chunk_decor(
                 velocity:         [0.0, 0.0],
                 scale_multiplier: scale_mult,
                 _pad_v54:         0.0,
-            });
+            };
+            if is_small_plant {
+                small_plant_out.push(instance);
+            } else {
+                flora_out.push(instance);
+            }
             decor_count += 1;
         }
     }

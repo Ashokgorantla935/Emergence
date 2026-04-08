@@ -677,7 +677,8 @@ fn decode_baked_elevation(data: &[u8], w: u32, h: u32, seed: u32) -> (Vec<f32>, 
     let mut elevation = elevation;
     elevation.resize(len, 0.3);
 
-    let simplex_noise = OpenSimplex::new(seed);
+    let moisture_noise = OpenSimplex::new(seed.wrapping_add(13));
+    let temp_noise = OpenSimplex::new(seed); // original seed for temperature
     let mut moisture = vec![0.0f32; len];
     let mut temperature_base = vec![0.0f32; len];
 
@@ -685,10 +686,28 @@ fn decode_baked_elevation(data: &[u8], w: u32, h: u32, seed: u32) -> (Vec<f32>, 
         for dx in 0..w {
             let i = (dy * w + dx) as usize;
             let e = elevation[i];
+            let ny = dy as f32 / h as f32; // normalized 0..1
             let nx = dx as f64 * 0.015;
-            let ny = dy as f64 * 0.015;
-            let n = simplex_noise.get([nx, ny]) as f32 * 0.2;
-            moisture[i] = (0.5 + (1.0 - e) * 0.3 + n).clamp(0.0, 1.0);
+            
+            // Replicate proper earth_gen moisture physics for baked maps
+            let coast_proximity = if e < 0.32 {
+                1.0f32
+            } else {
+                (1.0 - (e - 0.32) * 2.5).clamp(0.0, 1.0)
+            };
+            let m_noise = moisture_noise.get([dx as f64 * 0.01, dy as f64 * 0.01]) as f32 * 0.25;
+            
+            // Distance from equator (0.5), mapped to bonus
+            let dist_from_equator = (ny - 0.5).abs() * 2.0;
+            let equatorial_bonus = if dist_from_equator < 0.35 {
+                (1.0 - dist_from_equator / 0.35).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            
+            moisture[i] = (coast_proximity * 0.5 + equatorial_bonus * 0.3 + m_noise + 0.15).clamp(0.0, 1.0);
+            
+            let n = temp_noise.get([nx, dy as f64 * 0.015]) as f32 * 0.2;
             temperature_base[i] = (0.8 - e * 0.6 + n).clamp(0.0, 1.0);
         }
     }
@@ -745,10 +764,26 @@ fn upsample_baked_elevation(
             elevation[(dy * dst_w + dx) as usize] = (e + mn1 + mn2).clamp(0.0, 1.0);
 
             let nx = dx as f64 * 0.015;
-            let ny = dy as f64 * 0.015;
-            let n = simplex_noise.get([nx, ny]) as f32 * 0.2;
+            
+            // Earth-like moisture physics for upsampled maps
+            let coast_proximity = if e < 0.32 {
+                1.0f32
+            } else {
+                (1.0 - (e - 0.32) * 2.5).clamp(0.0, 1.0)
+            };
+            let m_noise = simplex_noise.get([dx as f64 * 0.01 + 10.0, dy as f64 * 0.01 + 10.0]) as f32 * 0.25;
+            
+            let ny_norm = dy as f32 / dst_h as f32;
+            let dist_from_equator = (ny_norm - 0.5).abs() * 2.0;
+            let equatorial_bonus = if dist_from_equator < 0.35 {
+                (1.0 - dist_from_equator / 0.35).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            
+            moisture[(dy * dst_w + dx) as usize] = (coast_proximity * 0.5 + equatorial_bonus * 0.3 + m_noise + 0.15).clamp(0.0, 1.0);
 
-            moisture[(dy * dst_w + dx) as usize] = (0.5 + (1.0 - e) * 0.3 + n).clamp(0.0, 1.0);
+            let n = simplex_noise.get([nx, dy as f64 * 0.015]) as f32 * 0.2;
             temperature_base[(dy * dst_w + dx) as usize] = (0.8 - e * 0.6 + n).clamp(0.0, 1.0);
         }
     }

@@ -158,7 +158,7 @@ impl BeingRenderer {
             );
             // V55 §4: Mass-to-Scale — visual radius = sqrt(mass)
             let mass = if i < beings.hot.mass.len() { beings.hot.mass[i] } else { 64.0 };
-            const ATLAS_VISUAL_SCALAR: f32 = 0.01; // V59: drastically reduced to 0.01 for continent scale
+            const ATLAS_VISUAL_SCALAR: f32 = 0.04; // V60: balanced — humans visible relative to trees (0.32 vs tree 1.2)
             let mut size = ATLAS_VISUAL_SCALAR * mass.sqrt();
 
             let mut skin_tone = personality_skin_tone(&beings.hot.personalities[i]);

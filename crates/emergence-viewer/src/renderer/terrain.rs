@@ -11,16 +11,18 @@ const ATLAS_CELL: f32 = 1.0 / 16.0;
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct TerrainInstance {
-    pub world_pos:          [f32; 2], // world x, y of this cell
-    pub tile_uv:            [f32; 2], // UV origin in the atlas for this tile
-    pub flags:              f32,      // biome id: 0=grass, 1=water, 2=forest, ...
-    pub elevation:          f32,      // terrain elevation [0.0, 1.0] — used for water depth coloring
-    pub structure_type:     f32,      // StructureType as f32: 0=None, 1=Campfire, etc.
-    pub build_progress:     f32,      // Ticks accumulated for construction, 0 = none.
-    pub density:            f32,      // V54 §4.1: flora/entity density [0.0, 1.0] for canopy shadow
-    pub _pad_density:       f32,      // padding to align struct to 40 bytes
+    pub world_pos:             [f32; 2], // world x, y of this cell
+    pub tile_uv:               [f32; 2], // UV origin in the atlas for this tile
+    pub flags:                 f32,      // biome id: 0=grass, 1=water, 2=forest, ...
+    pub elevation:             f32,      // terrain elevation [0.0, 1.0] — used for water depth coloring
+    pub structure_type:        f32,      // StructureType as f32: 0=None, 1=Campfire, etc.
+    pub build_progress:        f32,      // Ticks accumulated for construction, 0 = none.
+    pub density:               f32,      // V54 §4.1: flora/entity density [0.0, 1.0] for canopy shadow
+    pub _pad_density:          f32,      // padding
+    pub north_elevation:       f32,      // elevation of cell at (x, y-1) — for topo shadow
+    pub northeast_elevation:   f32,      // elevation of cell at (x+1, y-1) — for topo shadow
 }
-// 40 bytes per instance.
+// 48 bytes per instance.
 
 /// Unit quad vertex.
 #[repr(C)]
@@ -279,6 +281,12 @@ impl TerrainRenderer {
                             };
                             let structure_type = terrain.structure[idx] as f32;
 
+                            // Neighbor elevations for topographic shadow (NW→SE sun angle).
+                            let north_idx = if y > 0 { (y - 1) * w + x } else { idx };
+                            let north_elevation = terrain.elevation[north_idx];
+                            let ne_idx = if y > 0 && x + 1 < w { (y - 1) * w + (x + 1) } else { idx };
+                            let northeast_elevation = terrain.elevation[ne_idx];
+
                             // V54 §4.1: biome-based flora density for macro canopy shadow.
                             let density = match biome {
                                 Biome::Forest    => 0.85,
@@ -299,6 +307,8 @@ impl TerrainRenderer {
                                 build_progress: terrain.build_progress[idx] as f32,
                                 density,
                                 _pad_density: 0.0,
+                                north_elevation,
+                                northeast_elevation,
                             });
                         }
                     }

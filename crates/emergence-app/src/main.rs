@@ -2899,6 +2899,9 @@ impl ApplicationHandler for App {
                         // Pass 2: Flora (190-series spritesheet)
                         render_pass.set_bind_group(1, &rs.flora_190_bind_group, &[]);
                         obj_r.draw_flora(&mut render_pass);
+                        // Pass 2b: Small plants (190-series small_plant spritesheet)
+                        render_pass.set_bind_group(1, &rs.small_plant_190_bind_group, &[]);
+                        obj_r.draw_small_plants(&mut render_pass);
                         // Pass 3: Buildings (190-series architecture spritesheet)
                         render_pass.set_bind_group(1, &rs.architecture_190_bind_group, &[]);
                         obj_r.draw_buildings(&mut render_pass);

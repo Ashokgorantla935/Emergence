@@ -93,7 +93,8 @@ pub struct RenderState {
     pub terrain_bind_group: wgpu::BindGroup,
     // ── V54 §1.1: 190-series spritesheet bind groups with hardcoded grid dimensions ──
     // Grid constants defined here as documentation; UV math uses float constants in renderer files.
-    pub flora_190_bind_group: wgpu::BindGroup,             // 10×12 grid (CELL_FLORA_W=1/10, CELL_FLORA_H=1/12)
+    pub flora_190_bind_group: wgpu::BindGroup,             // 10×10 grid (CELL_FLORA_W=1/10, CELL_FLORA_H=1/10)
+    pub small_plant_190_bind_group: wgpu::BindGroup,
     pub architecture_190_bind_group: wgpu::BindGroup,      // 8×8 grid   (CELL_190=1/8)
     pub minerals_190_bind_group: wgpu::BindGroup,          // 8×8 grid   (CELL_MINERALS=1/8)
     pub fauna_190_bind_group: wgpu::BindGroup,             // 10×10 grid (CELL_FAUNA=1/10)
@@ -332,9 +333,15 @@ impl RenderState {
         // ── V59: 190-series spritesheets (pure alpha, no chroma-key) ──
         let flora_190_bind_group = Self::load_png_bind_group(
             &device, &queue,
-            include_bytes!("../../../../assets/sprites/190_assets/flora_spritesheet_190.png"),
+            include_bytes!("../../../../assets/sprites/190_assets/generated_flora_transparent.png"),
             &atlas.bind_group_layout,
-            "Flora 190 Spritesheet",  // 10×12 grid
+            "Flora 190 Spritesheet",  // 10×10 grid — clean alpha, no magenta
+        );
+        let small_plant_190_bind_group = Self::load_png_bind_group(
+            &device, &queue,
+            include_bytes!("../../../../assets/sprites/190_assets/small_plant_spritesheet_190.png"),
+            &atlas.bind_group_layout,
+            "Small Plant 190 Spritesheet",
         );
         let architecture_190_bind_group = Self::load_png_bind_group(
             &device, &queue,
@@ -595,32 +602,36 @@ impl RenderState {
         });
 
         // ── Terrain pipeline (instanced quad tilemap) ──────────────────────
-        // TerrainInstance: 40 bytes (V54 §4.1 — added density + padding)
-        //   0  world_pos      vec2  8B
-        //   8  tile_uv        vec2  8B
-        //  16  flags          f32   4B
-        //  20  elevation      f32   4B
-        //  24  structure_type f32   4B
-        //  28  build_progress f32   4B
-        //  32  density        f32   4B  ← V54 §4.1: flora density for canopy shadow
-        //  36  _pad_density   f32   4B
+        // TerrainInstance: 48 bytes (topo shadow — added north/northeast elevation)
+        //   0  world_pos           vec2  8B
+        //   8  tile_uv             vec2  8B
+        //  16  flags               f32   4B
+        //  20  elevation           f32   4B
+        //  24  structure_type      f32   4B
+        //  28  build_progress      f32   4B
+        //  32  density             f32   4B  ← V54 §4.1: flora density for canopy shadow
+        //  36  _pad_density        f32   4B
+        //  40  north_elevation     f32   4B  ← topo shadow: elevation of (x, y-1)
+        //  44  northeast_elevation f32   4B  ← topo shadow: elevation of (x+1, y-1)
         let terrain_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label:  Some("Terrain Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/terrain.wgsl").into()),
         });
 
         let terrain_instance_layout = wgpu::VertexBufferLayout {
-            array_stride: 40,
+            array_stride: 48,
             step_mode:    wgpu::VertexStepMode::Instance,
             attributes: &[
-                wgpu::VertexAttribute { offset:  0, shader_location: 2, format: wgpu::VertexFormat::Float32x2 }, // world_pos
-                wgpu::VertexAttribute { offset:  8, shader_location: 3, format: wgpu::VertexFormat::Float32x2 }, // tile_uv
-                wgpu::VertexAttribute { offset: 16, shader_location: 4, format: wgpu::VertexFormat::Float32   }, // flags
-                wgpu::VertexAttribute { offset: 20, shader_location: 5, format: wgpu::VertexFormat::Float32   }, // elevation
-                wgpu::VertexAttribute { offset: 24, shader_location: 6, format: wgpu::VertexFormat::Float32   }, // structure_type
-                wgpu::VertexAttribute { offset: 28, shader_location: 7, format: wgpu::VertexFormat::Float32   }, // build_progress
-                wgpu::VertexAttribute { offset: 32, shader_location: 8, format: wgpu::VertexFormat::Float32   }, // density (V54)
-                wgpu::VertexAttribute { offset: 36, shader_location: 9, format: wgpu::VertexFormat::Float32   }, // _pad_density
+                wgpu::VertexAttribute { offset:  0, shader_location:  2, format: wgpu::VertexFormat::Float32x2 }, // world_pos
+                wgpu::VertexAttribute { offset:  8, shader_location:  3, format: wgpu::VertexFormat::Float32x2 }, // tile_uv
+                wgpu::VertexAttribute { offset: 16, shader_location:  4, format: wgpu::VertexFormat::Float32   }, // flags
+                wgpu::VertexAttribute { offset: 20, shader_location:  5, format: wgpu::VertexFormat::Float32   }, // elevation
+                wgpu::VertexAttribute { offset: 24, shader_location:  6, format: wgpu::VertexFormat::Float32   }, // structure_type
+                wgpu::VertexAttribute { offset: 28, shader_location:  7, format: wgpu::VertexFormat::Float32   }, // build_progress
+                wgpu::VertexAttribute { offset: 32, shader_location:  8, format: wgpu::VertexFormat::Float32   }, // density (V54)
+                wgpu::VertexAttribute { offset: 36, shader_location:  9, format: wgpu::VertexFormat::Float32   }, // _pad_density
+                wgpu::VertexAttribute { offset: 40, shader_location: 10, format: wgpu::VertexFormat::Float32   }, // north_elevation
+                wgpu::VertexAttribute { offset: 44, shader_location: 11, format: wgpu::VertexFormat::Float32   }, // northeast_elevation
             ],
         };
 
@@ -1236,6 +1247,7 @@ impl RenderState {
             entity_bind_group,
             terrain_bind_group,
             flora_190_bind_group,
+            small_plant_190_bind_group,
             architecture_190_bind_group,
             minerals_190_bind_group,
             fauna_190_bind_group,

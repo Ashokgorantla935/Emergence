@@ -33,14 +33,16 @@ struct VertexInput {
 };
 
 struct InstanceInput {
-    @location(2) world_pos:      vec2<f32>, // world x, y of this cell
-    @location(3) tile_uv:        vec2<f32>, // UV origin in the atlas for this tile
-    @location(4) flags:          f32,       // biome id: 0=grass, 1=water, 2=forest, 3=desert, 4=mountain, 5=wetland
-    @location(5) elevation:      f32,       // terrain elevation [0.0, 1.0]
-    @location(6) structure_type: f32,       // 0=None, 1=Campfire, 2=LeanTo, 3=Hut, 4=Wall, 5=ResourceCache
-    @location(7) build_progress: f32,       // Construction ticks
-    @location(8) density:        f32,       // V54 §4.1: flora/entity density [0.0, 1.0] for canopy shadow
-    @location(9) _pad_density:   f32,       // padding
+    @location(2)  world_pos:           vec2<f32>, // world x, y of this cell
+    @location(3)  tile_uv:             vec2<f32>, // UV origin in the atlas for this tile
+    @location(4)  flags:               f32,       // biome id: 0=grass, 1=water, 2=forest, 3=desert, 4=mountain, 5=wetland
+    @location(5)  elevation:           f32,       // terrain elevation [0.0, 1.0]
+    @location(6)  structure_type:      f32,       // 0=None, 1=Campfire, 2=LeanTo, 3=Hut, 4=Wall, 5=ResourceCache
+    @location(7)  build_progress:      f32,       // Construction ticks
+    @location(8)  density:             f32,       // V54 §4.1: flora/entity density [0.0, 1.0] for canopy shadow
+    @location(9)  _pad_density:        f32,       // padding
+    @location(10) north_elevation:     f32,       // elevation of cell at (x, y-1) — topo shadow
+    @location(11) northeast_elevation: f32,       // elevation of cell at (x+1, y-1) — topo shadow
 };
 
 struct VertexOutput {
@@ -53,7 +55,9 @@ struct VertexOutput {
     @location(5) @interpolate(flat) build_progress: f32,
     @location(6) tile_uv:        vec2<f32>,
     @location(7) uv:             vec2<f32>, // tile-local [0,1] UV — interpolates cleanly inside quad
-    @location(8) @interpolate(flat) density: f32, // V54 §4.1: flora density for canopy shadow
+    @location(8) @interpolate(flat) density:        f32, // V54 §4.1: flora density for canopy shadow
+    @location(9) @interpolate(flat) north_elev:     f32, // topo shadow: north neighbor elevation
+    @location(10) @interpolate(flat) ne_elev:       f32, // topo shadow: northeast neighbor elevation
 };
 
 @vertex
@@ -84,6 +88,8 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     out.elevation = inst.elevation;
     out.build_progress = inst.build_progress;
     out.density = inst.density;
+    out.north_elev = inst.north_elevation;
+    out.ne_elev = inst.northeast_elevation;
     return out;
 }
 
@@ -140,14 +146,18 @@ fn cell_brightness(world_pos: vec2<f32>) -> f32 {
 
 // Water depth color based on elevation (water threshold ~0.25-0.30 in terrain gen).
 // Maps elevation to a depth gradient: deep navy → medium blue → cyan → shore foam.
-fn water_depth_color(elevation: f32) -> vec4<f32> {
+// Applies deep trench tidal shimmer (elev < 0.08) and coastal brightening near land.
+fn water_depth_color(elevation: f32, north_elev: f32, ne_elev: f32, world_pos: vec2<f32>, time: f32) -> vec4<f32> {
+    var base: vec4<f32>;
     if (elevation < 0.08) {
-        // Deep water — dark navy #0a1628
-        return vec4<f32>(0.039, 0.086, 0.157, 1.0);
+        // Deep trench — dark indigo with tidal shimmer
+        let tidal = sin(time * 0.3 + world_pos.x * 0.1) * cos(time * 0.2 + world_pos.y * 0.15) * 0.03;
+        let deep = vec3<f32>(0.05, 0.02, 0.18) + vec3<f32>(tidal, tidal, tidal);
+        base = vec4<f32>(clamp(deep, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
     } else if (elevation < 0.18) {
         // Medium depth — navy to medium blue #1a3a6a
         let t = (elevation - 0.08) / 0.10;
-        return mix(
+        base = mix(
             vec4<f32>(0.039, 0.086, 0.157, 1.0),
             vec4<f32>(0.102, 0.227, 0.416, 1.0),
             t,
@@ -155,7 +165,7 @@ fn water_depth_color(elevation: f32) -> vec4<f32> {
     } else if (elevation < 0.25) {
         // Shallow — medium blue to bright cyan #00bcd4
         let t = (elevation - 0.18) / 0.07;
-        return mix(
+        base = mix(
             vec4<f32>(0.102, 0.227, 0.416, 1.0),
             vec4<f32>(0.0,   0.737, 0.831, 1.0),
             t,
@@ -163,12 +173,20 @@ fn water_depth_color(elevation: f32) -> vec4<f32> {
     } else {
         // Shore fringe — cyan to white foam
         let t = clamp((elevation - 0.25) / 0.05, 0.0, 1.0);
-        return mix(
+        base = mix(
             vec4<f32>(0.0,   0.737, 0.831, 1.0),
             vec4<f32>(0.90,  0.95,  1.0,   1.0),
             t,
         );
     }
+
+    // Coastal brightening: blend toward translucent cyan when adjacent to land
+    let near_shore = max(north_elev, ne_elev) > 0.30;
+    if (near_shore) {
+        base = mix(base, vec4<f32>(0.0, 0.75, 0.85, 1.0), 0.35);
+    }
+
+    return base;
 }
 
 // Apply day/night illumination. Night dims to 20% brightness.
@@ -213,6 +231,57 @@ fn apply_structure(base: vec4<f32>, structure_type: u32, build_progress: f32, wo
     return base;
 }
 
+// Phase 3 §11: Volumetric cloud shadows — continent-scale atmospheric depth
+fn cloud_shadow(pos: vec2<f32>, time: f32) -> f32 {
+    let uv = pos * 0.003;  // very large scale for continent-sized clouds
+    let scroll = vec2<f32>(time * 0.01, time * 0.005);  // slow drift
+    let n1 = sin((uv.x + scroll.x) * 2.0) * cos((uv.y + scroll.y) * 3.0);
+    let n2 = sin((uv.x + scroll.x) * 5.0 + 1.7) * cos((uv.y + scroll.y) * 4.0 + 2.3);
+    return smoothstep(-0.3, 0.5, (n1 + n2) * 0.5);  // 0=shadow, 1=clear
+}
+
+// Micro-fractal terrain detail — infinite procedural resolution at LOD2.
+// Uses high-frequency organic_noise to generate biome-specific surface texture.
+fn micro_fractal(pos: vec2<f32>, biome: u32) -> vec3<f32> {
+    let n1 = organic_noise(pos * 18.0);
+    let n2 = organic_noise(pos * 45.0);
+    let micro = n1 * 0.6 + n2 * 0.4;
+
+    // Grass (biome 0): vertical blade-like streaks
+    if (biome == 0u) {
+        let blade = sin(pos.x * 20.0 + n1 * 3.0) * 0.5 + 0.5;
+        let detail = micro * 0.08 * blade;
+        return vec3<f32>(detail * -0.02, detail * 0.05, detail * -0.01);
+    }
+    // Forest floor (biome 2): dappled light through canopy
+    if (biome == 2u) {
+        let dapple = micro * 0.06;
+        return vec3<f32>(-dapple * 0.5, dapple * 0.3, -dapple * 0.3);
+    }
+    // Desert (biome 3): sand grain speckling
+    if (biome == 3u) {
+        let speckle = step(0.6, micro) * 0.06;
+        return vec3<f32>(speckle * 0.04, speckle * 0.02, speckle * -0.01);
+    }
+    // Mountain/stone (biome 4): angular fracture lines
+    if (biome == 4u) {
+        let fracture = step(0.7, organic_noise(pos * 80.0)) * 0.10;
+        return vec3<f32>(-fracture, -fracture, -fracture);
+    }
+    // Wetland (biome 5): muddy ripple texture
+    if (biome == 5u) {
+        let ripple = sin(pos.x * 15.0 + pos.y * 8.0 + n1 * 4.0) * 0.03;
+        return vec3<f32>(ripple * -0.02, ripple * 0.01, ripple * -0.01);
+    }
+    // Snow/Tundra (biome 6 or 7): crystalline sparkle
+    if (biome == 6u || biome == 7u) {
+        let sparkle = step(0.85, micro) * 0.15;
+        return vec3<f32>(sparkle, sparkle, sparkle);
+    }
+    // Water or unknown — no micro detail
+    return vec3<f32>(0.0, 0.0, 0.0);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let t = water_time.time;
@@ -239,16 +308,24 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // zoom_blend: 0.0=LOD0, 1.0=LOD1, 2.0=LOD2; fractional = smooth blend between adjacent LODs
     let zoom = clamp(camera.zoom_blend, 0.0, 2.0);
 
+    // Topographic shadow: NW→SE sun angle. Cells lower than their N/NE neighbors are darkened.
+    // Not applied to water tiles — checked per LOD branch below.
+    let height_diff_n  = in.north_elev - in.elevation;
+    let height_diff_ne = in.ne_elev    - in.elevation;
+    let shadow_strength = smoothstep(0.0, 0.12, max(height_diff_n, height_diff_ne));
+    let topo_shadow = mix(1.0, 0.55, shadow_strength);
+
     // ── LOD 0: Macro zoom — flat solid biome color ────────────────────────
     var color_lod0 = base_color;
     if (is_water) {
-        color_lod0 = water_depth_color(in.elevation);
+        color_lod0 = water_depth_color(in.elevation, in.north_elev, in.ne_elev, in.world_pos, t);
     } else {
         // V54 §4.1: Macro-density canopy shadow for LOD-culled flora.
         // At macro zoom (LOD0), individual tree sprites are sub-pixel and culled.
         // Darken terrain proportional to flora/entity density to simulate canopy cover.
         let canopy_shadow = in.density * smoothstep(1.0, 0.0, zoom) * 0.40;
         color_lod0 = mix(color_lod0, vec4<f32>(0.05, 0.12, 0.03, 1.0), canopy_shadow);
+        color_lod0 = vec4<f32>(color_lod0.rgb * topo_shadow, color_lod0.a);
     }
 
     // ── LOD 1: Medium zoom — base + per-cell brightness + signal tinting ──
@@ -258,7 +335,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let g = clamp(water_time.signal_grief,   0.0, 1.0);
     var color_lod1: vec4<f32>;
     if (is_water) {
-        let depth_color = water_depth_color(in.elevation);
+        let depth_color = water_depth_color(in.elevation, in.north_elev, in.ne_elev, in.world_pos, t);
         let pulse = sin(t * 2.0 + fract(in.world_pos.x * 0.5) * 6.283185) * 0.03;
         color_lod1 = vec4<f32>(
             clamp(depth_color.r + pulse,        0.0, 1.0),
@@ -274,19 +351,29 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             clamp(lod1_base.b * (1.0 - d * 0.10 + c * (-0.05) + g * 0.10), 0.0, 1.0),
             1.0,
         );
+        color_lod1 = vec4<f32>(color_lod1.rgb * topo_shadow, color_lod1.a);
+        // Subtle micro detail at medium zoom
+        let micro_lod1 = micro_fractal(in.world_pos, biome_id) * 0.4;
+        color_lod1 = vec4<f32>(clamp(color_lod1.rgb + micro_lod1, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
     }
 
     // Blend LOD 0 → LOD 1 when zoom in [0, 1)
     if (zoom < 1.0) {
         let blended = mix(color_lod0, color_lod1, zoom);
         let structured = apply_structure(blended, structure_id, in.build_progress, in.world_pos, t, 0u, in.uv);
-        return apply_illumination(structured, illumination, comfort);
+        var color = apply_illumination(structured, illumination, comfort);
+        // Phase 3 §11: Cloud shadow — macro/medium zoom only (not close-up)
+        if (zoom < 1.5) {
+            let cloud = mix(0.75, 1.0, cloud_shadow(in.world_pos, t));  // 25% max darkening
+            color = vec4<f32>(color.rgb * cloud, color.a);
+        }
+        return color;
     }
 
     // ── LOD 2: Close zoom — LOD 1 + shore foam + forest canopy ───────────
     var color_lod2: vec4<f32>;
     if (is_water) {
-        let depth_color = water_depth_color(in.elevation);
+        let depth_color = water_depth_color(in.elevation, in.north_elev, in.ne_elev, in.world_pos, t);
         let pulse = sin(t * 2.0) * 0.05;
         color_lod2 = vec4<f32>(
             clamp(depth_color.r + pulse,       0.0, 1.0),
@@ -318,6 +405,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let canopy_darkness = 0.15 + (sin(fract(in.world_pos.x * 3.0) * 6.283185 + t + sway) * cos(fract(in.world_pos.y * 3.0) * 6.283185)) * 0.05;
             color_lod2 = mix(color_lod2, vec4<f32>(0.1, 0.3, 0.1, 1.0), canopy_darkness);
         }
+        color_lod2 = vec4<f32>(color_lod2.rgb * topo_shadow, color_lod2.a);
+        // Micro-fractal procedural detail — infinite resolution at any zoom
+        let micro = micro_fractal(in.world_pos, biome_id);
+        color_lod2 = vec4<f32>(clamp(color_lod2.rgb + micro, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
     }
 
     // Blend LOD 1 → LOD 2 when zoom in [1, 2]
@@ -331,5 +422,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     blended = mix(blended, color_lod0, macro_alpha);
 
     let structured = apply_structure(blended, structure_id, in.build_progress, in.world_pos, t, u32(zoom), in.uv);
-    return apply_illumination(structured, illumination, comfort);
+    var color = apply_illumination(structured, illumination, comfort);
+    // Phase 3 §11: Cloud shadow — macro/medium zoom only (not close-up)
+    if (zoom < 1.5) {
+        let cloud = mix(0.75, 1.0, cloud_shadow(in.world_pos, t));  // 25% max darkening
+        color = vec4<f32>(color.rgb * cloud, color.a);
+    }
+    return color;
 }

@@ -209,9 +209,11 @@ pub fn deposit_emotion_signals(beings: &Beings, signals: &mut SignalGrid) {
         let is_human = ct == CreatureType::Human as u8;
 
         if is_human {
-            // Map emotions to signal channels
-            let emotion_signal_map: [(usize, SignalChannel); 5] = [
-                (EMO_FEAR, SignalChannel::Danger),
+            // Map emotions to signal channels.
+            // Fear is intentionally excluded: internal fear (from hunger/cold) must NOT
+            // deposit Danger onto the grid — that creates a self-reinforcing flee loop.
+            // Danger is reserved for predator presence, combat, and god actions.
+            let emotion_signal_map: [(usize, SignalChannel); 4] = [
                 (EMO_JOY, SignalChannel::Celebration),
                 (EMO_ANGER, SignalChannel::Anger),
                 (EMO_GRIEF, SignalChannel::Grief),

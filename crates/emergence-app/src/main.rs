@@ -2812,8 +2812,8 @@ impl ApplicationHandler for App {
                     let pp_world_tick = if let Some(ref world) = self.world {
                         world.read().unwrap().tick
                     } else { 0 };
-                    // 600 ticks per day; hour 0 = midnight
-                    let sim_hour = (pp_world_tick % 600) as f32 / 600.0 * 24.0;
+                    // 3600 ticks per day; hour 0 = midnight
+                    let sim_hour = (pp_world_tick % 3600) as f32 / 3600.0 * 24.0;
                     rs.postprocess.sim_hour = sim_hour;
                     let _pp_shake = rs.postprocess.update(&rs.queue, pp_world_tick);
                 }
@@ -3168,6 +3168,7 @@ fn build_kingdom_frame(
             hull: k.territory_cells.iter()
                 .map(|&(x, y)| [x as f32, y as f32])
                 .collect(),
+            population: k.population,
         }
     }).collect();
 

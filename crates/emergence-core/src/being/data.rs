@@ -614,7 +614,8 @@ impl Beings {
             1.0
         };
 
-        base * effective_light.clamp(0.4, 1.0) * sleep_mult
+        // V63: Night blindness — perception drops to 20% at zero light (was 40%)
+        base * effective_light.clamp(0.2, 1.0) * sleep_mult
     }
 
     // ── Convenience forwarding accessors ─────────────────────────────────────

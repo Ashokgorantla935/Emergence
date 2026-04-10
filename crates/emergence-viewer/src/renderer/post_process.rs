@@ -14,14 +14,14 @@ struct DayKeyframe {
 }
 
 const DAY_KEYFRAMES: &[DayKeyframe] = &[
-    DayKeyframe { hour:  4.0, tint: [0.2, 0.25, 0.4],    brightness: 0.25 }, // pre-dawn
+    DayKeyframe { hour:  4.0, tint: [0.3, 0.35, 0.55],   brightness: 0.60 }, // pre-dawn (moonlight blue)
     DayKeyframe { hour:  5.0, tint: [1.0, 0.7,  0.4],    brightness: 0.7  }, // dawn start
     DayKeyframe { hour:  7.0, tint: [1.0, 0.93, 0.87],   brightness: 1.0  }, // morning
     DayKeyframe { hour: 10.0, tint: [1.0, 1.0,  1.0],    brightness: 1.05 }, // noon
     DayKeyframe { hour: 14.0, tint: [1.0, 0.89, 0.71],   brightness: 1.0  }, // afternoon
     DayKeyframe { hour: 17.0, tint: [1.0, 0.47, 0.2],    brightness: 0.95 }, // sunset
     DayKeyframe { hour: 19.0, tint: [0.4, 0.47, 0.67],   brightness: 0.6  }, // dusk
-    DayKeyframe { hour: 21.0, tint: [0.13, 0.2, 0.33],   brightness: 0.25 }, // night
+    DayKeyframe { hour: 21.0, tint: [0.2, 0.25, 0.45],   brightness: 0.60 }, // night (moonlight blue)
 ];
 
 /// Trauma-based screen shake state.

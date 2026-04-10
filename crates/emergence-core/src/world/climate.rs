@@ -128,14 +128,14 @@ impl Climate {
     pub fn tick(&mut self, rng: &mut fastrand::Rng, world_size: (u32, u32)) {
         self.tick += 1;
 
-        // Day/night cycle: 600 ticks per day
+        // Day/night cycle: 3600 ticks per day (~1 minute at 60tps)
         if self.day_night_enabled {
-            let day_tick = self.tick % 600;
-            self.day_phase = if day_tick < 400 {
+            let day_tick = self.tick % 3600;
+            self.day_phase = if day_tick < 2400 {
                 DayPhase::Day
-            } else if day_tick < 450 {
+            } else if day_tick < 2700 {
                 DayPhase::Dusk
-            } else if day_tick < 550 {
+            } else if day_tick < 3300 {
                 DayPhase::Night
             } else {
                 DayPhase::Dawn

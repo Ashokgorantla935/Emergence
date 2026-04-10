@@ -182,7 +182,27 @@ pub fn score_actions(
     let needs = &beings.hot.needs[being_index];
     let emotions = &beings.hot.emotions[being_index];
     let personality = &beings.hot.personalities[being_index];
-    let light = climate.light_level();
+    let base_light = climate.light_level();
+    // V63: Campfire restores perception — nearby campfire overrides darkness to full light.
+    let light = {
+        use crate::world::terrain::StructureType;
+        let tw = terrain.width as usize;
+        let th = terrain.height as usize;
+        let bx = (pos[0] as i32).clamp(0, tw as i32 - 1);
+        let by_ = (pos[1] as i32).clamp(0, th as i32 - 1);
+        let mut near_fire = false;
+        'fire_check: for dy in -3..=3i32 {
+            for dx in -3..=3i32 {
+                let nx = (bx + dx).clamp(0, tw as i32 - 1) as usize;
+                let ny = (by_ + dy).clamp(0, th as i32 - 1) as usize;
+                if terrain.structure[ny * tw + nx] == StructureType::Campfire as u8 {
+                    near_fire = true;
+                    break 'fire_check;
+                }
+            }
+        }
+        if near_fire { 1.0 } else { base_light }
+    };
     let radius = beings.perception_radius(being_index, light);
 
     // Build per-being signal cache: read once, use for all 15 action scores.
@@ -1925,8 +1945,11 @@ fn logistic_need_score(action: Action, needs: &[f32; MAX_NEEDS]) -> f32 {
             w.max(s).max(b)
         }
 
-        // Safety / flee: steep curve (k=12), threshold 0.6 — panics fast
-        Action::Flee => logistic(safety_urgency, 12.0, 0.6),
+        // Flee: driven by external Danger signal scoring, NOT by internal need urgency.
+        // Internal hunger/cold must drive SeekFood/SeekShelter gradient descent instead.
+        // A low baseline allows the Danger signal and emotion modifiers to activate Flee
+        // only when there is genuine external threat (predator, fire, combat).
+        Action::Flee => 0.2,
         Action::AvoidBeing => logistic(safety_urgency, 8.0, 0.5) * 0.9,
 
         // Social / belonging: gentler curve (k=6), threshold 0.5
@@ -2013,7 +2036,7 @@ fn emotion_modifier(action: Action, emotions: &[f32; 6]) -> f32 {
     let curiosity = emotions[EMO_CURIOSITY];
 
     let raw = match action {
-        Action::Flee => 1.0 + fear * 1.5 - contentment * 0.5,
+        Action::Flee => 1.0 + fear * 0.5 - contentment * 0.3,
         Action::SeekFood => 1.0 - fear * 0.3,
         Action::ApproachBeing => 1.0 + joy * 0.5 - fear * 0.3,
         Action::ShareFood | Action::ShareResource => 1.0 + joy * 0.3 + contentment * 0.3,

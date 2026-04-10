@@ -77,7 +77,7 @@ pub fn detect_settlements(
     use crate::being::data::{BeingState, CreatureType};
 
     const CLUSTER_RADIUS: f32 = 8.0;
-    const COMFORT_THRESHOLD: f32 = 0.15;
+    const COMFORT_THRESHOLD: f32 = 0.25; // V63: raised bar — comfort must be meaningful
 
     // Collect living Human candidates — typically 100-500 entries, not 4M cells.
     let candidates: Vec<usize> = (0..beings.hot.positions.len())
@@ -141,8 +141,8 @@ pub fn detect_settlements(
     let mut next_id = existing.iter().map(|s| s.id).max().unwrap_or(0) + 1;
 
     for (_root, members) in &groups {
-        if members.len() < 2 {
-            continue;
+        if members.len() < 5 {
+            continue; // V63: requires 5+ for settlement (structural stigmergy)
         }
 
         // Compute centroid of this cluster.

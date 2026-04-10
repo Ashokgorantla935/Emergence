@@ -29,6 +29,8 @@ pub struct KingdomInfo {
     pub leader_pos: [f32; 2],
     /// Convex hull vertices of territory (world coords)
     pub hull: Vec<[f32; 2]>,
+    /// Number of beings in this kingdom (used to gate territory overlay)
+    pub population: u32,
 }
 
 /// Output fed to the overlay renderer each frame from simulation state.
@@ -388,7 +390,8 @@ impl KingdomOverlay {
 
         for k in &frame.kingdoms {
             // ── Territory fill — triangle fan from centroid into hull ──────
-            if k.hull.len() >= 3 {
+            // V63: Territory circles only for kingdoms (pop>=15 with a leader)
+            if k.hull.len() >= 3 && k.population >= 15 && k.leader_idx != usize::MAX {
                 let cx = k.capital_pos[0];
                 let cy = k.capital_pos[1];
 
@@ -645,6 +648,7 @@ pub fn extract_kingdoms(beings: &Beings, tick: u32) -> KingdomFrame {
             at_war: false, // updated below if needed
             leader_pos,
             hull,
+            population: indices.len() as u32,
         });
     }
 

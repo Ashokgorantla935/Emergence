@@ -156,6 +156,28 @@ pub fn tick_physics(terrain: &mut Terrain, signals: &mut SignalGrid, energy_avai
         }
     }
 
+    // --- Phase 4c: Campfire Thermal Projection ---
+    // V63: Active campfires inject warmth into a 3-cell radius so beings seek them at night.
+    {
+        use crate::world::terrain::StructureType;
+        for idx in 0..len {
+            if terrain.structure[idx] != StructureType::Campfire as u8 { continue; }
+            let cx = (idx % w) as i32;
+            let cy = (idx / w) as i32;
+            for dy in -3..=3i32 {
+                for dx in -3..=3i32 {
+                    let dist = ((dx * dx + dy * dy) as f32).sqrt();
+                    if dist > 3.5 { continue; }
+                    let nx = (cx + dx).clamp(0, w as i32 - 1) as usize;
+                    let ny = (cy + dy).clamp(0, h as i32 - 1) as usize;
+                    let ni = ny * w + nx;
+                    let falloff = 1.0 - (dist / 3.5);
+                    terrain.thermal_energy[ni] = (terrain.thermal_energy[ni] + falloff * 0.3).min(1.0);
+                }
+            }
+        }
+    }
+
     // --- Phase 5: Signal Coupling ---
     // Emit terrain physics state into SignalGrid so beings can navigate via gradients.
     // thermal_energy → Comfort channel (beings seek warmth when cold)

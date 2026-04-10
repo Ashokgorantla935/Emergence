@@ -98,11 +98,12 @@ impl PostProcessRenderer {
     ) -> Self {
         // Full-screen quad: positions [-1,1] in NDC, UVs [0,1]
         // Layout: [x, y, u, v] x 4 vertices
+        // TriangleStrip order: zigzag BL→BR→TL→TR
         let vertices: [[f32; 4]; 4] = [
             [-1.0, -1.0, 0.0, 1.0], // bottom-left
             [ 1.0, -1.0, 1.0, 1.0], // bottom-right
-            [ 1.0,  1.0, 1.0, 0.0], // top-right
             [-1.0,  1.0, 0.0, 0.0], // top-left
+            [ 1.0,  1.0, 1.0, 0.0], // top-right
         ];
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label:    Some("PostProcess Quad"),

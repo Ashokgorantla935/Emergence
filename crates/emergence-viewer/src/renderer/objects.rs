@@ -105,8 +105,10 @@ const fn uv_190(col: u8, row: u8) -> [f32; 2] {
 }
 
 // ── V57: ALL spritesheet grid constants (USER CONFIRMED) ──────────────────
-/// V59: Global visual scalar reduced to drop structures into macro scale
-const ATLAS_VISUAL_SCALAR: f32 = 0.01;
+/// V55 §4 + V60: Unified visual constant. ALL objects use: scale = K * sqrt(mass).
+/// Single constant for beings, flora, buildings — proportional automatically.
+/// K=0.035 gives: human(mass=64)→0.28, tree(mass=900)→1.05, bush(mass=25)→0.175, hut(mass=100)→0.35
+const UNIFIED_VISUAL_K: f32 = 0.035;
 // Flora spritesheet: 10×10 grid (flora_spritesheet_190.png — trees, growth + decay)
 const CELL_FLORA_W: f32 = 1.0 / 10.0;
 const CELL_FLORA_H: f32 = 1.0 / 10.0;
@@ -1002,17 +1004,17 @@ fn collect_chunk_decor(
                 StructureType::ResourceCache => 100.0,
                 _                           => 100.0,
             };
-            let building_scale = ATLAS_VISUAL_SCALAR * building_mass.sqrt();
+            let building_size = UNIFIED_VISUAL_K * building_mass.sqrt();
 
             building_out.push(ObjectInstance {
                 position:         [x as f32 + 0.5, y as f32 + 0.5],
                 atlas_uv,
                 atlas_size:       [CELL_190, CELL_190],
                 tint,
-                size,
+                size:             building_size,
                 alpha,
                 velocity:         [0.0, 0.0],
-                scale_multiplier: building_scale,
+                scale_multiplier: 1.0,
                 _pad_v54:         0.0,
             });
         }
@@ -1060,97 +1062,84 @@ fn collect_chunk_decor(
             let flora_cell = [CELL_FLORA_W * 0.98, CELL_FLORA_H * 0.98];
             let small_cell = [CELL_SMALL_W * 0.98, CELL_SMALL_H * 0.98];
 
-            // Scale reference: ATLAS_VISUAL_SCALAR=0.01, beings mass~64 → size~0.08
-            // Trees must be 5-15x bigger than beings to create canopy. Bushes 2-5x.
-            // scale_mult_hint is multiplied by ATLAS_VISUAL_SCALAR later.
-            // Target: canopy trees ~0.8-1.5 world units, bushes ~0.3-0.5, ground ~0.1-0.2
+            // V61: Biological mass drives size. size = K * sqrt(effective_mass). scale_multiplier = 1.0.
+            // Mass: canopy trees=900, wetland trees=800, dead trees=400,
+            //       large bushes=100, small bushes/shrubs=25, ground cover=9.
 
-            let (atlas_uv, size, atlas_cell, scale_mult_hint, is_small_plant) = if temp < 0.2 {
-                // Snow/Cold: snow conifers + sparse bushes
+            let (atlas_uv, flora_mass, atlas_cell, is_small_plant) = if temp < 0.2 {
                 if hash % 4 < 3 {
                     let v = FLORA_190_SNOW[hash % FLORA_190_SNOW.len()];
-                    (v, 3.0 + (hash % 3) as f32 * 0.5, flora_cell, 1.0f32, false)
+                    (v, 900.0f32, flora_cell, false)
                 } else {
                     let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
-                    (v, 1.5, flora_cell, 0.4f32, false)
+                    (v, 100.0f32, flora_cell, false)
                 }
             } else if biome == Biome::Wetland {
-                // Wetland: willows/mangroves + dense small bushes
                 if hash % 3 == 0 {
                     let v = FLORA_190_WETLAND[hash % FLORA_190_WETLAND.len()];
-                    (v, 3.5 + (hash % 2) as f32 * 0.5, flora_cell, 1.2f32, false)
+                    (v, 800.0f32, flora_cell, false)
                 } else {
                     let v = SMALL_190_BUSH_DENSE[hash % SMALL_190_BUSH_DENSE.len()];
-                    (v, 1.8 + (hash % 3) as f32 * 0.3, small_cell, 0.4f32, true)
+                    (v, 25.0f32, small_cell, true)
                 }
             } else if biome == Biome::Desert {
-                // Desert: cacti + dead trees + sparse shrubs
-                if hash % 5 == 0 {
+                if hash % 3 == 0 {
                     let v = FLORA_190_DEAD[hash % FLORA_190_DEAD.len()];
-                    (v, 2.5, flora_cell, 0.7f32, false)
-                } else if hash % 5 < 3 {
-                    let v = FLORA_190_DEAD[hash % FLORA_190_DEAD.len()]; // desert: dead trees instead of cacti
-                    (v, 2.0, flora_cell, 0.5f32, false)
+                    (v, 400.0f32, flora_cell, false)
                 } else {
                     let v = SMALL_190_SHRUB_SPARSE[hash % SMALL_190_SHRUB_SPARSE.len()];
-                    (v, 1.2, small_cell, 0.25f32, true)
+                    (v, 25.0f32, small_cell, true)
                 }
             } else if biome == Biome::Mountain {
-                // Mountain: sparse conifers + bushes
                 if hash % 4 == 0 {
                     let v = FLORA_190_SNOW[hash % FLORA_190_SNOW.len()];
-                    (v, 2.5, flora_cell, 0.6f32, false)
+                    (v, 900.0f32, flora_cell, false)
                 } else if hash % 4 == 1 {
                     let v = FLORA_190_BUSH[hash % FLORA_190_BUSH.len()];
-                    (v, 1.5, flora_cell, 0.3f32, false)
+                    (v, 100.0f32, flora_cell, false)
                 } else {
                     let v = SMALL_190_SHRUB_SPARSE[hash % SMALL_190_SHRUB_SPARSE.len()];
-                    (v, 1.2, small_cell, 0.2f32, true)
+                    (v, 25.0f32, small_cell, true)
                 }
             } else if biome == Biome::Forest {
-                // Forest: DENSE overlapping canopy trees + small undergrowth
-                // Trees must be BIG and overlap to create a continuous green mass
                 if hash % 20 < 15 {
-                    // 75% canopy trees — BIG, overlapping, the forest itself
                     let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
-                    (v, 3.0 + (hash % 5) as f32 * 0.4, flora_cell, 1.2 + (hash % 3) as f32 * 0.3, false)
+                    (v, 900.0f32, flora_cell, false)
                 } else if hash % 20 < 16 {
-                    // 5% seasonal accent (cherry blossom, autumn) — same big size
                     let v = FLORA_190_SEASONAL[hash % FLORA_190_SEASONAL.len()];
-                    (v, 3.0, flora_cell, 1.0f32, false)
+                    (v, 900.0f32, flora_cell, false)
                 } else if hash % 20 < 17 {
-                    // 5% forest floor (logs, stumps) — small ground items
-                    let v = FLORA_190_DEAD[hash % FLORA_190_DEAD.len()]; // forest floor: dead trees
-                    (v, 1.5, flora_cell, 0.3f32, false)
+                    let v = FLORA_190_DEAD[hash % FLORA_190_DEAD.len()];
+                    (v, 400.0f32, flora_cell, false)
                 } else {
-                    // 15% undergrowth (small plants) — medium bushes under canopy
                     let v = SMALL_190_BUSH_DENSE[hash % SMALL_190_BUSH_DENSE.len()];
-                    (v, 1.5 + (hash % 3) as f32 * 0.3, small_cell, 0.35f32, true)
+                    (v, 25.0f32, small_cell, true)
                 }
             } else if biome == Biome::Grassland && temp >= 0.65 {
-                // Savannah: scattered big palms + dry shrubs
                 if hash % 5 == 0 {
                     let v = FLORA_190_TROPICAL[hash % FLORA_190_TROPICAL.len()];
-                    (v, 3.5 + (hash % 3) as f32 * 0.5, flora_cell, 1.0f32, false)
+                    (v, 900.0f32, flora_cell, false)
                 } else {
                     let v = SMALL_190_SHRUB_DRY[hash % SMALL_190_SHRUB_DRY.len()];
-                    (v, 1.2 + (hash % 2) as f32 * 0.3, small_cell, 0.25f32, true)
+                    (v, 25.0f32, small_cell, true)
                 }
             } else {
-                // Temperate grassland: scattered trees + bushes + ground cover
                 if hash % 10 < 1 {
                     let v = FLORA_190_TEMPERATE[hash % FLORA_190_TEMPERATE.len()];
-                    (v, 3.0, flora_cell, 0.8f32, false)
+                    (v, 900.0f32, flora_cell, false)
                 } else if hash % 10 < 3 {
                     let v = SMALL_190_BUSH_MEDIUM[hash % SMALL_190_BUSH_MEDIUM.len()];
-                    (v, 1.5, small_cell, 0.3f32, true)
+                    (v, 25.0f32, small_cell, true)
                 } else {
                     let v = SMALL_190_GROUND[hash % SMALL_190_GROUND.len()];
-                    (v, 1.0 + (hash % 3) as f32 * 0.2, small_cell, 0.15f32, true)
+                    (v, 9.0f32, small_cell, true)
                 }
             };
 
-            let scale_mult = scale_mult_hint * (0.7 + biomass * 0.3);
+            let biomass_mod = 0.7 + biomass * 0.6; // ±30% variation from local biomass
+            let effective_mass = flora_mass * biomass_mod;
+            let size = UNIFIED_VISUAL_K * effective_mass.sqrt();
+            let scale_mult = 1.0f32;
 
             if pixels_per_unit < 1.0 && size < 0.5 { continue; }
 

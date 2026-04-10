@@ -158,16 +158,17 @@ impl BeingRenderer {
             );
             // V55 §4: Mass-to-Scale — visual radius = sqrt(mass)
             let mass = if i < beings.hot.mass.len() { beings.hot.mass[i] } else { 64.0 };
-            const ATLAS_VISUAL_SCALAR: f32 = 0.04; // V60: balanced — humans visible relative to trees (0.32 vs tree 1.2)
-            let mut size = ATLAS_VISUAL_SCALAR * mass.sqrt();
+            const ATLAS_VISUAL_SCALAR: f32 = 0.035; // V55 §4 + V60: unified K — same as UNIFIED_VISUAL_K in objects.rs
+            let size = ATLAS_VISUAL_SCALAR * mass.sqrt();
 
             let mut skin_tone = personality_skin_tone(&beings.hot.personalities[i]);
+            // V61: body_scale goes into scale_multiplier, keeping size = K*sqrt(mass) pure
+            let mut scale_multiplier = 1.0f32;
 
             // Apply genotype visual traits for humans
             if is_human && i < beings.cold.genotypes.len() {
                 let geno = &beings.cold.genotypes[i];
-                // Scale size by body_scale (0.85–1.15)
-                size *= geno.body_scale;
+                scale_multiplier = geno.body_scale;
                 // Shift skin tone by skin_hue_shift: positive = warmer (more red), negative = cooler (more blue)
                 let shift = geno.skin_hue_shift;
                 skin_tone[0] = (skin_tone[0] + shift).clamp(0.0, 1.0);
@@ -242,7 +243,7 @@ impl BeingRenderer {
                 alpha,
                 bob_flip,
                 velocity: beings.hot.velocities[i],
-                scale_multiplier: 1.0, // V57: size already includes ATLAS_VISUAL_SCALAR
+                scale_multiplier, // V61: genotype body_scale (1.0 for fauna/no-genotype)
                 _pad_v54: 0.0,
             };
             if is_human {
@@ -415,20 +416,6 @@ fn blend_colors(base: [f32; 3], overlay: [f32; 3], t: f32) -> [f32; 3] {
     ]
 }
 
-/// Biological scale multiplier per creature type for V54 LOD and bio-sizing.
-fn creature_scale_multiplier(creature_type: u8) -> f32 {
-    match creature_type {
-        0 => 0.8, // Human
-        1 => 0.4, // Wolf
-        2 => 0.4, // Deer
-        3 => 0.2, // Rabbit
-        4 => 0.2, // Fish
-        5 => 0.3, // Hawk
-        6 => 0.6, // Bear
-        7 => 0.3, // Snake
-        _ => 0.5,
-    }
-}
 
 /// Derive skin tone from personality hash (0-7).
 fn personality_skin_tone(personality: &[f32; 5]) -> [f32; 3] {

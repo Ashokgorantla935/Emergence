@@ -56,8 +56,8 @@ struct VertexOutput {
 fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
 
-    // V54: Dead-reckoning — predict position based on velocity and elapsed time
-    var world_pos = inst.world_pos + inst.velocity * obj_time.delta_time;
+    // Use the raw world_pos from CPU. The CPU handles all simulation syncing.
+    var world_pos = inst.world_pos;
 
     // V54: Biological scaling — combine base size with type/category multiplier
     let bio_size   = inst.size * inst.scale_multiplier;

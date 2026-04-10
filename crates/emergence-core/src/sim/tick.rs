@@ -238,6 +238,16 @@ pub fn tick(world: &mut World) {
     } else {
         age_beings(&mut world.beings)
     };
+    // V61: no_starvation — reset caloric energy and hunger counters before death check
+    if world.laws.no_starvation {
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] == BeingState::Dead { continue; }
+            if world.beings.hot.caloric_energy[i] <= 0.0 {
+                world.beings.hot.caloric_energy[i] = 0.01;
+            }
+            world.beings.hot.hunger_zero_ticks[i] = 0;
+        }
+    }
     let condition_dead = if world.laws.immortal || world.laws.invulnerable {
         // Skip natural death checks (beings still die from combat/explicit kill)
         Vec::new()
@@ -377,11 +387,35 @@ pub fn tick(world: &mut World) {
     }
 
     // 5e-pre. Enhanced fauna boids — update velocities and positions before action scoring
-    crate::being::fauna_boids::tick_fauna_boids(
-        &mut world.beings.hot,
-        &world.terrain,
-        &world.resources,
-    );
+    // V61: no_predators — temporarily suspend predator fauna during boids tick
+    if world.laws.no_predators {
+        // Save original states, mark predators dead so boids skips them, then restore
+        let predator_states: Vec<(usize, BeingState)> = world.beings.hot.fauna_indices.iter().copied()
+            .filter(|&i| {
+                let ct = CreatureType::from_u8(world.beings.hot.creature_type[i]);
+                matches!(ct, CreatureType::Wolf | CreatureType::Bear | CreatureType::Hawk)
+                    && world.beings.hot.states[i] != BeingState::Dead
+            })
+            .map(|i| (i, world.beings.hot.states[i]))
+            .collect();
+        for &(i, _) in &predator_states {
+            world.beings.hot.states[i] = BeingState::Dead;
+        }
+        crate::being::fauna_boids::tick_fauna_boids(
+            &mut world.beings.hot,
+            &world.terrain,
+            &world.resources,
+        );
+        for &(i, original_state) in &predator_states {
+            world.beings.hot.states[i] = original_state;
+        }
+    } else {
+        crate::being::fauna_boids::tick_fauna_boids(
+            &mut world.beings.hot,
+            &world.terrain,
+            &world.resources,
+        );
+    }
     // Fauna breeding check (every 200 ticks)
     if world.tick % 200 == 0 {
         crate::being::fauna_boids::tick_fauna_breeding(
@@ -390,8 +424,9 @@ pub fn tick(world: &mut World) {
         );
     }
     
-    // Human breeding check (every 300 ticks)
-    if world.tick % 300 == 0 {
+    // Human breeding check (every 300 ticks, or every 50 when fast_reproduction is active)
+    let breed_interval = if world.laws.fast_reproduction { 50u32 } else { 300u32 };
+    if world.tick % breed_interval == 0 {
         // V55 §2: Conservation — no reproduction if energy cap is reached
         let energy_available = world.total_energy < world.energy_cap;
         crate::being::lifecycle::tick_human_breeding(
@@ -588,6 +623,7 @@ pub fn tick(world: &mut World) {
                 &world.climate,
                 &world.spatial,
                 &world.knowledge,
+                &world.laws,
                 &mut rng,
             ))
         })
@@ -812,6 +848,38 @@ pub fn tick(world: &mut World) {
                 nearby_count,
                 world.climate.day_phase(),
             );
+        }
+    }
+
+    // V61: Relationship law overrides — applied after action execution each tick
+
+    // no_memory: wipe all relationship slots (blocked by perfect_memory)
+    if world.laws.no_memory && !world.laws.perfect_memory {
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] == BeingState::Dead { continue; }
+            world.beings.cold.relationships[i].count = 0;
+        }
+    }
+
+    // universal_trust: force all relationship trust to 1.0
+    if world.laws.universal_trust {
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] == BeingState::Dead { continue; }
+            let count = world.beings.cold.relationships[i].count as usize;
+            for slot in world.beings.cold.relationships[i].slots[..count].iter_mut() {
+                slot.trust = 1.0;
+            }
+        }
+    }
+
+    // no_trust: force all relationship trust to 0.0
+    if world.laws.no_trust {
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] == BeingState::Dead { continue; }
+            let count = world.beings.cold.relationships[i].count as usize;
+            for slot in world.beings.cold.relationships[i].slots[..count].iter_mut() {
+                slot.trust = 0.0;
+            }
         }
     }
 
@@ -1272,6 +1340,8 @@ pub fn tick(world: &mut World) {
         }
 
         // Memetic decay: beings who haven't built/used fire in 50 years lose the ability
+        // V61: perfect_memory prevents this decay
+        if !world.laws.perfect_memory {
         let decay_threshold = 1_440_000u32; // 50 years in ticks (28800 * 50)
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] == BeingState::Dead { continue; }
@@ -1286,6 +1356,7 @@ pub fn tick(world: &mut World) {
                 world.beings.hot.last_fire_tick[i] = 0; // Reset so we don't keep decaying
             }
         }
+        } // end if !world.laws.perfect_memory
     }
 
     // V55 §2: Recalculate total energy every 100 ticks to keep conservation gate accurate.

@@ -1507,10 +1507,12 @@ impl ApplicationHandler for App {
 
             let being_t = Instant::now();
             if let Some(ref mut br) = self.being_renderer {
-                // frame_frac: fractional progress into the current simulation tick.
-                // At high speeds (many ticks/frame) we always render at 1.0.
-                // At Speed1x the tick runs at end of each frame so frac = 1.0.
-                let frame_frac = 1.0f32;
+                // frame_frac: fractional progress into the current tick for CPU position interpolation.
+                // This engine uses a fixed N-ticks-per-frame model (no accumulator), so rendering
+                // always occurs immediately after all ticks complete → 1.0 when active.
+                // When paused (0 ticks/frame) positions are frozen, so prev == cur and the value
+                // has no visual effect; use 0.0 to express "no progress since last tick."
+                let frame_frac = if self.speed.ticks_this_frame() > 0 { 1.0f32 } else { 0.0f32 };
                 let cx = self.camera.position[0];
                 let cy = self.camera.position[1];
                 let half_w = self.camera.zoom * self.camera.aspect * 0.5 + 4.0;
@@ -2805,12 +2807,25 @@ impl ApplicationHandler for App {
                     rs.copy_events_to_staging(&mut encoder);
                 }
 
+                // V61 §2: Update post-process uniforms (day/night grading, flash, shake)
+                {
+                    let pp_world_tick = if let Some(ref world) = self.world {
+                        world.read().unwrap().tick
+                    } else { 0 };
+                    // 600 ticks per day; hour 0 = midnight
+                    let sim_hour = (pp_world_tick % 600) as f32 / 600.0 * 24.0;
+                    rs.postprocess.sim_hour = sim_hour;
+                    let _pp_shake = rs.postprocess.update(&rs.queue, pp_world_tick);
+                }
+
                 let gpu_render_t = Instant::now();
                 {
+                    let pp_scene_view = rs.postprocess.scene_view.as_ref()
+                        .expect("PostProcess scene_view not initialized");
                     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("World Pass"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &view,
+                            view: pp_scene_view,
                             resolve_target: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -2963,6 +2978,29 @@ impl ApplicationHandler for App {
                             render_pass.draw_indexed(0..6, 0, 0..ps.active_count);
                         }
                     }
+                }
+
+                // V61 §2: Post-process pass — scene_view → swapchain
+                {
+                    let pp_bg = rs.postprocess.bind_group.as_ref()
+                        .expect("PostProcess bind group not initialized");
+                    let mut pp_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("PostProcess Pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        ..Default::default()
+                    });
+                    pp_pass.set_pipeline(&rs.postprocess.pipeline);
+                    pp_pass.set_bind_group(0, pp_bg, &[]);
+                    pp_pass.set_vertex_buffer(0, rs.postprocess.vertex_buffer.slice(..));
+                    pp_pass.draw(0..4, 0..1);
                 }
 
                 rs.queue.submit(std::iter::once(encoder.finish()));

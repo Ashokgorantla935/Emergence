@@ -3,6 +3,7 @@ use super::context::compute_context_hash;
 use super::data::*;
 use super::projection::projection_bonus;
 use crate::sim::spatial::SpatialIndex;
+use crate::sim::world_state::WorldLaws;
 use crate::world::climate::Climate;
 use crate::world::knowledge::KnowledgeGrid;
 use crate::world::resource::ResourceLayer;
@@ -174,6 +175,7 @@ pub fn score_actions(
     climate: &Climate,
     spatial: &SpatialIndex,
     knowledge: &KnowledgeGrid,
+    laws: &WorldLaws,
     rng: &mut fastrand::Rng,
 ) -> ScoredAction {
     let pos = beings.hot.positions[being_index];
@@ -557,6 +559,33 @@ pub fn score_actions(
             allowed_indices.retain(|&a| a != Action::Hunt as u8);
         }
 
+        // ── V61: World Law Overrides (applied after brain forward pass, before Boltzmann) ──
+        // Note: q_values has 22 entries (brain outputs 0-21). Assault/Appease/BuildClean/Farm
+        // are post-Boltzmann overrides and are gated separately in their override blocks below.
+        if laws.no_bonding {
+            q_values[Action::Bond as usize] = -999.0;
+            q_values[Action::ShareFood as usize] = -999.0;
+            q_values[Action::ShareResource as usize] = -999.0;
+        }
+        if laws.forced_generosity {
+            q_values[Action::ShareFood as usize] += 500.0;
+            q_values[Action::ShareResource as usize] += 500.0;
+            q_values[Action::TakeFood as usize] = -999.0;
+        }
+        if laws.forced_selfishness {
+            q_values[Action::ShareFood as usize] = -999.0;
+            q_values[Action::ShareResource as usize] = -999.0;
+            q_values[Action::TakeFood as usize] += 200.0;
+        }
+        if laws.forced_peace {
+            q_values[Action::Hunt as usize] = -999.0;
+            // Assault is post-Boltzmann; gated in its override block below
+        }
+        if laws.total_war {
+            q_values[Action::Hunt as usize] += 500.0;
+            // Assault post-Boltzmann boost gated in its override block below
+        }
+
         let curiosity = beings.hot.personalities[being_index][TRAIT_CURIOUS].clamp(-1.0, 1.0);
         let temperature = 0.5 + 1.5 * curiosity;
 
@@ -827,7 +856,8 @@ pub fn score_actions(
 
         // ── Post-Boltzmann: Assault override for bold warriors ──────────────────
         // Triggers when bold human detects enemy territory near home + high danger signal.
-        {
+        // V61: forced_peace suppresses assault; total_war boosts its score.
+        if !laws.forced_peace {
             let boldness = beings.hot.personalities[being_index][TRAIT_BOLD];
             let hunger = beings.hot.needs[being_index][super::data::NEED_HUNGER];
             if boldness > 0.6 && hunger > 0.4 {
@@ -865,8 +895,13 @@ pub fn score_actions(
                             let sy = (pos[1] as u32).min(signals.height - 1);
                             let danger = signals.read(SignalChannel::Danger, sx, sy);
 
-                            if danger > 0.3 {
-                                let assault_score = boldness * 3.0;
+                            let danger_threshold = if laws.total_war { 0.05 } else { 0.3 };
+                            if danger > danger_threshold {
+                                let assault_score = if laws.total_war {
+                                    boldness * 3.0 + 500.0
+                                } else {
+                                    boldness * 3.0
+                                };
                                 if assault_score > chosen_q {
                                     let signal_levels = local.values;
                                     let biome = terrain.biome_at(cx, cy);
@@ -1242,6 +1277,13 @@ pub fn score_actions(
                 target_pos = Some(pos); // stay in place
             }
             Action::Hunt => {
+                // V61: no_predators law — prevent predator fauna from hunting
+                if laws.no_predators && matches!(
+                    CreatureType::from_u8(creature_type),
+                    CreatureType::Wolf | CreatureType::Bear | CreatureType::Hawk
+                ) {
+                    score = 0.0;
+                } else {
                 // Predators find nearest prey being within perception radius
                 let prey_pos = find_nearest_prey(pos, radius, being_index, beings, &nearby);
                 if let Some(pp) = prey_pos {
@@ -1255,6 +1297,7 @@ pub fn score_actions(
                     }
                 } else {
                     score = 0.0; // no prey visible
+                }
                 }
             }
             Action::Appease => {
@@ -2405,7 +2448,8 @@ mod tests {
         signals.deposit(SignalChannel::FoodTrail, spawn_pos[0] as u32 + 3, spawn_pos[1] as u32, 3.0);
 
         let knowledge = crate::world::knowledge::KnowledgeGrid::new(64, 64);
-        let result = score_actions(0, &beings, &terrain, &resources, &signals, &climate, &spatial, &knowledge, &mut rng);
+        let laws = crate::sim::world_state::WorldLaws::default();
+        let result = score_actions(0, &beings, &terrain, &resources, &signals, &climate, &spatial, &knowledge, &laws, &mut rng);
         assert_eq!(
             result.action,
             Action::SeekFood,
@@ -2447,7 +2491,8 @@ mod tests {
         signals.deposit(SignalChannel::Danger, spawn_pos[0] as u32 + 2, spawn_pos[1] as u32, 5.0);
 
         let knowledge = crate::world::knowledge::KnowledgeGrid::new(64, 64);
-        let result = score_actions(0, &beings, &terrain, &resources, &signals, &climate, &spatial, &knowledge, &mut rng);
+        let laws = crate::sim::world_state::WorldLaws::default();
+        let result = score_actions(0, &beings, &terrain, &resources, &signals, &climate, &spatial, &knowledge, &laws, &mut rng);
         assert_eq!(
             result.action,
             Action::Flee,

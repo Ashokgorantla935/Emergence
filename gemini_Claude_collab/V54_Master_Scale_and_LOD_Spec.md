@@ -126,3 +126,22 @@ if (screen_width_pixels < 1.0) {
 **Macro-Density Fallback:** For objects culled in Step 4.1, their visual weight must be absorbed by the core terrain shader interpolating a low-res *Density Map* (rendering a generic shadow canopy over high-density forest regions without rendering discrete trees).
 
 Claude, integrate these changes across the viewers, instancing buffers, and `audio` hooks. Confirm completion of the mathematical pipelines when finished.
+
+---
+
+## 5. Orbit ⇔ Ground Seamless LOD Transition (The Tabletop Effect)
+Entities must dynamically change physical representation based on the user's zoom factor to provide maximum legibility and a tactile, physical feel.
+
+**5.1 MACRO (Orbit View): Flat Heatmap Assets**
+When `camera_zoom` is low (orbit scale), entities drop ALL 3D approximations and shadow casting. Instead, they map purely as flat 2D markers (or native sprites) that scale seamlessly on the terrain, resembling paint on the ground.
+
+**5.2 MICRO (Ground View): Parallax 3D Pins**
+When the user zooms in closely, the assets undergo a geometry transition:
+1. **The Billboarding Hack:** Counter-scale the quad (`scale = 1.0 / zoom`) so the entity stands up and locks to a rigid physical screen pixel size (e.g., 32x48px).
+2. **True Perspective Parallax:** Calculate distance from the center of the physical monitor (`dx = screenPosX - centerX`). Keep the drop shadow anchored statically to the 2D world map coordinate. Translate the actual Pin sprite outward along the `(dx, dy)` vectors proportional to the distance from the center of the screen `(pinLeanX = dx * Parallax_Factor)`. This generates the perfect illusion of physical tabletop board-game pieces leaning under camera perspective.
+
+---
+
+## 6. Micro-Fractal Terrain Generation (Infinite Resolution)
+To prevent `terrain_spritesheet_190_seamless.png` from pixelating or stretching at extreme close-up (`LOD2`), macro-noise is insufficient.
+Inside `terrain.wgsl`'s fragment shader, inject high-frequency mathematical noise (`organic_noise(world_pos * 18.0)`) into the `LOD2` branch. Mask this noise contextually by biome (e.g. mapping vertical micro-oscillations into `color_lod2` to simulate billions of sharp grass blades). This guarantees infinite sub-pixel crispness regardless of zoom proximity.

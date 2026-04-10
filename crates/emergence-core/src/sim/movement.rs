@@ -593,7 +593,9 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     StructureType::Campfire
                 };
                 let build_ticks = target_type.build_ticks();
-                world.terrain.build_progress[cidx] += 1;
+                // V61: fast_construction doubles progress per tick
+                let base_increment = if world.laws.fast_construction { 2u32 } else { 1u32 };
+                world.terrain.build_progress[cidx] += base_increment;
                 // tool_quality speeds up building: each point adds 15% progress per tick
                 let extra = (world.beings.hot.tool_quality[being_index] * 1.5) as u32;
                 world.terrain.build_progress[cidx] += extra;

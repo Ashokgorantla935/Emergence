@@ -163,6 +163,29 @@ This audit compares every Gemini design spec (V4-V60) against the actual codebas
 
 ---
 
+## ADDENDUM: SIMULATION BEHAVIOR ISSUES (Found 2026-04-10 during visual testing)
+
+### GAP 16: Settlements Form With Only 2 Beings (P0 — Broken Feel)
+**File:** `settlement.rs:144` — `if members.len() < 2 { continue; }`
+**Problem:** A "settlement" forms with just 2 humans within 8 cells of each other. With Pop:5, you get 2-3 named settlements with territory overlay circles, even though no one has built a single structure.
+**Required:** Settlement should require minimum 5+ humans AND at least one built structure (campfire/shelter). A settlement without buildings is just "beings standing near each other."
+
+### GAP 17: Kingdom Overlay Renders for All Settlements (P0 — Visual Noise)
+**Problem:** The kingdom_overlay.rs renders territory circles and settlement names for ALL settlements, even tiny 2-person clusters that never reached kingdom threshold (15 pop). With 5 beings on a 256 map, the screen fills with overlapping territory circles originating from corners/coastlines.
+**Required:** Territory overlay should only render for actual kingdoms (population >= 15 with leader). Settlement names can show but without the massive concentric territory circles.
+
+### GAP 18: Settlement Centers in Water (P1)
+**Problem:** Settlement centroid computed from being positions can land in ocean when beings cluster at coastlines. No land validation on settlement center coordinates.
+**Required:** Snap settlement center to nearest land cell.
+
+### GAP 19: "Fled" Behavior Loop (P1 — Beings Don't Build Society)
+**Problem:** Being life stories show nothing but "Fled" repeated endlessly. With Pop:3-5 on a small map, the dominant behavior is fear-based fleeing, not exploration, building, or social interaction.
+**Root cause candidates:**
+1. Danger signals propagate too aggressively relative to population density
+2. Fear emotion overwhelms Maslow hierarchy at low population
+3. No "safe zone" establishment mechanic — beings never feel safe enough to settle
+**Required:** At low population with no predators, beings should explore, gather food, and build — not endlessly flee from nothing. The flee behavior should require an actual threat source.
+
 ## RECOMMENDED PRIORITY ORDER
 
 1. **Fix object scaling** — Gemini must spec the exact formula. Without this, nothing looks right.

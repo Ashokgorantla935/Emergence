@@ -150,20 +150,28 @@ pub fn tick_fauna_boids(
             _ => {} // Hawk, Snake, Human: wander only
         }
 
-        // Deterministic wander: hash of position for pseudo-random direction
-        let hash = (pos[0] as u32)
+        // Wander: hash of entity index + coarse time for slow directional drift
+        // Using index (not position) prevents oscillation when position changes
+        let tick_phase = (hot.ages[i] / 30) as u32; // changes direction every ~30 ticks
+        let hash = (i as u32)
             .wrapping_mul(2654435761)
-            ^ (pos[1] as u32).wrapping_mul(2246822519);
+            ^ tick_phase.wrapping_mul(2246822519);
         wander_vec[0] = ((hash % 201) as f32 / 100.0) - 1.0;
         wander_vec[1] = (((hash >> 8) % 201) as f32 / 100.0) - 1.0;
 
-        // Composite velocity: Flee*3.0 + Seek*1.5 + Wander*0.5
-        let vx = flee_vec[0] * 3.0 + seek_vec[0] * 1.5 + wander_vec[0] * 0.5;
-        let vy = flee_vec[1] * 3.0 + seek_vec[1] * 1.5 + wander_vec[1] * 0.5;
+        // Composite desire: Flee*3.0 + Seek*1.5 + Wander*0.5
+        let desired_vx = flee_vec[0] * 3.0 + seek_vec[0] * 1.5 + wander_vec[0] * 0.5;
+        let desired_vy = flee_vec[1] * 3.0 + seek_vec[1] * 1.5 + wander_vec[1] * 0.5;
+
+        // Smooth damping: blend 30% new desire with 70% current velocity
+        let prev_vx = hot.velocities[i][0];
+        let prev_vy = hot.velocities[i][1];
+        let vx = prev_vx * 0.7 + desired_vx * 0.3;
+        let vy = prev_vy * 0.7 + desired_vy * 0.3;
 
         // Clamp to max speed
         let speed = (vx * vx + vy * vy).sqrt();
-        const MAX_SPEED: f32 = 0.05;
+        const MAX_SPEED: f32 = 0.04;
         let (nvx, nvy) = if speed > MAX_SPEED {
             (vx / speed * MAX_SPEED, vy / speed * MAX_SPEED)
         } else {

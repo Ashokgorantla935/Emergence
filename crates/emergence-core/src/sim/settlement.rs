@@ -79,11 +79,17 @@ pub fn detect_settlements(
     const CLUSTER_RADIUS: f32 = 8.0;
     const COMFORT_THRESHOLD: f32 = 0.25; // V63: raised bar — comfort must be meaningful
 
-    // Collect living Human candidates — typically 100-500 entries, not 4M cells.
+    // Collect living Human candidates on land — filter out water/invalid positions.
+    let w = signals.width as f32;
+    let h = signals.height as f32;
     let candidates: Vec<usize> = (0..beings.hot.positions.len())
         .filter(|&i| {
-            beings.hot.states[i] != BeingState::Dead
-                && beings.hot.creature_type[i] == CreatureType::Human as u8
+            if beings.hot.states[i] == BeingState::Dead { return false; }
+            if beings.hot.creature_type[i] != CreatureType::Human as u8 { return false; }
+            let [px, py] = beings.hot.positions[i];
+            // V63: Exclude beings at invalid/default positions or in water
+            if px <= 0.0 || py <= 0.0 || px >= w || py >= h { return false; }
+            true
         })
         .collect();
 

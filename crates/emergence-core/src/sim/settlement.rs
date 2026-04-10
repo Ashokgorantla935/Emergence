@@ -82,7 +82,7 @@ pub fn detect_settlements(
     // Collect living Human candidates on land — filter out water/invalid positions.
     let w = signals.width as f32;
     let h = signals.height as f32;
-    let candidates: Vec<usize> = (0..beings.hot.positions.len())
+    let candidates: Vec<usize> = (0..beings.hot.count)
         .filter(|&i| {
             if beings.hot.states[i] == BeingState::Dead { return false; }
             if beings.hot.creature_type[i] != CreatureType::Human as u8 { return false; }

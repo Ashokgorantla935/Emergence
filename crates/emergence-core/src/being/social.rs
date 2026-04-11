@@ -1,7 +1,9 @@
 use super::actions::Action;
 use super::data::*;
+use super::dna::DietType;
 use crate::sim::spatial::SpatialIndex;
 use crate::world::signal::{SignalChannel, SignalGrid};
+use crate::world::tensor::{TensorGrid, TensorLayer};
 use smallvec::SmallVec;
 
 /// Cap witnesses to 32 per action. Random sample via Fisher-Yates partial shuffle if more in radius.
@@ -194,8 +196,8 @@ pub fn init_kinship_warmth(beings: &mut Beings, new_idx: usize, current_tick: u3
 }
 
 /// Deposit emotion-based signals for all alive beings.
-/// Fauna also deposit biome-specific signals (predator scent, prey food trail, death grief).
-pub fn deposit_emotion_signals(beings: &Beings, signals: &mut SignalGrid) {
+/// Fauna deposit to tensor grid (predator acoustic, herbivore odor). No species-name branches.
+pub fn deposit_emotion_signals(beings: &Beings, signals: &mut SignalGrid, tensor: &mut TensorGrid) {
     for i in 0..beings.hot.count {
         if beings.hot.states[i] == BeingState::Dead {
             continue;
@@ -204,11 +206,13 @@ pub fn deposit_emotion_signals(beings: &Beings, signals: &mut SignalGrid) {
         let pos = beings.hot.positions[i];
         let cx = (pos[0] as u32).min(signals.width - 1);
         let cy = (pos[1] as u32).min(signals.height - 1);
+        let tcx = (pos[0] as u32).min(tensor.width - 1);
+        let tcy = (pos[1] as u32).min(tensor.height - 1);
 
-        let ct = beings.hot.creature_type[i];
-        let is_human = ct == CreatureType::Human as u8;
+        let dna = beings.hot.dna[i];
+        let is_omnivore = dna.diet == DietType::Omnivore;
 
-        if is_human {
+        if is_omnivore {
             // Map emotions to signal channels.
             // Fear is intentionally excluded: internal fear (from hunger/cold) must NOT
             // deposit Danger onto the grid — that creates a self-reinforcing flee loop.
@@ -238,39 +242,20 @@ pub fn deposit_emotion_signals(beings: &Beings, signals: &mut SignalGrid) {
                 signals.deposit(SignalChannel::Comfort, cx, cy, 0.15);
             }
         } else {
-            // Fauna-specific signal deposits
-            use crate::being::data::CreatureType;
-            match CreatureType::from_u8(ct) {
-                CreatureType::Wolf => {
-                    // Wolf always deposits scent (predator presence)
-                    signals.deposit(SignalChannel::Scent, cx, cy, 0.4);
-                    // Hunting wolf deposits danger
-                    if beings.hot.needs[i][NEED_HUNGER] < 0.5 {
-                        signals.deposit(SignalChannel::Danger, cx, cy, 0.6);
-                    }
-                }
-                CreatureType::Bear => {
-                    // Bear near other beings = danger
-                    signals.deposit(SignalChannel::Danger, cx, cy, 1.0);
-                    signals.deposit(SignalChannel::Scent, cx, cy, 0.4);
-                }
-                CreatureType::Hawk => {
-                    // Hawk deposits scent while airborne (hunting)
-                    signals.deposit(SignalChannel::Scent, cx, cy, 0.3);
-                    if beings.hot.needs[i][NEED_HUNGER] < 0.5 {
-                        signals.deposit(SignalChannel::Danger, cx, cy, 0.4);
-                    }
-                }
-                CreatureType::Deer => {
-                    // Grazing deer mark food trail
-                    signals.deposit(SignalChannel::FoodTrail, cx, cy, 0.1);
-                }
-                CreatureType::Fish => {
-                    // Fish school marks food trail
-                    signals.deposit(SignalChannel::FoodTrail, cx, cy, 0.2);
-                }
-                CreatureType::Rabbit | CreatureType::Snake => {}
-                CreatureType::Human => {}
+            // Fauna: DNA-driven tensor deposits — no species-name branches.
+            // Predators (base_aggression > 0.3) deposit Acoustic tensor (presence signal).
+            if dna.base_aggression() > 0.3 {
+                let hungry = beings.hot.needs[i][NEED_HUNGER] < 0.5;
+                let intensity = if hungry {
+                    dna.base_aggression() * 0.8
+                } else {
+                    dna.base_aggression() * 0.4
+                };
+                tensor.deposit(TensorLayer::Acoustic, tcx, tcy, intensity);
+            }
+            // Herbivores deposit Odor tensor (grazing trails for scent tracking).
+            if dna.diet == DietType::Herbivore {
+                tensor.deposit(TensorLayer::Odor, tcx, tcy, 0.15);
             }
         }
 

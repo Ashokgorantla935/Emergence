@@ -18,6 +18,7 @@ use crate::being::social::{deposit_emotion_signals, init_kinship_warmth};
 use crate::sim::movement::execute_action;
 use crate::sim::world_state::{Event, EventCause, EventType, World};
 use crate::world::signal::SignalChannel;
+use crate::being::dna::DietType;
 
 pub fn tick(world: &mut World) {
     let world_size = (world.config.size.0, world.config.size.1);
@@ -298,7 +299,7 @@ pub fn tick(world: &mut World) {
         let cy = (pos[1] as u32).min(world.signals.height - 1);
 
         // Grief signal burst only for humans (otherwise society shuts down mourning dead fish/deer)
-        if world.beings.hot.creature_type[dead_idx] == crate::being::data::CreatureType::Human as u8 {
+        if world.beings.hot.dna[dead_idx].diet == DietType::Omnivore {
             world.signals.deposit(SignalChannel::Grief, cx, cy, 1.0);
         }
 
@@ -318,13 +319,9 @@ pub fn tick(world: &mut World) {
             let tcx = (pos[0] as u32).min(world.terrain.width - 1);
             let tcy = (pos[1] as u32).min(world.terrain.height - 1);
             let terrain_idx = (tcy * world.terrain.width + tcx) as usize;
-            let (bio_inject, nutrient_inject) = match crate::being::data::CreatureType::from_u8(world.beings.hot.creature_type[dead_idx]) {
-                crate::being::data::CreatureType::Human => (0.3, 0.5),
-                crate::being::data::CreatureType::Bear => (0.5, 0.6),
-                crate::being::data::CreatureType::Wolf => (0.3, 0.4),
-                crate::being::data::CreatureType::Deer => (0.3, 0.4),
-                _ => (0.1, 0.2), // small fauna
-            };
+            let dead_dna = world.beings.hot.dna[dead_idx];
+            let bio_inject = (dead_dna.mass * 0.005).min(1.0);
+            let nutrient_inject = (dead_dna.mass * 0.006).min(1.0);
             world.terrain.biomass[terrain_idx] = (world.terrain.biomass[terrain_idx] + bio_inject).min(1.0);
             world.terrain.nutrient_density[terrain_idx] = (world.terrain.nutrient_density[terrain_idx] + nutrient_inject).min(1.0);
         }
@@ -340,8 +337,8 @@ pub fn tick(world: &mut World) {
                     trigger_emotion(&mut world.beings, i, EMO_GRIEF, 0.9);
 
                     // Axiom 12: grief erodes brain weights when culturally similar being dies
-                    if world.beings.hot.creature_type[i] == CreatureType::Human as u8
-                        && world.beings.hot.creature_type[dead_idx] == CreatureType::Human as u8
+                    if world.beings.hot.dna[i].diet == DietType::Omnivore
+                        && world.beings.hot.dna[dead_idx].diet == DietType::Omnivore
                     {
                         let hash_i = &world.beings.cold.true_memetic_hash[i];
                         let hash_d = &world.beings.cold.true_memetic_hash[dead_idx];
@@ -407,8 +404,7 @@ pub fn tick(world: &mut World) {
         // Save original states, mark predators dead so boids skips them, then restore
         let predator_states: Vec<(usize, BeingState)> = world.beings.hot.fauna_indices.iter().copied()
             .filter(|&i| {
-                let ct = CreatureType::from_u8(world.beings.hot.creature_type[i]);
-                matches!(ct, CreatureType::Wolf | CreatureType::Bear | CreatureType::Hawk)
+                world.beings.hot.dna[i].base_aggression() > 0.3
                     && world.beings.hot.states[i] != BeingState::Dead
             })
             .map(|i| (i, world.beings.hot.states[i]))
@@ -470,7 +466,7 @@ pub fn tick(world: &mut World) {
             world.beings.hot.pattern_hallucination[i] = 0.02 + world.beings.hot.dread_ratio[i] * 0.1;
 
             // Axiom 7: Boredom entropy — humans with satisfied needs and no threat accumulate entropy
-            if world.beings.hot.creature_type[i] == CreatureType::Human as u8 {
+            if world.beings.hot.dna[i].diet == DietType::Omnivore {
                 let hunger = world.beings.hot.needs[i][NEED_HUNGER];
                 let fear = world.beings.hot.emotions[i][EMO_FEAR];
                 if hunger > 0.7 && fear < 0.2 {
@@ -516,7 +512,7 @@ pub fn tick(world: &mut World) {
         let danger = world.signals.read(SignalChannel::Danger, x, y);
 
         // Hero bypass: bold or devoted humans resist the initial panic trigger
-        let is_hero = if world.beings.hot.creature_type[i] == CreatureType::Human as u8 {
+        let is_hero = if world.beings.hot.dna[i].diet == DietType::Omnivore {
             let boldness = world.beings.hot.personalities[i][TRAIT_BOLD];
             let belonging = world.beings.hot.needs[i][NEED_BELONGING];
             boldness > 0.8 || (boldness > 0.5 && belonging > 0.7)
@@ -576,7 +572,7 @@ pub fn tick(world: &mut World) {
     // 5e-pre2. Comfort gradient climbing: critically cold humans seek shelter
     for i in 0..world.beings.hot.count {
         if world.beings.hot.states[i] != BeingState::Awake { continue; }
-        if world.beings.hot.creature_type[i] != 0 { continue; } // humans only
+        if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; } // humans only
 
         let warmth = world.beings.hot.needs[i][NEED_WARMTH];
         if warmth < 0.25 {
@@ -636,6 +632,7 @@ pub fn tick(world: &mut World) {
                 &world.terrain,
                 &world.resources,
                 &world.signals,
+                &world.tensor,
                 &world.climate,
                 &world.spatial,
                 &world.knowledge,
@@ -722,7 +719,7 @@ pub fn tick(world: &mut World) {
             }
 
             // Hebbian update: fauna only, after action execution
-            if world.beings.hot.creature_type[i] != CreatureType::Human as u8
+            if world.beings.hot.dna[i].diet != DietType::Omnivore
                 && world.beings.hot.states[i] != BeingState::Dead
             {
                 let needs_after = world.beings.hot.needs[i];
@@ -736,7 +733,7 @@ pub fn tick(world: &mut World) {
             }
 
             // TD(0) brain update: humans only, after action execution
-            if world.beings.hot.creature_type[i] == CreatureType::Human as u8
+            if world.beings.hot.dna[i].diet == DietType::Omnivore
                 && world.beings.hot.states[i] != BeingState::Dead
             {
                 let needs_after = world.beings.hot.needs[i];
@@ -940,7 +937,7 @@ pub fn tick(world: &mut World) {
 
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] != BeingState::Awake { continue; }
-            if world.beings.hot.creature_type[i] != 0 { continue; } // humans only
+            if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; } // humans only
 
             let pos_i = world.beings.hot.positions[i];
             let nearby = world.spatial.query_radius(pos_i[0], pos_i[1], separation_radius);
@@ -950,7 +947,7 @@ pub fn tick(world: &mut World) {
 
             for j in nearby {
                 if j == i { continue; }
-                if world.beings.hot.creature_type[j] != 0 { continue; } // humans only
+                if world.beings.hot.dna[j].diet != DietType::Omnivore { continue; } // humans only
 
                 let pos_j = world.beings.hot.positions[j];
                 let mut dx = pos_i[0] - pos_j[0];
@@ -986,8 +983,7 @@ pub fn tick(world: &mut World) {
     // 5f-1c. Mass dynamics: eating grows mass, starvation shrinks mass (V55 §4)
     for i in 0..world.beings.hot.count {
         if world.beings.hot.states[i] == BeingState::Dead { continue; }
-        let ct = world.beings.hot.creature_type[i];
-        let max_mass = crate::being::data::init_mass(ct) * 4.0;
+        let max_mass = world.beings.hot.dna[i].mass * 4.0;
         // Well-fed: caloric_energy > 0.7 means the being is eating enough
         if world.beings.hot.caloric_energy[i] > 0.7 {
             world.beings.hot.mass[i] = (world.beings.hot.mass[i] + 0.5).min(max_mass);
@@ -1004,7 +1000,7 @@ pub fn tick(world: &mut World) {
             continue;
         }
         // Fauna don't form causal memories (no purpose/belonging reasoning)
-        if world.beings.hot.creature_type[i] != crate::being::data::CreatureType::Human as u8 {
+        if world.beings.hot.dna[i].diet != DietType::Omnivore {
             continue;
         }
         let prev_pending_action = world.beings.hot.pending_action[i];
@@ -1056,20 +1052,20 @@ pub fn tick(world: &mut World) {
         if world.beings.hot.states[i] == BeingState::Dead {
             continue;
         }
-        if world.beings.hot.creature_type[i] != CreatureType::Human as u8 {
+        if world.beings.hot.dna[i].diet != DietType::Omnivore {
             continue;
         }
         crate::being::memes::tick_memes(&mut world.beings.cold.meme_slots[i]);
     }
 
     // 5g. Deposit emotion signals
-    deposit_emotion_signals(&world.beings, &mut world.signals);
+    deposit_emotion_signals(&world.beings, &mut world.signals, &mut world.tensor);
 
     // 5h-1. Chemical agriculture: beings deposit Fertilization near home
     if world.tick % 10 == 0 {
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] != BeingState::Awake { continue; }
-            if world.beings.hot.creature_type[i] != 0 { continue; }
+            if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; }
 
             let pos = world.beings.hot.positions[i];
             let sx = (pos[0] as u32).min(world.signals.width - 1);
@@ -1088,7 +1084,7 @@ pub fn tick(world: &mut World) {
     if world.tick % 5 == 0 {
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] != BeingState::Awake { continue; }
-            if world.beings.hot.creature_type[i] != 0 { continue; }
+            if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; }
 
             let pos = world.beings.hot.positions[i];
             let sx = (pos[0] as u32).min(world.signals.width - 1);
@@ -1100,39 +1096,8 @@ pub fn tick(world: &mut World) {
         }
     }
 
-    // 5h-3. Wave interference warfare: cultural dissonance at borders spikes Danger
-    if world.tick % 20 == 0 {
-        let sw = world.signals.width as usize;
-        let sh = world.signals.height as usize;
-        let mut danger_deposits: Vec<(u32, u32, f32)> = Vec::new();
-
-        for y in 1..(sh - 1) {
-            for x in 1..(sw - 1) {
-                let idx = y * sw + x;
-                let strength = world.signals.channels[SignalChannel::CultureStrength as usize][idx];
-                if strength < 0.2 { continue; }
-                let freq = world.signals.channels[SignalChannel::CultureFreq as usize][idx];
-
-                let neighbors = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)];
-                for (nx, ny) in neighbors {
-                    let nidx = ny * sw + nx;
-                    let n_strength = world.signals.channels[SignalChannel::CultureStrength as usize][nidx];
-                    let n_freq = world.signals.channels[SignalChannel::CultureFreq as usize][nidx];
-
-                    if n_strength > 0.2 {
-                        let dissonance = (freq - n_freq).abs();
-                        if dissonance > 0.1 {
-                            danger_deposits.push((x as u32, y as u32, dissonance * 2.0));
-                        }
-                    }
-                }
-            }
-        }
-
-        for (x, y, amount) in danger_deposits {
-            world.signals.deposit(SignalChannel::Danger, x, y, amount);
-        }
-    }
+    // 5h-3. Wave interference warfare: cultural dissonance at borders
+    // V70: Danger sequestered to physical damage/predation only — dissonance no longer deposits Danger.
 
     // 6. Birth checks (Phase 6: no_reproduction law)
     if !world.laws.no_reproduction {
@@ -1144,7 +1109,7 @@ pub fn tick(world: &mut World) {
         if world.beings.hot.states[i] == BeingState::Dead {
             continue;
         }
-        if world.beings.hot.creature_type[i] != crate::being::data::CreatureType::Human as u8 {
+        if world.beings.hot.dna[i].diet != DietType::Omnivore {
             continue;
         }
         let all_satisfied = world.beings.hot.needs[i].iter().all(|&n| n > 0.7);
@@ -1203,7 +1168,7 @@ pub fn tick(world: &mut World) {
         if avg_danger > 2.0 {
             for i in 0..world.beings.hot.count {
                 if world.beings.hot.states[i] == BeingState::Dead { continue; }
-                if world.beings.hot.creature_type[i] != crate::being::data::CreatureType::Human as u8 { continue; }
+                if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; }
 
                 let pos = world.beings.hot.positions[i];
                 let bx = (pos[0] as u32).min(world.signals.width - 1);
@@ -1260,7 +1225,7 @@ pub fn tick(world: &mut World) {
 
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] != BeingState::Awake { continue; }
-            if world.beings.hot.creature_type[i] != 0 { continue; } // humans only
+            if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; } // humans only
 
             let pos = world.beings.hot.positions[i];
             let x = (pos[0] as u32).min(tw - 1);
@@ -1361,7 +1326,7 @@ pub fn tick(world: &mut World) {
         let decay_threshold = 1_440_000u32; // 50 years in ticks (28800 * 50)
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] == BeingState::Dead { continue; }
-            if world.beings.hot.creature_type[i] != 0 { continue; } // humans only
+            if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; } // humans only
 
             let last_fire = world.beings.hot.last_fire_tick[i];
             if last_fire > 0 && world.tick.saturating_sub(last_fire) > decay_threshold {
@@ -1528,6 +1493,19 @@ pub fn tick(world: &mut World) {
                     let ty = y.min(world.tensor.height - 1);
                     world.tensor.deposit(crate::world::tensor::TensorLayer::Heat, tx, ty, heat_amt);
                 }
+
+                // V70: Tensor Light — campfires emit 1.0 locally; beings near campfires at night
+                // get full perception even when global Light tensor is at moonlight floor (0.6).
+                let light_amt = match st {
+                    StructureType::Campfire => 1.0,
+                    StructureType::Forge => 0.5,
+                    _ => 0.0,
+                };
+                if light_amt > 0.0 {
+                    let tx = x.min(world.tensor.width - 1);
+                    let ty = y.min(world.tensor.height - 1);
+                    world.tensor.deposit(crate::world::tensor::TensorLayer::Light, tx, ty, light_amt);
+                }
             }
         }
     }
@@ -1542,7 +1520,7 @@ pub fn tick(world: &mut World) {
 
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] != BeingState::Awake { continue; }
-            if world.beings.hot.creature_type[i] != 0 { continue; } // humans only
+            if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; } // humans only
 
             let pos = world.beings.hot.positions[i];
             let x = (pos[0] as u32).min(tw - 1);
@@ -1622,10 +1600,11 @@ fn apply_weather_effects(world: &mut World) {
             }
         }
         crate::world::climate::WeatherKind::Storm => {
-            // Danger burst
+            // Danger burst — V70: storms cause physical wind/lightning damage so Danger stays,
+            // but reduced to 0.3 (was 0.8) since storm is a borderline physical threat.
             for y in ry..(ry + rh).min(world.terrain.height) {
                 for x in rx..(rx + rw).min(world.terrain.width) {
-                    world.signals.deposit(SignalChannel::Danger, x, y, 0.8);
+                    world.signals.deposit(SignalChannel::Danger, x, y, 0.3);
                 }
             }
             // Warmth damage + scatter for beings in region
@@ -1673,7 +1652,7 @@ fn process_births(world: &mut World) {
             continue;
         }
         // Only humans reproduce through this system
-        if world.beings.hot.creature_type[i] != CreatureType::Human as u8 {
+        if world.beings.hot.dna[i].diet != DietType::Omnivore {
             continue;
         }
         if world.beings.life_phase(i) != LifePhase::Adult {
@@ -1698,7 +1677,7 @@ fn process_births(world: &mut World) {
             }
             if partner >= world.beings.hot.count
                 || world.beings.hot.states[partner] != BeingState::Awake
-                || world.beings.hot.creature_type[partner] != CreatureType::Human as u8
+                || world.beings.hot.dna[partner].diet != DietType::Omnivore
                 || world.beings.life_phase(partner) != LifePhase::Adult
             {
                 continue;

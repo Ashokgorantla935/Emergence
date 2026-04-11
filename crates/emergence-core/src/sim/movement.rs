@@ -1,30 +1,15 @@
 use crate::being::actions::{Action, ScoredAction};
 use crate::being::data::*;
+use crate::being::dna::DietType;
 use crate::being::emotions::trigger_emotion;
 use crate::being::memes;
 use crate::being::social::process_witnessing;
 use crate::sim::world_state::{Event, EventType, World};
 use crate::world::terrain::StructureType;
 
-/// Food gained by predator per successful kill by prey type.
-fn hunt_food_gain(prey_type: u8) -> f32 {
-    match CreatureType::from_u8(prey_type) {
-        CreatureType::Deer => 0.5,
-        CreatureType::Rabbit => 0.15,
-        CreatureType::Fish => 0.1,
-        _ => 0.1,
-    }
-}
-
-/// Per-tick success probability when predator is within strike range.
-fn hunt_success_chance(prey_type: u8) -> f32 {
-    match CreatureType::from_u8(prey_type) {
-        CreatureType::Deer => 0.50,
-        CreatureType::Rabbit => 0.30,
-        CreatureType::Fish => 0.20,
-        _ => 0.20,
-    }
-}
+/// Max displacement per tick, scaled by DNA mass. Heavier = slower.
+/// BASE_SPEED * speed_scalar() = tiles/tick cap for each being.
+const BASE_SPEED: f32 = 0.12;
 
 /// Execute a being's chosen action, updating state accordingly.
 pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredAction) {
@@ -41,9 +26,10 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
             if let Some(target) = action.target_pos {
                 // Rabbit freeze: if target is current pos and freeze_ticks just expired,
                 // initiate a fresh 30-tick freeze (rabbit froze instead of fleeing)
-                let is_rabbit = world.beings.hot.creature_type[being_index] == CreatureType::Rabbit as u8;
+                let self_dna = world.beings.hot.dna[being_index];
+                let is_small_timid = self_dna.mass < 10.0 && self_dna.risk_tolerance() < 0.2;
                 let is_freeze_pos = (target[0] - pos[0]).abs() < 0.1 && (target[1] - pos[1]).abs() < 0.1;
-                if is_rabbit && is_freeze_pos && world.beings.hot.freeze_ticks[being_index] == 0 {
+                if is_small_timid && is_freeze_pos && world.beings.hot.freeze_ticks[being_index] == 0 {
                     // This wander-in-place was triggered by the freeze scoring path
                     world.beings.hot.freeze_ticks[being_index] = 30;
                 }
@@ -150,9 +136,9 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                 cx.min(world.signals.width - 1),
                 cy.min(world.signals.height - 1),
             );
-            // Deer herd alarm: fleeing deer deposit a strong danger signal so
+            // Herbivore herd alarm: fleeing herbivore deposits a strong danger signal so
             // herd members within 20 cells sense it and also flee (cascading alarm)
-            if world.beings.hot.creature_type[being_index] == CreatureType::Deer as u8 {
+            if world.beings.hot.dna[being_index].diet == DietType::Herbivore {
                 world.signals.deposit(
                     crate::world::signal::SignalChannel::Danger,
                     cx.min(world.signals.width - 1),
@@ -191,9 +177,9 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     imp.last_interaction = tick;
                     imp.memory_count = imp.memory_count.saturating_add(1);
 
-                    // Meme transmission: humans only. Clone carrier slots to avoid double-borrow.
-                    if world.beings.hot.creature_type[being_index] == CreatureType::Human as u8
-                        && world.beings.hot.creature_type[target_idx] == CreatureType::Human as u8
+                    // Meme transmission: omnivores (cognitive beings) only. Clone carrier slots to avoid double-borrow.
+                    if world.beings.hot.dna[being_index].diet == DietType::Omnivore
+                        && world.beings.hot.dna[target_idx].diet == DietType::Omnivore
                     {
                         let carrier = world.beings.cold.meme_slots[being_index];
                         memes::try_transmit(&carrier, &mut world.beings.cold.meme_slots[target_idx], &mut world.rng);
@@ -242,9 +228,9 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     cause: crate::sim::world_state::EventCause::RelationshipWarmth { warmth },
                 });
 
-                // Meme transmission: humans only. Clone carrier slots to avoid double-borrow.
-                if world.beings.hot.creature_type[being_index] == CreatureType::Human as u8
-                    && world.beings.hot.creature_type[target_idx] == CreatureType::Human as u8
+                // Meme transmission: omnivores (cognitive beings) only. Clone carrier slots to avoid double-borrow.
+                if world.beings.hot.dna[being_index].diet == DietType::Omnivore
+                    && world.beings.hot.dna[target_idx].diet == DietType::Omnivore
                 {
                     let carrier = world.beings.cold.meme_slots[being_index];
                     memes::try_transmit(&carrier, &mut world.beings.cold.meme_slots[target_idx], &mut world.rng);
@@ -312,9 +298,9 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                             cause: crate::sim::world_state::EventCause::RelationshipTrust { trust },
                         });
 
-                        // Meme transmission: humans only. Clone carrier slots to avoid double-borrow.
-                        if world.beings.hot.creature_type[being_index] == CreatureType::Human as u8
-                            && world.beings.hot.creature_type[target_idx] == CreatureType::Human as u8
+                        // Meme transmission: omnivores (cognitive beings) only. Clone carrier slots to avoid double-borrow.
+                        if world.beings.hot.dna[being_index].diet == DietType::Omnivore
+                            && world.beings.hot.dna[target_idx].diet == DietType::Omnivore
                         {
                             let carrier = world.beings.cold.meme_slots[being_index];
                             memes::try_transmit(&carrier, &mut world.beings.cold.meme_slots[target_idx], &mut world.rng);
@@ -423,21 +409,23 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
             if let Some(prey_idx) = action.target_being {
                 if prey_idx < world.beings.hot.count && world.beings.hot.states[prey_idx] != BeingState::Dead {
                     let prey_pos = world.beings.hot.positions[prey_idx];
+                    let prey_dna = world.beings.hot.dna[prey_idx];
+                    let attacker_dna = world.beings.hot.dna[being_index];
                     let dist = distance(pos, prey_pos);
                     if dist < 1.5 {
                         // Within strike range — resolve success by chance
                         let mut rng = fastrand::Rng::with_seed(
                             world.tick as u64 ^ being_index as u64 ^ prey_idx as u64
                         );
-                        let prey_type = world.beings.hot.creature_type[prey_idx];
-                        let success = rng.f32() < hunt_success_chance(prey_type);
+                        // Mass-ratio hunt success: larger predator vs smaller prey = higher chance
+                        let success = rng.f32() < (attacker_dna.mass / (attacker_dna.mass + prey_dna.mass));
                         if success {
                             // Kill prey
                             world.beings.hot.states[prey_idx] = BeingState::Dead;
                             world.beings.hot.alive_count = world.beings.hot.alive_count.saturating_sub(1);
 
-                            // Hunter gains food
-                            let food_gain = hunt_food_gain(prey_type);
+                            // Hunter gains food scaled by prey caloric yield (DNA mass)
+                            let food_gain = prey_dna.caloric_yield();
                             world.beings.hot.needs[being_index][NEED_HUNGER] =
                                 (world.beings.hot.needs[being_index][NEED_HUNGER] + food_gain).min(1.0);
 
@@ -470,10 +458,8 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                                 0.8,
                             );
 
-                            // Crime signal: human killed a peaceful human (unprovoked murder)
-                            if prey_type == CreatureType::Human as u8
-                                && world.beings.hot.creature_type[being_index] == CreatureType::Human as u8
-                            {
+                            // Crime signal: omnivore killed a peaceful omnivore (unprovoked murder)
+                            if prey_dna.diet == DietType::Omnivore && attacker_dna.diet == DietType::Omnivore {
                                 let victim_last_action = world.beings.hot.pending_action[prey_idx];
                                 let victim_was_peaceful = victim_last_action != Action::Hunt as u8
                                     && victim_last_action != 255; // 255 = no action pending
@@ -507,14 +493,12 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                                 world.beings.cold.kill_count[being_index].saturating_add(1);
                             let kills = world.beings.cold.kill_count[being_index];
                             if kills >= 3 {
-                                match CreatureType::from_u8(prey_type) {
-                                    CreatureType::Wolf => {
-                                        world.beings.cold.traits[being_index] |= BEING_TRAIT_WOLF_SLAYER;
-                                    }
-                                    CreatureType::Bear => {
-                                        world.beings.cold.traits[being_index] |= BEING_TRAIT_BEAR_SLAYER;
-                                    }
-                                    _ => {}
+                                // Mass-based slayer trait: heavy aggressive predators earn bear slayer,
+                                // medium aggressive predators earn wolf slayer
+                                if prey_dna.mass > 30.0 && prey_dna.base_aggression() > 0.3 {
+                                    world.beings.cold.traits[being_index] |= BEING_TRAIT_BEAR_SLAYER;
+                                } else if prey_dna.mass > 13.0 && prey_dna.base_aggression() > 0.3 {
+                                    world.beings.cold.traits[being_index] |= BEING_TRAIT_WOLF_SLAYER;
                                 }
                             }
                         } else {
@@ -558,8 +542,8 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                         );
                     }
 
-                    // Combat exhaustion: fighting costs rest and safety for humans only
-                    if world.beings.hot.creature_type[being_index] == CreatureType::Human as u8 {
+                    // Combat exhaustion: fighting costs rest and safety for omnivores (cognitive beings)
+                    if attacker_dna.diet == DietType::Omnivore {
                         world.beings.hot.needs[being_index][NEED_REST] =
                             (world.beings.hot.needs[being_index][NEED_REST] - 0.10).max(0.0);
                         world.beings.hot.needs[being_index][NEED_SAFETY] =
@@ -1019,7 +1003,7 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                 for j in 0..count {
                     if j == being_index { continue; }
                     if world.beings.hot.states[j] != BeingState::Awake { continue; }
-                    if world.beings.hot.creature_type[j] != 0 { continue; }
+                    if world.beings.hot.dna[j].diet != DietType::Omnivore { continue; }
 
                     let jpos = world.beings.hot.positions[j];
                     let dx = jpos[0] - pos[0];
@@ -1047,19 +1031,6 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
     }
 }
 
-/// Species-specific maximum speed in tiles per tick.
-fn max_speed_for(creature_type: u8) -> f32 {
-    match CreatureType::from_u8(creature_type) {
-        CreatureType::Human  => 0.015,
-        CreatureType::Wolf   => 0.035,
-        CreatureType::Hawk   => 0.05,
-        CreatureType::Deer   => 0.025,
-        CreatureType::Rabbit => 0.02,
-        CreatureType::Bear   => 0.015,
-        CreatureType::Fish   => 0.012,
-        CreatureType::Snake  => 0.008,
-    }
-}
 
 fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f32) {
     let pos = world.beings.hot.positions[being_index];
@@ -1092,9 +1063,9 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
     let effective_speed = speed / (cost * road_multiplier);
     let move_dist = effective_speed.min(dist);
 
-    // Clamp per-tick displacement to species max speed (prevents MLP brain from
+    // Clamp per-tick displacement to DNA-derived max speed (prevents MLP brain from
     // producing teleporting velocity vectors that appear as dark streaks).
-    let max_speed = max_speed_for(world.beings.hot.creature_type[being_index]);
+    let max_speed = world.beings.hot.dna[being_index].speed_scalar() * BASE_SPEED;
     let clamped_dist = move_dist.min(max_speed);
 
     let new_x = (pos[0] + nx * clamped_dist).clamp(0.0, world.terrain.width as f32 - 1.0);
@@ -1111,12 +1082,16 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
         _ => false,
     };
     let is_obstacle = is_water || is_solid_struct;
-    let is_fish = world.beings.hot.creature_type[being_index] == CreatureType::Fish as u8;
+    // Aquatic beings (small herbivores in water) move through water; others avoid it
+    let is_aquatic = {
+        let dna = world.beings.hot.dna[being_index];
+        dna.diet == DietType::Herbivore && dna.mass < 12.0
+    };
 
     const MAX_VEL: f32 = 0.5;
 
-    // Fish move in water; all others avoid obstacles (water + solid structures)
-    if is_fish {
+    // Aquatic beings move in water; all others avoid obstacles (water + solid structures)
+    if is_aquatic {
         if is_water {
             let old_pos = world.beings.hot.positions[being_index];
             world.beings.hot.positions[being_index] = [new_x, new_y];

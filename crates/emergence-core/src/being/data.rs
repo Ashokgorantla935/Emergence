@@ -656,8 +656,8 @@ impl Beings {
             1.0
         };
 
-        // V63: Night blindness — perception drops to 20% at zero light (was 40%)
-        base * effective_light.clamp(0.2, 1.0) * sleep_mult
+        // V70: Night blindness — perception drops to 1% at zero light (tensor Light layer controls this).
+        base * effective_light.clamp(0.01, 1.0) * sleep_mult
     }
 
     // ── Convenience forwarding accessors ─────────────────────────────────────

@@ -343,8 +343,7 @@ impl ResourceLayer {
 
     /// Fire cellular automaton — spreads based on neighbor flora, destroys environment, emits Danger signal.
     /// Runs every tick when any fire is active.
-    pub fn tick_fire(&mut self, terrain: &mut Terrain, signals: &mut crate::world::signal::SignalGrid, world_tick: u32) {
-        use crate::world::signal::SignalChannel;
+    pub fn tick_fire(&mut self, terrain: &mut Terrain, _signals: &mut crate::world::signal::SignalGrid, world_tick: u32) {
         let w = terrain.width as usize;
         let h = terrain.height as usize;
         let len = w * h;
@@ -372,12 +371,10 @@ impl ResourceLayer {
                 }
             }
 
-            // Emit extreme Danger signal
+            // V70: Fire no longer deposits Danger signal — resource events are not physical combat.
+            // Fire damage is applied directly to beings via needs (warmth depletion).
             let x = (idx % w) as u32;
             let y = (idx / w) as u32;
-            let sx = x.min(signals.width - 1);
-            let sy = y.min(signals.height - 1);
-            signals.deposit(SignalChannel::Danger, sx, sy, 5.0);
 
             // Spread to 4-connected neighbors
             let neighbors: [(isize, isize); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];

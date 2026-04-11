@@ -208,11 +208,8 @@ pub fn tick_physics(terrain: &mut Terrain, signals: &mut SignalGrid, energy_avai
                 signals.deposit(SignalChannel::FoodTrail, sx as u32, sy as u32, (nutrient - 0.2) * 1.0);
             }
 
-            // Emit pathogen as danger signal
-            let pathogen = terrain.pathogen[tidx];
-            if pathogen > 0.3 {
-                signals.deposit(SignalChannel::Danger, sx as u32, sy as u32, (pathogen - 0.3) * 2.0);
-            }
+            // V70: Pathogen no longer deposits Danger — physical damage from pathogens is applied
+            // directly to caloric_energy. Danger is sequestered to combat/predation only.
         }
     }
 }

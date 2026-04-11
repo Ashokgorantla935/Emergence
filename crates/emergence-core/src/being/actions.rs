@@ -1,6 +1,7 @@
 use super::brain;
 use super::context::compute_context_hash;
 use super::data::*;
+use super::dna::DietType;
 use super::projection::projection_bonus;
 use crate::sim::spatial::SpatialIndex;
 use crate::sim::world_state::WorldLaws;
@@ -8,6 +9,7 @@ use crate::world::climate::Climate;
 use crate::world::knowledge::KnowledgeGrid;
 use crate::world::resource::ResourceLayer;
 use crate::world::signal::{SignalChannel, SignalGrid};
+use crate::world::tensor::{TensorGrid, TensorLayer};
 use crate::world::terrain::{Biome, Terrain};
 
 /// Pre-cached signal values at a being's position. Read ONCE per tick, used by all action scores.
@@ -112,45 +114,53 @@ impl Action {
         }
     }
 
-    /// Return the action subset allowed for the given creature type.
-    /// Fauna get simplified subsets (5-9 actions). Humans get all 24.
-    /// Predators (Wolf, Bear, Hawk) include Hunt. Prey flee, seek food, avoid.
-    pub fn allowed_actions(creature_type: u8) -> &'static [Action] {
-        use crate::being::data::CreatureType;
-        match CreatureType::from_u8(creature_type) {
-            CreatureType::Human => &Action::ALL,
-            CreatureType::Wolf => &[
-                Action::Wander, Action::SeekFood, Action::SeekShelter,
-                Action::Flee, Action::Explore, Action::Sleep,
-                Action::Cluster, Action::AvoidBeing, Action::Hunt,
-            ],
-            CreatureType::Bear => &[
-                Action::Wander, Action::SeekFood, Action::SeekShelter,
-                Action::Flee, Action::Explore, Action::Sleep,
-                Action::AvoidBeing, Action::Hunt,
-            ],
-            CreatureType::Hawk => &[
-                Action::Wander, Action::SeekFood,
-                Action::Flee, Action::Explore,
-                Action::AvoidBeing, Action::Hunt,
-            ],
-            CreatureType::Deer => &[
-                Action::Wander, Action::SeekFood,
-                Action::Flee, Action::Cluster, Action::AvoidBeing,
-            ],
-            CreatureType::Rabbit => &[
-                Action::Wander, Action::SeekFood,
-                Action::SeekShelter, Action::Flee,
-                Action::Cluster, Action::AvoidBeing,
-            ],
-            CreatureType::Fish => &[
-                Action::Wander, Action::SeekFood,
-                Action::Flee, Action::Cluster,
-            ],
-            CreatureType::Snake => &[
-                Action::Wander, Action::SeekFood, Action::Flee,
-            ],
+    /// Return the action subset allowed for a being, derived from its DNA.
+    /// Universal actions: Wander, SeekFood, SeekShelter, Flee, Explore, AvoidBeing, Sleep.
+    /// Hunt: base_aggression > 0.1 (carnivores + omnivores).
+    /// Cognitive actions: diet == Omnivore (Build, Craft, Teach, Bond, ShareFood, etc.).
+    /// Cluster: mass < 30.0 (small creatures herd/flock).
+    pub fn allowed_actions(dna: &crate::being::dna::BiologicalDNA) -> Vec<Action> {
+        use crate::being::dna::DietType;
+        let mut actions = vec![
+            Action::Wander,
+            Action::SeekFood,
+            Action::SeekShelter,
+            Action::Flee,
+            Action::Explore,
+            Action::AvoidBeing,
+            Action::Sleep,
+        ];
+        // Predators and omnivores can hunt
+        if dna.base_aggression() > 0.1 {
+            actions.push(Action::Hunt);
         }
+        // Small creatures cluster (herding, flocking, schooling)
+        if dna.mass < 30.0 {
+            actions.push(Action::Cluster);
+        }
+        // Cognitive beings: full social + construction action set
+        if dna.diet == DietType::Omnivore {
+            actions.extend([
+                Action::ApproachBeing,
+                Action::Bond,
+                Action::ShareFood,
+                Action::TakeFood,
+                Action::Mourn,
+                Action::PickUpFood,
+                Action::Teach,
+                Action::Build,
+                Action::Craft,
+                Action::Memorialize,
+                Action::CreateMark,
+                Action::ShareResource,
+                Action::PickUpStone,
+                Action::Appease,
+                Action::BuildClean,
+                Action::Farm,
+                Action::Assault,
+            ]);
+        }
+        actions
     }
 }
 
@@ -172,6 +182,7 @@ pub fn score_actions(
     terrain: &Terrain,
     resources: &ResourceLayer,
     signals: &SignalGrid,
+    tensor: &TensorGrid,
     climate: &Climate,
     spatial: &SpatialIndex,
     knowledge: &KnowledgeGrid,
@@ -182,27 +193,10 @@ pub fn score_actions(
     let needs = &beings.hot.needs[being_index];
     let emotions = &beings.hot.emotions[being_index];
     let personality = &beings.hot.personalities[being_index];
-    let base_light = climate.light_level();
-    // V63: Campfire restores perception — nearby campfire overrides darkness to full light.
-    let light = {
-        use crate::world::terrain::StructureType;
-        let tw = terrain.width as usize;
-        let th = terrain.height as usize;
-        let bx = (pos[0] as i32).clamp(0, tw as i32 - 1);
-        let by_ = (pos[1] as i32).clamp(0, th as i32 - 1);
-        let mut near_fire = false;
-        'fire_check: for dy in -3..=3i32 {
-            for dx in -3..=3i32 {
-                let nx = (bx + dx).clamp(0, tw as i32 - 1) as usize;
-                let ny = (by_ + dy).clamp(0, th as i32 - 1) as usize;
-                if terrain.structure[ny * tw + nx] == StructureType::Campfire as u8 {
-                    near_fire = true;
-                    break 'fire_check;
-                }
-            }
-        }
-        if near_fire { 1.0 } else { base_light }
-    };
+    // V70: Read light from TensorGrid at being's position (campfires emit 1.0 locally via Sub-task C).
+    let tx = (pos[0] as u32).min(tensor.width - 1);
+    let ty = (pos[1] as u32).min(tensor.height - 1);
+    let light = tensor.read(TensorLayer::Light, tx, ty);
     let radius = beings.perception_radius(being_index, light);
 
     // Build per-being signal cache: read once, use for all 15 action scores.
@@ -293,11 +287,10 @@ pub fn score_actions(
     // Nearby beings for social actions
     let nearby = spatial.query_radius_with_positions(pos[0], pos[1], radius, &beings.hot.positions);
 
-    // ── Human brain path ──────────────────────────────────────────────────────
-    // Humans use a learned MLP to select actions via Boltzmann sampling.
+    // ── Omnivore brain path ───────────────────────────────────────────────────
+    // Omnivores (cognitive beings) use a learned MLP to select actions via Boltzmann sampling.
     // Fauna continue through the heuristic path below.
-    let creature_type = beings.hot.creature_type[being_index];
-    if creature_type == CreatureType::Human as u8 {
+    if beings.hot.dna[being_index].diet == DietType::Omnivore {
         // Assemble 14-float input: [needs[0..6], signal_values[0..7], elevation]
         // elevation replaces light: beings must sense terrain to avoid walking into water.
         let elev = terrain.elevation_at(cx.min(terrain.width - 1), cy.min(terrain.height - 1));
@@ -529,8 +522,8 @@ pub fn score_actions(
             }
         }
 
-        // ACTION MASKING: Restrict to species-specific allowed actions.
-        let allowed_actions = Action::allowed_actions(beings.hot.creature_type[being_index]);
+        // ACTION MASKING: Restrict to DNA-derived allowed actions.
+        let allowed_actions = Action::allowed_actions(&beings.hot.dna[being_index]);
         let mut allowed_indices: Vec<u8> = allowed_actions.iter()
             .filter(|&&a| a != Action::Appease && a != Action::BuildClean && a != Action::Farm && a != Action::Assault)
             .map(|&a| a as u8)
@@ -542,22 +535,22 @@ pub fn score_actions(
 
         let mut hunt_justified = crime_at_pos > 2.0 && beings.hot.personalities[being_index][TRAIT_BOLD] > 0.8; // only bold guards near crime source
 
-        // Precondition 1: Desperation — starving and a nearby human is carrying food
+        // Precondition 1: Desperation — starving and a nearby omnivore is carrying food
         if !hunt_justified && hunger < 0.25 {
             hunt_justified = nearby.iter().any(|&ni| {
                 ni != being_index
                     && beings.hot.states[ni] != BeingState::Dead
-                    && beings.hot.creature_type[ni] == CreatureType::Human as u8
+                    && beings.hot.dna[ni].diet == DietType::Omnivore
                     && beings.hot.carry[ni][0] > 0.1
             });
         }
 
-        // Precondition 2: Grudge — deep negative trust toward a nearby human
+        // Precondition 2: Grudge — deep negative trust toward a nearby omnivore
         if !hunt_justified {
             hunt_justified = nearby.iter().any(|&ni| {
                 ni != being_index
                     && beings.hot.states[ni] != BeingState::Dead
-                    && beings.hot.creature_type[ni] == CreatureType::Human as u8
+                    && beings.hot.dna[ni].diet == DietType::Omnivore
                     && beings.cold.relationships[being_index]
                         .find(ni as u32)
                         .map(|imp| imp.trust < -0.5)
@@ -565,12 +558,12 @@ pub fn score_actions(
             });
         }
 
-        // Precondition 3: Self-defense — low safety and a nearby human is actively hunting
+        // Precondition 3: Self-defense — low safety and a nearby omnivore is actively hunting
         if !hunt_justified && safety < 0.3 {
             hunt_justified = nearby.iter().any(|&ni| {
                 ni != being_index
                     && beings.hot.states[ni] != BeingState::Dead
-                    && beings.hot.creature_type[ni] == CreatureType::Human as u8
+                    && beings.hot.dna[ni].diet == DietType::Omnivore
                     && beings.hot.pending_action[ni] == Action::Hunt as u8
             });
         }
@@ -702,7 +695,7 @@ pub fn score_actions(
                             if ni == being_index || beings.hot.states[ni] == BeingState::Dead {
                                 continue;
                             }
-                            if beings.hot.creature_type[ni] == CreatureType::Human as u8 {
+                            if beings.hot.dna[ni].diet == DietType::Omnivore {
                                 let np = beings.hot.positions[ni];
                                 let ndx = np[0] - pos[0];
                                 let ndy = np[1] - pos[1];
@@ -1007,7 +1000,7 @@ pub fn score_actions(
     let mut max_relationship_contrib: f32 = 0.0;
     let mut max_signal_contrib: f32 = 0.0;
 
-    for &action in Action::allowed_actions(creature_type) {
+    for action in Action::allowed_actions(&beings.hot.dna[being_index]) {
         let mut score = logistic_need_score(action, needs)
             * personality_modifier(action, personality)
             * emotion_modifier(action, emotions);
@@ -1125,11 +1118,10 @@ pub fn score_actions(
                 }
             }
             Action::Cluster => {
-                let ct = CreatureType::from_u8(beings.hot.creature_type[being_index]);
-                if ct.is_prey() {
-                    // Herbivores: herd toward nearest same-species neighbor
+                if beings.hot.dna[being_index].diet == DietType::Herbivore {
+                    // Herbivores: herd toward nearest similar-DNA neighbor
                     if let Some(herd_pos) = find_nearest_same_species(
-                        pos, being_index, beings.hot.creature_type[being_index], beings, &nearby
+                        pos, being_index, &beings.hot.dna[being_index], beings, &nearby
                     ) {
                         let mut t = herd_pos;
                         t[0] += (rng.f32() - 0.5) * 1.5;
@@ -1297,11 +1289,8 @@ pub fn score_actions(
                 target_pos = Some(pos); // stay in place
             }
             Action::Hunt => {
-                // V61: no_predators law — prevent predator fauna from hunting
-                if laws.no_predators && matches!(
-                    CreatureType::from_u8(creature_type),
-                    CreatureType::Wolf | CreatureType::Bear | CreatureType::Hawk
-                ) {
+                // V61: no_predators law — prevent aggressive fauna from hunting
+                if laws.no_predators && beings.hot.dna[being_index].base_aggression() > 0.3 {
                     score = 0.0;
                 } else {
                 // DNA-derived: only beings with meaningful aggression can hunt
@@ -1351,7 +1340,6 @@ pub fn score_actions(
         let fauna_params = beings.hot.fauna_params[being_index];
         apply_species_behavior(
             action,
-            creature_type,
             being_index,
             beings,
             terrain,
@@ -1447,7 +1435,6 @@ pub fn score_actions(
 #[allow(clippy::too_many_arguments)]
 fn apply_species_behavior(
     action: Action,
-    creature_type: u8,
     being_index: usize,
     beings: &Beings,
     terrain: &Terrain,
@@ -1462,7 +1449,7 @@ fn apply_species_behavior(
     target_pos: &mut Option<[f32; 2]>,
     target_being: &mut Option<usize>,
 ) {
-    use crate::being::data::CreatureType;
+    use crate::being::dna::DietType;
     const CH_DANGER: usize = 0;
 
     // Param indices (named for clarity)
@@ -1474,63 +1461,70 @@ fn apply_species_behavior(
     const CLUSTER: usize = 4;
     const WANDER: usize = 5;
 
-    match CreatureType::from_u8(creature_type) {
-        // ── HAWK: boids flocking ──────────────────────────────────────────
-        CreatureType::Hawk => match action {
+    let self_dna = beings.hot.dna[being_index];
+
+    // ── Small carnivores (mass < 13, Carnivore): aerial boid flocking (hawk-like) ──
+    if self_dna.diet == DietType::Carnivore && self_dna.mass < 13.0 {
+        match action {
             Action::Cluster => {
-                // Use boids: separation (3 cells) + alignment + cohesion (8 cells)
                 let boids = compute_hawk_boids(pos, being_index, beings, nearby, 3.0, 8.0);
                 if boids[0].abs() > 0.01 || boids[1].abs() > 0.01 {
                     *target_pos = Some([pos[0] + boids[0] * 5.0, pos[1] + boids[1] * 5.0]);
-                    *score = 5.0 * params[COH]; // cohesion_weight drives flock preference
+                    *score = 5.0 * params[COH];
                 }
             }
             Action::Wander => {
-                // Hawks near a flock still wander occasionally, but less
-                let hawk_count = nearby.iter().filter(|&&ni| {
+                // Small carnivores near a flock suppress wandering
+                let flock_count = nearby.iter().filter(|&&ni| {
                     ni != being_index
-                        && beings.hot.creature_type[ni] == CreatureType::Hawk as u8
                         && beings.hot.states[ni] != BeingState::Dead
+                        && {
+                            let ni_dna = beings.hot.dna[ni];
+                            ni_dna.diet == DietType::Carnivore && ni_dna.mass < 13.0
+                        }
                 }).count();
-                if hawk_count >= 2 {
-                    *score *= (1.0 - params[COH]).max(0.1); // suppress wander based on cohesion learned
+                if flock_count >= 2 {
+                    *score *= (1.0 - params[COH]).max(0.1);
                 }
             }
             _ => {}
-        },
-
-        // ── WOLF: pack hunting ────────────────────────────────────────────
-        CreatureType::Wolf => match action {
+        }
+    // ── Large carnivores (mass >= 13, Carnivore): ground pack hunting (wolf/bear-like) ──
+    } else if self_dna.diet == DietType::Carnivore && self_dna.mass >= 13.0 {
+        match action {
             Action::Hunt => {
-                // Coordinated hunt: massive boost when prey visible AND packmate nearby
                 if target_being.is_some() {
                     let pack_nearby = nearby.iter().any(|&ni| {
                         ni != being_index
-                            && beings.hot.creature_type[ni] == CreatureType::Wolf as u8
                             && beings.hot.states[ni] != BeingState::Dead
+                            && {
+                                let ni_dna = beings.hot.dna[ni];
+                                ni_dna.diet == DietType::Carnivore && ni_dna.mass >= 13.0
+                            }
                             && {
                                 let tp = beings.hot.positions[ni];
                                 let dx = tp[0] - pos[0];
                                 let dy = tp[1] - pos[1];
-                                dx * dx + dy * dy <= 100.0 // within 10 cells
+                                dx * dx + dy * dy <= 100.0
                             }
                     });
                     if pack_nearby {
-                        *score = 4.0 * params[HUNT]; // hunt_weight drives coordinated hunt
+                        *score = 4.0 * params[HUNT];
                     }
                 }
             }
             Action::Cluster => {
-                // PackIdle: wolves near packmates without prey nearby stay together
                 let prey_visible = find_nearest_prey(pos, radius, being_index, beings, nearby).is_some();
                 let pack_nearby = nearby.iter().any(|&ni| {
                     ni != being_index
-                        && beings.hot.creature_type[ni] == CreatureType::Wolf as u8
                         && beings.hot.states[ni] != BeingState::Dead
+                        && {
+                            let ni_dna = beings.hot.dna[ni];
+                            ni_dna.diet == DietType::Carnivore && ni_dna.mass >= 13.0
+                        }
                 });
                 if pack_nearby && !prey_visible {
-                    // Stay near pack center
-                    let pack_center = flock_centroid(pos, being_index, CreatureType::Wolf as u8, beings, nearby);
+                    let pack_center = flock_centroid(pos, being_index, &self_dna, beings, nearby);
                     if let Some(center) = pack_center {
                         *target_pos = Some(center);
                         *score = 3.5 * params[CLUSTER];
@@ -1538,187 +1532,168 @@ fn apply_species_behavior(
                 }
             }
             Action::Wander => {
-                // Solo wolves patrol; pack wolves suppress wandering
                 let pack_nearby = nearby.iter().any(|&ni| {
                     ni != being_index
-                        && beings.hot.creature_type[ni] == CreatureType::Wolf as u8
                         && beings.hot.states[ni] != BeingState::Dead
+                        && {
+                            let ni_dna = beings.hot.dna[ni];
+                            ni_dna.diet == DietType::Carnivore && ni_dna.mass >= 13.0
+                        }
                 });
                 if pack_nearby {
-                    *score *= (1.0 - params[COH]).max(0.1); // suppress wander when in pack
+                    *score *= (1.0 - params[COH]).max(0.1);
                 } else {
-                    *score *= params[WANDER]; // solo patrol strength from wander_weight
+                    *score *= params[WANDER];
                 }
             }
             _ => {}
-        },
-
-        // ── DEER: herd vigilance + cascading danger alarm ─────────────────
-        CreatureType::Deer => match action {
+        }
+    // ── Large herbivores (mass >= 12, Herbivore): herd vigilance (deer-like) ──
+    } else if self_dna.diet == DietType::Herbivore && self_dna.mass >= 12.0 {
+        match action {
             Action::Flee => {
-                // Cascading alarm: ANY deer in 12 cells that detects a wolf/bear/hawk
-                // deposits danger signal — we read that accumulated signal here
                 let danger = local.values[CH_DANGER];
                 if danger > 0.1 {
-                    // Amplify flee score proportional to alarm signal and flee_weight
                     *score += danger * 6.0 * params[FLEE];
-                    // Flee away from danger gradient
                     let [gx, gy] = local.gradients[CH_DANGER];
                     if gx.abs() > 0.01 || gy.abs() > 0.01 {
                         *target_pos = Some([pos[0] - gx * 15.0, pos[1] - gy * 15.0]);
                     } else {
-                        // Fallback to blind run
                         let angle = rng.f32() * std::f32::consts::TAU;
                         *target_pos = Some([pos[0] + angle.cos() * 12.0, pos[1] + angle.sin() * 12.0]);
                     }
                 }
-                // Direct predator in range: flee scaled by DNA risk_tolerance
                 let predator_near = nearby.iter().any(|&ni| {
                     ni != being_index
                         && beings.hot.states[ni] != BeingState::Dead
                         && {
                             let ni_dna = beings.hot.dna[ni];
-                            // DNA-driven: threatening if aggressive and outmasses self
-                            let self_mass = beings.hot.dna[being_index].mass;
-                            ni_dna.base_aggression() > 0.3 && ni_dna.mass > self_mass * 0.5
+                            ni_dna.base_aggression() > 0.3 && ni_dna.mass > self_dna.mass * 0.5
                         }
                         && {
                             let tp = beings.hot.positions[ni];
                             let dx = tp[0] - pos[0];
                             let dy = tp[1] - pos[1];
-                            dx * dx + dy * dy <= 144.0 // 12 cells
+                            dx * dx + dy * dy <= 144.0
                         }
                 });
                 if predator_near {
-                    let panic_scale = 1.0 - beings.hot.dna[being_index].risk_tolerance();
+                    let panic_scale = 1.0 - self_dna.risk_tolerance();
                     *score = 4.5 * params[FLEE] * panic_scale.max(0.5);
                 }
             }
             Action::Cluster => {
-                // Peaceful grazing herds: score herding highly when no danger
                 let danger = local.values[CH_DANGER];
                 if danger < 0.05 {
-                    *score *= params[CLUSTER]; // cluster_weight drives herd preference
+                    *score *= params[CLUSTER];
                 }
             }
             _ => {}
-        },
+        }
+    // ── Small herbivores (mass < 12, Herbivore): freeze/warren response (rabbit/fish-like) ──
+    } else if self_dna.diet == DietType::Herbivore && self_dna.mass < 12.0 {
+        let in_water = {
+            let cx = pos[0] as u32;
+            let cy = pos[1] as u32;
+            terrain.water[(cy as usize * terrain.width as usize) + cx as usize]
+        };
 
-        // ── RABBIT: freeze response ────────────────────────────────────────
-        CreatureType::Rabbit => match action {
-            Action::Flee => {
-                // 50% chance to freeze instead of flee when predator within 8 cells
-                let self_mass = beings.hot.dna[being_index].mass;
-                let predator_close = nearby.iter().any(|&ni| {
-                    ni != being_index
-                        && beings.hot.states[ni] != BeingState::Dead
-                        && {
-                            let ni_dna = beings.hot.dna[ni];
-                            // DNA-driven: threatening if aggressive and outmasses self
-                            ni_dna.base_aggression() > 0.3 && ni_dna.mass > self_mass * 0.5
-                        }
-                        && {
-                            let tp = beings.hot.positions[ni];
-                            let dx = tp[0] - pos[0];
-                            let dy = tp[1] - pos[1];
-                            dx * dx + dy * dy <= 64.0 // 8 cells
-                        }
-                });
-                if predator_close && beings.hot.freeze_ticks[being_index] == 0 {
-                    let panic_scale = 1.0 - beings.hot.dna[being_index].risk_tolerance();
-                    if rng.f32() < 0.5 {
-                        // Freeze: override flee with zero-movement wander (target = current pos)
-                        // freeze_ticks will be set to 30 in movement.rs when this Flee action executes
-                        // but here we DON'T flee; suppress flee score so Wander (frozen) wins
-                        *score = -1.0;
-                    } else {
-                        // Flee with learned flee weight, scaled by DNA risk aversion
-                        *score *= params[FLEE] * panic_scale.max(0.5);
-                    }
-                }
-                // Already frozen: suppress flee
-                if beings.hot.freeze_ticks[being_index] > 0 {
-                    *score = -5.0;
-                }
-            }
-            Action::Wander => {
-                // Frozen rabbit: stay in place
-                if beings.hot.freeze_ticks[being_index] > 0 {
-                    *target_pos = Some(pos); // freeze in place
-                    *score = 8.0; // high score so freeze wins
-                }
-                // WarrenCluster: rabbits near others prefer to cluster
-                let rabbit_neighbors = nearby.iter().filter(|&&ni| {
-                    ni != being_index
-                        && beings.hot.creature_type[ni] == CreatureType::Rabbit as u8
-                        && beings.hot.states[ni] != BeingState::Dead
-                }).count();
-                if rabbit_neighbors >= 2 && beings.hot.freeze_ticks[being_index] == 0 {
-                    *score *= (1.0 - params[CLUSTER] * 0.3).max(0.1); // prefer Cluster when params say so
-                }
-            }
-            Action::Cluster => {
-                // WarrenCluster: stay near rabbit neighbors
-                let rabbit_count = nearby.iter().filter(|&&ni| {
-                    ni != being_index
-                        && beings.hot.creature_type[ni] == CreatureType::Rabbit as u8
-                        && beings.hot.states[ni] != BeingState::Dead
-                }).count();
-                if rabbit_count >= 1 {
-                    *score = (*score * params[CLUSTER]).min(7.0); // cluster_weight drives warren preference
-                }
-                if beings.hot.freeze_ticks[being_index] > 0 {
-                    *score = -1.0; // frozen rabbits don't actively cluster
-                }
-            }
-            _ => {}
-        },
-
-        // ── FISH: simplified boids (separation + cohesion, water-only) ────
-        CreatureType::Fish => match action {
-            Action::Cluster => {
-                let cx = pos[0] as u32;
-                let cy = pos[1] as u32;
-                let in_water = terrain.water[(cy as usize * terrain.width as usize) + cx as usize];
-                if !in_water {
-                    *score = -5.0; // fish must stay in water
-                } else {
+        if in_water {
+            // Aquatic small herbivores (fish-like): water boids
+            match action {
+                Action::Cluster => {
                     let boids = compute_fish_boids(pos, being_index, beings, terrain, nearby, 2.0, 6.0);
                     if boids[0].abs() > 0.01 || boids[1].abs() > 0.01 {
-                        // Validate target stays in water
                         let tx = (pos[0] + boids[0] * 4.0).clamp(0.0, terrain.width as f32 - 1.0);
                         let ty = (pos[1] + boids[1] * 4.0).clamp(0.0, terrain.height as f32 - 1.0);
                         let tidx = ty as usize * terrain.width as usize + tx as usize;
                         if terrain.water[tidx] {
                             *target_pos = Some([tx, ty]);
-                            *score = 4.0 * params[CLUSTER]; // cluster_weight drives schooling
+                            *score = 4.0 * params[CLUSTER];
                         }
                     }
                 }
-            }
-            Action::Wander => {
-                // Fish wandering must stay in water
-                let cx = pos[0] as u32;
-                let cy = pos[1] as u32;
-                let in_water = terrain.water[(cy as usize * terrain.width as usize) + cx as usize];
-                if !in_water {
-                    *score = -5.0;
-                } else if let Some(tp) = *target_pos {
-                    let tx = tp[0] as u32;
-                    let ty = tp[1] as u32;
-                    let w = terrain.width as usize;
-                    let h = terrain.height as usize;
-                    if tx as usize >= w || ty as usize >= h || !terrain.water[ty as usize * w + tx as usize] {
-                        // Pick a water-seeking direction instead
-                        *target_pos = find_water_direction(pos, signals, terrain, rng);
+                Action::Wander => {
+                    if let Some(tp) = *target_pos {
+                        let tx = tp[0] as u32;
+                        let ty = tp[1] as u32;
+                        let w = terrain.width as usize;
+                        let h = terrain.height as usize;
+                        if tx as usize >= w || ty as usize >= h || !terrain.water[ty as usize * w + tx as usize] {
+                            *target_pos = find_water_direction(pos, signals, terrain, rng);
+                        }
                     }
                 }
+                _ => {}
             }
-            _ => {}
-        },
-
-        _ => {}
+        } else {
+            // Terrestrial small herbivores (rabbit-like): freeze + warren cluster
+            match action {
+                Action::Flee => {
+                    let predator_close = nearby.iter().any(|&ni| {
+                        ni != being_index
+                            && beings.hot.states[ni] != BeingState::Dead
+                            && {
+                                let ni_dna = beings.hot.dna[ni];
+                                ni_dna.base_aggression() > 0.3 && ni_dna.mass > self_dna.mass * 0.5
+                            }
+                            && {
+                                let tp = beings.hot.positions[ni];
+                                let dx = tp[0] - pos[0];
+                                let dy = tp[1] - pos[1];
+                                dx * dx + dy * dy <= 64.0
+                            }
+                    });
+                    if predator_close && beings.hot.freeze_ticks[being_index] == 0 {
+                        let panic_scale = 1.0 - self_dna.risk_tolerance();
+                        if rng.f32() < 0.5 {
+                            *score = -1.0;
+                        } else {
+                            *score *= params[FLEE] * panic_scale.max(0.5);
+                        }
+                    }
+                    if beings.hot.freeze_ticks[being_index] > 0 {
+                        *score = -5.0;
+                    }
+                }
+                Action::Wander => {
+                    if beings.hot.freeze_ticks[being_index] > 0 {
+                        *target_pos = Some(pos);
+                        *score = 8.0;
+                    }
+                    let neighbor_count = nearby.iter().filter(|&&ni| {
+                        ni != being_index
+                            && beings.hot.states[ni] != BeingState::Dead
+                            && {
+                                let ni_dna = beings.hot.dna[ni];
+                                ni_dna.diet == DietType::Herbivore && ni_dna.mass < 12.0
+                            }
+                    }).count();
+                    if neighbor_count >= 2 && beings.hot.freeze_ticks[being_index] == 0 {
+                        *score *= (1.0 - params[CLUSTER] * 0.3).max(0.1);
+                    }
+                }
+                Action::Cluster => {
+                    let neighbor_count = nearby.iter().filter(|&&ni| {
+                        ni != being_index
+                            && beings.hot.states[ni] != BeingState::Dead
+                            && {
+                                let ni_dna = beings.hot.dna[ni];
+                                ni_dna.diet == DietType::Herbivore && ni_dna.mass < 12.0
+                            }
+                    }).count();
+                    if neighbor_count >= 1 {
+                        *score = (*score * params[CLUSTER]).min(7.0);
+                    }
+                    if beings.hot.freeze_ticks[being_index] > 0 {
+                        *score = -1.0;
+                    }
+                }
+                _ => {}
+            }
+        }
     }
+    // Omnivores: no boid overrides (handled by MLP brain path above)
 }
 
 // Param index constants used by apply_species_behavior and hebbian.rs
@@ -1751,7 +1726,9 @@ fn compute_hawk_boids(
         if ni == being_index || beings.hot.states[ni] != BeingState::Awake {
             continue;
         }
-        if beings.hot.creature_type[ni] != CreatureType::Hawk as u8 {
+        // Small carnivore flock filter (hawk-like DNA class)
+        let ni_dna = beings.hot.dna[ni];
+        if ni_dna.diet != DietType::Carnivore || ni_dna.mass >= 13.0 {
             continue;
         }
         let tp = beings.hot.positions[ni];
@@ -1819,7 +1796,9 @@ fn compute_fish_boids(
         if ni == being_index || beings.hot.states[ni] != BeingState::Awake {
             continue;
         }
-        if beings.hot.creature_type[ni] != CreatureType::Fish as u8 {
+        // Small herbivore school filter (fish-like DNA class: aquatic small herbivores)
+        let ni_dna = beings.hot.dna[ni];
+        if ni_dna.diet != DietType::Herbivore || ni_dna.mass >= 12.0 {
             continue;
         }
         let tp = beings.hot.positions[ni];
@@ -1871,7 +1850,7 @@ fn compute_fish_boids(
 fn flock_centroid(
     pos: [f32; 2],
     being_index: usize,
-    ct: u8,
+    self_dna: &crate::being::dna::BiologicalDNA,
     beings: &Beings,
     nearby: &[usize],
 ) -> Option<[f32; 2]> {
@@ -1879,7 +1858,10 @@ fn flock_centroid(
     let mut count = 0u32;
     for &ni in nearby {
         if ni == being_index || beings.hot.states[ni] == BeingState::Dead { continue; }
-        if beings.hot.creature_type[ni] != ct { continue; }
+        let ni_dna = beings.hot.dna[ni];
+        // Same DNA class: same diet, mass within 50% of self
+        if ni_dna.diet != self_dna.diet { continue; }
+        if ni_dna.mass < self_dna.mass * 0.5 || ni_dna.mass > self_dna.mass * 2.0 { continue; }
         sum[0] += beings.hot.positions[ni][0];
         sum[1] += beings.hot.positions[ni][1];
         count += 1;
@@ -2224,7 +2206,7 @@ fn find_food_biome_direction(pos: [f32; 2], terrain: &Terrain, scan_dist: f32) -
 fn find_nearest_same_species(
     pos: [f32; 2],
     being_index: usize,
-    creature_type: u8,
+    self_dna: &crate::being::dna::BiologicalDNA,
     beings: &Beings,
     nearby: &[usize],
 ) -> Option<[f32; 2]> {
@@ -2238,9 +2220,10 @@ fn find_nearest_same_species(
         if ni == being_index || beings.hot.states[ni] == BeingState::Dead {
             continue;
         }
-        if beings.hot.creature_type[ni] != creature_type {
-            continue;
-        }
+        let ni_dna = beings.hot.dna[ni];
+        // Same DNA class: same diet, mass within 50% of self
+        if ni_dna.diet != self_dna.diet { continue; }
+        if ni_dna.mass < self_dna.mass * 0.5 || ni_dna.mass > self_dna.mass * 2.0 { continue; }
         let tp = beings.hot.positions[ni];
         let dx = tp[0] - pos[0];
         let dy = tp[1] - pos[1];
@@ -2263,7 +2246,7 @@ fn find_nearest_same_species(
 }
 
 /// Find the nearest prey being within radius for a predator.
-/// Prey types: Deer, Rabbit, Fish. Returns (index, position).
+/// Valid prey: low aggression (< 0.2) AND doesn't outmass self by 3x. DNA-driven, no species names.
 fn find_nearest_prey(
     pos: [f32; 2],
     radius: f32,
@@ -2271,15 +2254,16 @@ fn find_nearest_prey(
     beings: &Beings,
     nearby: &[usize],
 ) -> Option<(usize, [f32; 2])> {
-    use crate::being::data::CreatureType;
+    let self_dna = beings.hot.dna[being_index];
     let mut best_dist = radius * radius;
     let mut best = None;
     for &ni in nearby {
         if ni == being_index || beings.hot.states[ni] == BeingState::Dead {
             continue;
         }
-        let ct = CreatureType::from_u8(beings.hot.creature_type[ni]);
-        if !ct.is_prey() {
+        let ni_dna = beings.hot.dna[ni];
+        // Valid prey: low aggression and doesn't outmass self by 3x
+        if ni_dna.base_aggression() >= 0.2 || ni_dna.mass >= self_dna.mass * 3.0 {
             continue;
         }
         let tp = beings.hot.positions[ni];
@@ -2357,7 +2341,7 @@ fn find_youth_target(
         if ni == being_index || beings.hot.states[ni] == BeingState::Dead {
             continue;
         }
-        if beings.hot.creature_type[ni] != crate::being::data::CreatureType::Human as u8 {
+        if beings.hot.dna[ni].diet != DietType::Omnivore {
             continue;
         }
         if beings.life_phase(ni) != LifePhase::Youth {
@@ -2385,7 +2369,7 @@ fn find_resource_need_target(
         if ni == being_index || beings.hot.states[ni] == BeingState::Dead {
             continue;
         }
-        if beings.hot.creature_type[ni] != crate::being::data::CreatureType::Human as u8 {
+        if beings.hot.dna[ni].diet != DietType::Omnivore {
             continue;
         }
         // Target should have low stone but positive warmth (won't share with enemies)

@@ -2,9 +2,10 @@ use crate::being::data::{BeingsHot, BeingState, CreatureType};
 use crate::world::resource::ResourceLayer;
 use crate::world::terrain::Terrain;
 
-/// Enhanced fauna boids tick — runs every tick for alive fauna.
-/// Computes desire vectors and updates velocities/positions.
-/// Velocity formula: Flee*3.0 + Seek_Food*1.5 + Wander*0.5
+/// Enhanced fauna boids tick — staggered cognitive + kinetic update.
+/// Cognitive (desire vectors): recomputed every 10 ticks per fauna (staggered).
+/// Kinetic (position push): runs every tick using cached velocity.
+/// This matches the human cognitive stagger pattern for smooth movement.
 pub fn tick_fauna_boids(
     hot: &mut BeingsHot,
     terrain: &Terrain,
@@ -16,7 +17,25 @@ pub fn tick_fauna_boids(
 
     let w = terrain.width as usize;
     let h = terrain.height as usize;
+    let current_tick = hot.ages.get(0).copied().unwrap_or(0) as u32; // approximate global tick
 
+    // ── Kinetic push: ALL fauna move along cached velocity every tick ──
+    for &i in &hot.fauna_indices {
+        if hot.states[i] == BeingState::Dead { continue; }
+        let [vx, vy] = hot.velocities[i];
+        let new_x = (hot.positions[i][0] + vx).clamp(0.0, (w - 1) as f32);
+        let new_y = (hot.positions[i][1] + vy).clamp(0.0, (h - 1) as f32);
+        let new_idx = (new_y as usize).min(h - 1) * w + (new_x as usize).min(w - 1);
+        let is_water = terrain.water[new_idx];
+        let is_fish = hot.creature_type[i] == CreatureType::Fish as u8;
+        if (is_fish && is_water) || (!is_fish && !is_water) {
+            hot.positions[i] = [new_x, new_y];
+        } else {
+            hot.velocities[i] = [0.0, 0.0];
+        }
+    }
+
+    // ── Cognitive update: recompute desire vectors every 10 ticks (staggered) ──
     // Snapshot positions and types for neighbor queries (before mutation)
     let fauna_snapshot: Vec<(usize, [f32; 2], u8)> = hot
         .fauna_indices
@@ -27,6 +46,12 @@ pub fn tick_fauna_boids(
     for &(i, pos, ctype) in &fauna_snapshot {
         if hot.states[i] == BeingState::Dead {
             continue;
+        }
+
+        // Stagger: each fauna updates on a different tick (spread load)
+        const COGNITIVE_INTERVAL: u32 = 10;
+        if (current_tick + i as u32) % COGNITIVE_INTERVAL != 0 {
+            continue; // skip cognitive update, keep moving on cached velocity
         }
 
         let mut flee_vec = [0.0f32; 2];
@@ -178,30 +203,8 @@ pub fn tick_fauna_boids(
             (vx, vy)
         };
 
+        // Cache new velocity — kinetic push (at top of function) uses it next tick
         hot.velocities[i] = [nvx, nvy];
-
-        // Update position with terrain-aware boundary checks
-        let new_x = (hot.positions[i][0] + nvx).clamp(0.0, (w - 1) as f32);
-        let new_y = (hot.positions[i][1] + nvy).clamp(0.0, (h - 1) as f32);
-        let new_idx = (new_y as usize).min(h - 1) * w + (new_x as usize).min(w - 1);
-        let is_water_cell = terrain.water[new_idx];
-
-        let is_fish = ctype == CreatureType::Fish as u8;
-        if is_fish {
-            // Fish MUST stay in water
-            if is_water_cell {
-                hot.positions[i] = [new_x, new_y];
-            } else {
-                hot.velocities[i] = [0.0, 0.0]; // stop at boundary
-            }
-        } else {
-            // Non-fish MUST stay on land
-            if !is_water_cell {
-                hot.positions[i] = [new_x, new_y];
-            } else {
-                hot.velocities[i] = [0.0, 0.0]; // stop at boundary
-            }
-        }
     }
 }
 

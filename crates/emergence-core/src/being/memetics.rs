@@ -1,4 +1,5 @@
-use super::data::{BeingState, Beings, CreatureType, BUDDHA_STATE};
+use super::data::{BeingState, Beings, BUDDHA_STATE};
+use crate::being::dna::DietType;
 use crate::sim::spatial::SpatialIndex;
 
 /// L1 divergence between two memetic hashes.
@@ -33,7 +34,7 @@ pub fn tick_memetic_contagion(
             continue;
         }
         // Only humans carry active cultural identity
-        if beings.hot.creature_type[i] != CreatureType::Human as u8 {
+        if beings.hot.dna[i].diet != DietType::Omnivore {
             continue;
         }
 
@@ -51,7 +52,7 @@ pub fn tick_memetic_contagion(
             if beings.hot.states[j] == BeingState::Dead {
                 continue;
             }
-            if beings.hot.creature_type[j] != CreatureType::Human as u8 {
+            if beings.hot.dna[j].diet != DietType::Omnivore {
                 continue;
             }
             let j_hash = beings.cold.true_memetic_hash[j];
@@ -78,7 +79,7 @@ pub fn tick_buddha_detection(beings: &mut Beings, current_tick: u32) {
         if beings.hot.states[i] == BeingState::Dead {
             continue;
         }
-        if beings.hot.creature_type[i] != CreatureType::Human as u8 {
+        if beings.hot.dna[i].diet != DietType::Omnivore {
             continue;
         }
         // Already enlightened

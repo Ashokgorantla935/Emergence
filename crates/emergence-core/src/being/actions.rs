@@ -2476,7 +2476,8 @@ mod tests {
 
         let knowledge = crate::world::knowledge::KnowledgeGrid::new(64, 64);
         let laws = crate::sim::world_state::WorldLaws::default();
-        let result = score_actions(0, &beings, &terrain, &resources, &signals, &climate, &spatial, &knowledge, &laws, &mut rng);
+        let tensor = crate::world::tensor::TensorGrid::new(64, 64);
+        let result = score_actions(0, &beings, &terrain, &resources, &signals, &tensor, &climate, &spatial, &knowledge, &laws, &mut rng);
         assert_eq!(
             result.action,
             Action::SeekFood,
@@ -2519,7 +2520,8 @@ mod tests {
 
         let knowledge = crate::world::knowledge::KnowledgeGrid::new(64, 64);
         let laws = crate::sim::world_state::WorldLaws::default();
-        let result = score_actions(0, &beings, &terrain, &resources, &signals, &climate, &spatial, &knowledge, &laws, &mut rng);
+        let tensor = crate::world::tensor::TensorGrid::new(64, 64);
+        let result = score_actions(0, &beings, &terrain, &resources, &signals, &tensor, &climate, &spatial, &knowledge, &laws, &mut rng);
         assert_eq!(
             result.action,
             Action::Flee,

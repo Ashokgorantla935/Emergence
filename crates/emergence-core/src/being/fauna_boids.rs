@@ -70,7 +70,9 @@ pub fn tick_fauna_boids(
         let mut wander_vec = [0.0f32; 2];
 
         // ── Flee vector: away from high-aggression beings that outmass self ──
-        // V70 math: flight_panic = (1.0 - risk_tolerance) * acoustic_receptor
+        // V70 Neural Calculus: dna.flight_panic(incoming_danger, urgency)
+        let flee_radius = dna.perception_radius();
+        let flee_radius_sq = flee_radius * flee_radius;
         for &(j, jpos) in &fauna_snapshot {
             if j == i { continue; }
             let j_dna = hot.dna[j];
@@ -80,18 +82,24 @@ pub fn tick_fauna_boids(
             let dx = pos[0] - jpos[0];
             let dy = pos[1] - jpos[1];
             let dist_sq = dx * dx + dy * dy;
-            if dist_sq < 64.0 && dist_sq > 0.001 {
+            if dist_sq < flee_radius_sq && dist_sq > 0.001 {
                 let dist = dist_sq.sqrt();
-                let strength = (8.0 - dist) / 8.0;
-                let panic_scale = (1.0 - dna.risk_tolerance()) * dna.acoustic_receptor();
+                let strength = (flee_radius - dist) / flee_radius;
+                // incoming_danger proxy: aggression of the threat
+                let incoming_danger = j_dna.base_aggression();
+                // urgency proxy: how low the flee-er's safety need is (higher when unsafe)
+                let urgency = (1.0 - hot.needs[i][2]).max(0.0); // needs[2] = safety
+                let panic_scale = dna.flight_panic(incoming_danger, urgency);
                 flee_vec[0] += dx / dist * strength * panic_scale;
                 flee_vec[1] += dy / dist * strength * panic_scale;
             }
         }
 
         // ── Hunt vector (carnivores/omnivores): seek smaller, non-aggressive prey ──
-        // V70 math: fight_willpower = base_aggression * kinship_density_multiplier
+        // V70 Neural Calculus: dna.fight_willpower(kinship_density)
         if dna.base_aggression() > 0.3 {
+            let hunt_radius = dna.perception_radius();
+            let hunt_radius_sq = hunt_radius * hunt_radius;
             let kinship_density = fauna_snapshot
                 .iter()
                 .filter(|&&(j, jpos)| {
@@ -101,13 +109,13 @@ pub fn tick_fauna_boids(
                     let dy = jpos[1] - pos[1];
                     dx * dx + dy * dy < 100.0
                 })
-                .count() as f32;
-            let fight_willpower = dna.base_aggression() * (1.0 + kinship_density * 0.1);
+                .count() as f32 / 10.0;
+            let fight_willpower = dna.fight_willpower(kinship_density);
             let flee_magnitude =
                 (flee_vec[0] * flee_vec[0] + flee_vec[1] * flee_vec[1]).sqrt();
 
             if fight_willpower > flee_magnitude {
-                let mut best_dist_sq = 400.0f32; // within 20 tiles
+                let mut best_dist_sq = hunt_radius_sq;
                 let mut best_dir = [0.0f32; 2];
                 for &(j, jpos) in &fauna_snapshot {
                     if j == i { continue; }
@@ -123,7 +131,7 @@ pub fn tick_fauna_boids(
                         }
                     }
                 }
-                if best_dist_sq < 400.0 {
+                if best_dist_sq < hunt_radius_sq {
                     let d = best_dist_sq.sqrt();
                     hunt_vec[0] = best_dir[0] / d * dna.odor_receptor();
                     hunt_vec[1] = best_dir[1] / d * dna.odor_receptor();

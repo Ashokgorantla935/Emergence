@@ -1,4 +1,5 @@
 use super::data::*;
+use crate::being::dna::DietType;
 use crate::world::climate::Season;
 
 /// Blend genotypes from two parents, apply mutation, and return the child genotype.
@@ -432,7 +433,7 @@ pub fn tick_human_breeding(beings: &mut Beings, terrain: &crate::world::terrain:
         for j in nearby {
             if j == i { continue; }
             if beings.hot.states[j] == BeingState::Dead { continue; }
-            if beings.hot.creature_type[j] != CreatureType::Human as u8 { continue; }
+            if beings.hot.dna[j].diet != DietType::Omnivore { continue; }
             if beings.life_phase(j) != LifePhase::Adult { continue; }
             if world_tick.saturating_sub(beings.cold.last_birth_tick[j]) < 4000 { continue; }
             // Must have trust relationship

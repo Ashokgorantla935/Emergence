@@ -41,7 +41,7 @@ pub const NEED_WEALTH: usize = 7;
 
 /// Map a creature_type u8 to its preset BiologicalDNA. Used as a bridge while
 /// callers outside the allowed Wave-2 files still pass creature_type u8.
-fn dna_from_creature_type(ct: u8) -> BiologicalDNA {
+pub fn dna_from_creature_type(ct: u8) -> BiologicalDNA {
     match CreatureType::from_u8(ct) {
         CreatureType::Human  => BiologicalDNA::HUMAN,
         CreatureType::Wolf   => BiologicalDNA::WOLF,
@@ -99,13 +99,13 @@ pub fn active_needs_mask(creature_type: u8) -> u16 {
 }
 
 /// Count of active needs for a species (for reward normalization).
-pub fn active_needs_count(creature_type: u8) -> usize {
-    active_needs_mask(creature_type).count_ones() as usize
+pub fn active_needs_count(dna: &BiologicalDNA) -> usize {
+    dna.active_needs_mask().count_ones() as usize
 }
 
 /// Find the lowest ACTIVE need for a species.
-pub fn lowest_active_need(needs: &[f32; MAX_NEEDS], creature_type: u8) -> (usize, f32) {
-    let mask = active_needs_mask(creature_type);
+pub fn lowest_active_need(needs: &[f32; MAX_NEEDS], dna: &BiologicalDNA) -> (usize, f32) {
+    let mask = dna.active_needs_mask() as u16;
     let mut min_idx = 0;
     let mut min_val = f32::MAX;
     for i in 0..MAX_NEEDS {

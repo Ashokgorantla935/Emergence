@@ -84,8 +84,7 @@ pub fn update_emotions_from_needs(beings: &mut Beings) {
 
         // --- CONTENTMENT: rises when ALL active needs are well-satisfied ---
         let contentment_pressure = {
-            let ct = beings.hot.creature_type[i];
-            let (_, min_active) = super::data::lowest_active_need(needs, ct);
+            let (_, min_active) = super::data::lowest_active_need(needs, &beings.hot.dna[i]);
             if min_active > 0.5 {
                 (min_active - 0.5) * 0.014
             } else {

@@ -1,4 +1,4 @@
-use crate::being::data::CreatureType;
+use crate::being::dna::{BiologicalDNA, DietType};
 use crate::being::names::generate_name;
 use crate::world::climate::{Season, WeatherKind};
 use crate::world::terrain::Biome;
@@ -63,7 +63,7 @@ pub enum GodAction {
         preset: u8, // 0=Wanderer, 1=Elder, 2=Bold, 3=Pacifist, 4=Social, 5=Solitary
     },
     SpawnFauna {
-        kind: CreatureType,
+        dna: BiologicalDNA,
         pos: [f32; 2],
         count: u8,
     },
@@ -467,18 +467,16 @@ fn apply_god_action(world: &mut World, action: GodAction) {
             }
         }
 
-        GodAction::SpawnFauna { kind, pos, count } => {
+        GodAction::SpawnFauna { dna, pos, count } => {
             for i in 0..count {
                 let jitter_x = pos[0] + (world.rng.f32() - 0.5) * 3.0;
                 let jitter_y = pos[1] + (world.rng.f32() - 0.5) * 3.0;
                 let jx = jitter_x.clamp(0.0, world.config.size.0 as f32 - 1.0);
                 let jy = jitter_y.clamp(0.0, world.config.size.1 as f32 - 1.0);
                 if !world.terrain.is_water_f(jx, jy) {
-                    let personality = fauna_personality(kind, &mut world.rng);
+                    let personality = fauna_personality_from_dna(&dna, &mut world.rng);
                     let lifespan = 20000 + world.rng.u32(0..10000);
-                    let idx = world.beings.spawn([jx, jy], personality, lifespan, [u32::MAX, u32::MAX]);
-                    world.beings.hot.creature_type[idx] = kind as u8;
-                    world.beings.hot.fauna_params[idx] = crate::being::data::init_fauna_params(kind as u8);
+                    world.beings.spawn_with_dna([jx, jy], personality, lifespan, [u32::MAX, u32::MAX], dna);
                 }
                 let _ = i;
             }
@@ -887,15 +885,14 @@ fn apply_god_action(world: &mut World, action: GodAction) {
         }
 
         GodAction::SpawnPredatorPack { pos, count } => {
-            let predator_personality = [0.9f32, -0.8, 0.3, -0.9, 0.5];
             for i in 0..count {
                 let jx = (pos[0] + (world.rng.f32() - 0.5) * 4.0).clamp(0.0, world.config.size.0 as f32 - 1.0);
                 let jy = (pos[1] + (world.rng.f32() - 0.5) * 4.0).clamp(0.0, world.config.size.1 as f32 - 1.0);
                 if !world.terrain.is_water_f(jx, jy) {
                     let lifespan = 50000 + world.rng.u32(0..20000);
-                    let idx = world.beings.spawn([jx, jy], predator_personality, lifespan, [u32::MAX, u32::MAX]);
-                    world.beings.hot.creature_type[idx] = CreatureType::Wolf as u8;
-                    world.beings.hot.fauna_params[idx] = crate::being::data::init_fauna_params(CreatureType::Wolf as u8);
+                    let dna = BiologicalDNA::WOLF;
+                    let personality = fauna_personality_from_dna(&dna, &mut world.rng);
+                    world.beings.spawn_with_dna([jx, jy], personality, lifespan, [u32::MAX, u32::MAX], dna);
                 }
                 let _ = i;
             }
@@ -1468,15 +1465,17 @@ fn modify_relationship(
     slot.debt = (slot.debt + debt_delta).clamp(-1.0, 1.0);
 }
 
-fn fauna_personality(kind: CreatureType, rng: &mut fastrand::Rng) -> [f32; 5] {
-    match kind {
-        CreatureType::Hawk =>    [0.8,  -0.3, 0.5, -0.4, 0.8],
-        CreatureType::Deer =>    [-0.8,  0.6, -0.4, 0.0, 0.9],
-        CreatureType::Wolf =>    [0.9,  0.7, 0.3, -0.5, 0.5],
-        CreatureType::Fish =>    [-0.3,  0.2, 0.2,  0.1, 0.3],
-        CreatureType::Bear =>    [0.9,  -0.5, 0.2, -0.6, 0.3],
-        CreatureType::Rabbit =>  [-0.7,  0.4, 0.2,  0.0, 0.9],
-        CreatureType::Snake =>   [0.4,  -0.8, -0.1, -0.3, 0.2],
-        CreatureType::Human =>   crate::being::lifecycle::generate_initial_personality(rng),
+
+/// V70 Neural Calculus: DNA-derived personality instead of hardcoded per-species vectors.
+/// [bold, social, curious, generous, diurnal]
+fn fauna_personality_from_dna(dna: &BiologicalDNA, rng: &mut fastrand::Rng) -> [f32; 5] {
+    if dna.diet == DietType::Omnivore {
+        return crate::being::lifecycle::generate_initial_personality(rng);
     }
+    let bold = dna.risk_tolerance() * 2.0 - 1.0; // carnivores bold, herbivores timid
+    let social = if dna.diet == DietType::Herbivore { 0.5 } else { -0.3 }; // herds vs solo
+    let curious = dna.speed_scalar().min(1.0) * 0.5; // small fast creatures more curious
+    let generous = -dna.base_aggression(); // predators less generous
+    let diurnal = 0.5 + rng.f32() * 0.5; // slight random variation
+    [bold, social, curious, generous, diurnal]
 }

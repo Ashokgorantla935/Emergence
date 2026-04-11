@@ -13,13 +13,13 @@ pub fn hebbian_update(
     chosen_action: u8,
     needs_before: &[f32; super::data::MAX_NEEDS],
     needs_after: &[f32; super::data::MAX_NEEDS],
-    creature_type: u8,
+    dna: &super::dna::BiologicalDNA,
 ) {
     const ETA: f32 = 0.005;
 
     // Reward = improvement in worst-off active need (only positive → reinforce)
-    let (_, min_before) = super::data::lowest_active_need(needs_before, creature_type);
-    let (_, min_after)  = super::data::lowest_active_need(needs_after, creature_type);
+    let (_, min_before) = super::data::lowest_active_need(needs_before, dna);
+    let (_, min_after)  = super::data::lowest_active_need(needs_after, dna);
     let reward = (min_after - min_before).max(0.0);
 
     if reward < 1e-6 {
@@ -69,16 +69,16 @@ pub fn hebbian_update(
 mod tests {
     use super::*;
     use super::super::data::MAX_NEEDS;
+    use super::super::dna::BiologicalDNA;
 
-    // Wolf creature_type = 1; uses mask 0b00100101 (hunger=0, safety=2, rest=5)
-    const WOLF: u8 = 1;
+    fn wolf_dna() -> BiologicalDNA { BiologicalDNA::WOLF }
 
     #[test]
     fn test_hebbian_no_update_on_no_reward() {
         let mut params = [1.0f32; 6];
         let original = params;
         let needs = [0.5f32; MAX_NEEDS];
-        hebbian_update(&mut params, 3, &needs, &needs, WOLF); // same needs → no reward
+        hebbian_update(&mut params, 3, &needs, &needs, &wolf_dna()); // same needs → no reward
         assert_eq!(params, original);
     }
 
@@ -89,7 +89,7 @@ mod tests {
         let mut needs_after  = [0.5f32; MAX_NEEDS];
         needs_before[0] = 0.3; // hunger active for wolf
         needs_after[0]  = 0.4; // hunger improves → positive reward
-        hebbian_update(&mut params, 3, &needs_before, &needs_after, WOLF);
+        hebbian_update(&mut params, 3, &needs_before, &needs_after, &wolf_dna());
         // flee_weight (index 2) should be larger than all others after normalization
         assert!(params[2] > params[0], "flee_weight should be dominant over sep");
         assert!(params[2] > params[5], "flee_weight should be dominant over wander");
@@ -108,7 +108,7 @@ mod tests {
         needs_after[0]  = 0.9; // large improvement → large reward
         // Run many updates
         for _ in 0..100 {
-            hebbian_update(&mut params, 10, &needs_before, &needs_after, WOLF);
+            hebbian_update(&mut params, 10, &needs_before, &needs_after, &wolf_dna());
         }
         for &p in params.iter() {
             assert!(p >= 0.05 && p <= 5.0, "param out of bounds: {}", p);

@@ -99,6 +99,19 @@ impl BiologicalDNA {
         (50_000.0 * self.mass.powf(0.25)) as u32
     }
 
+    /// V70 Neural Calculus: willingness to fight.
+    /// kinship_density = count of same-diet beings within perception radius / 10.0
+    pub fn fight_willpower(&self, kinship_density: f32) -> f32 {
+        self.base_aggression() * (1.0 + kinship_density)
+    }
+
+    /// V70 Neural Calculus: panic-flight urgency.
+    /// incoming_danger = Acoustic tensor value at local cell
+    /// urgency = max(hunger_deficit, warmth_deficit, safety_deficit)
+    pub fn flight_panic(&self, incoming_danger: f32, urgency: f32) -> f32 {
+        incoming_danger * (1.0 - self.risk_tolerance()) * (1.0 + urgency)
+    }
+
     /// Genetic reproduction: blend two parents + mutation.
     pub fn reproduce(parent_a: &Self, parent_b: &Self, mutation: f32) -> Self {
         let avg_mass = (parent_a.mass + parent_b.mass) * 0.5;

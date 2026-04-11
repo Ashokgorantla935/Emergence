@@ -393,8 +393,12 @@ pub fn create_world_from_scenario(scenario: &ScenarioConfig) -> crate::sim::worl
         // Starting ages: mix of children, young adults, adults (0..50% of lifespan). No elders at start.
         beings.hot.ages[idx] = rng.u32(0..(lifespan / 2));
         if config.has_predators && (i as u32) < predator_count {
+            let wolf_dna = crate::being::dna::BiologicalDNA::WOLF;
+            beings.hot.dna[idx] = wolf_dna;
+            beings.hot.mass[idx] = wolf_dna.mass;
+            beings.hot.insulation[idx] = wolf_dna.insulation();
+            beings.hot.fauna_params[idx] = crate::being::data::derive_fauna_params(&wolf_dna);
             beings.hot.creature_type[idx] = crate::being::data::CreatureType::Wolf as u8;
-            beings.hot.fauna_params[idx] = crate::being::data::init_fauna_params(crate::being::data::CreatureType::Wolf as u8);
         }
     }
 

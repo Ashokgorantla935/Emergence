@@ -563,11 +563,13 @@ impl SaveFile {
             beings.hot.action_lock_ticks.push(0u16);
             beings.hot.states.push(being_state_from_u8(self.states[i]));
             beings.hot.creature_type.push(self.creature_type[i]);
+            let loaded_dna = crate::being::data::dna_from_creature_type(self.creature_type[i]);
+            beings.hot.dna.push(loaded_dna);
             beings.hot.fauna_params.push(
                 if i < self.fauna_params.len() {
                     self.fauna_params[i]
                 } else {
-                    crate::being::data::init_fauna_params(self.creature_type[i])
+                    crate::being::data::derive_fauna_params(&loaded_dna)
                 }
             );
             beings.hot.insulation.push(
@@ -580,7 +582,7 @@ impl SaveFile {
                 if i < self.being_caloric_energy.len() { self.being_caloric_energy[i] } else { 0.8 }
             );
             // V55 fields — transient state, not persisted in save
-            beings.hot.mass.push(crate::being::data::init_mass(self.creature_type[i]));
+            beings.hot.mass.push(loaded_dna.mass);
             beings.hot.last_fire_tick.push(
                 if i < self.being_last_fire_tick.len() { self.being_last_fire_tick[i] } else { 0u32 }
             );

@@ -1,4 +1,5 @@
 use super::data::*;
+use crate::being::dna::DietType;
 use crate::world::climate::Climate;
 
 pub fn decay_needs(beings: &mut Beings, climate: &Climate) {
@@ -17,9 +18,8 @@ pub fn decay_needs(beings: &mut Beings, climate: &Climate) {
             beings.hot.emotions[i][emo_idx] = (beings.hot.emotions[i][emo_idx] - 0.05).max(0.0);
         }
 
-        let ct = beings.hot.creature_type[i];
-        let is_human = ct == CreatureType::Human as u8;
         let dna = beings.hot.dna[i];
+        let is_omnivore = dna.diet == DietType::Omnivore;
 
         if beings.hot.states[i] == BeingState::Sleeping {
             // Sleeping: rest increases, other needs still decay
@@ -53,7 +53,7 @@ pub fn decay_needs(beings: &mut Beings, climate: &Climate) {
             beings.hot.needs[i][NEED_WARMTH] = beings.hot.body_temp[i].clamp(0.0, 1.0);
         }
 
-        if is_human {
+        if is_omnivore {
             // Human needs: full set (core needs 0-5 + human-only 6-7)
             // Safety: passive slow recovery (heals danger trauma)
             beings.hot.needs[i][NEED_SAFETY] = (beings.hot.needs[i][NEED_SAFETY] + 0.0005).min(1.0);

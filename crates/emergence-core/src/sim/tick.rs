@@ -728,7 +728,7 @@ pub fn tick(world: &mut World) {
                     action.action as u8,
                     &needs_before,
                     &needs_after,
-                    world.beings.hot.creature_type[i],
+                    &world.beings.hot.dna[i],
                 );
             }
 
@@ -785,9 +785,8 @@ pub fn tick(world: &mut World) {
                 );
 
                 // Reward: improvement in lowest ACTIVE need for this species
-                let ct = world.beings.hot.creature_type[i];
-                let (_, min_before) = crate::being::data::lowest_active_need(&needs_before, ct);
-                let (_, min_after) = crate::being::data::lowest_active_need(&needs_after, ct);
+                let (_, min_before) = crate::being::data::lowest_active_need(&needs_before, &world.beings.hot.dna[i]);
+                let (_, min_after) = crate::being::data::lowest_active_need(&needs_after, &world.beings.hot.dna[i]);
                 let base_reward = min_after - min_before;
 
                 // Criminal penalty: if Crime signal is at this being's position and they just

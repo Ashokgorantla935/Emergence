@@ -64,9 +64,10 @@ impl Settlement {
     }
 }
 
-/// Detect settlements: cluster living Human beings by proximity (radius 8.0) via union-find
-/// over the small candidate set (~100-500 beings), then quality-gate each cluster on
-/// comfort >= 0.15. O(N_beings) instead of O(W*H).
+/// Detect settlements via structural stigmergy: cluster living Humans who are bonded to
+/// built structures (home_settlement_pos is set), then quality-gate on comfort field.
+/// Settlements persist as long as beings remember their home position — abandoned areas
+/// dissolve when no bonded beings remain nearby.
 pub fn detect_settlements(
     signals: &SignalGrid,
     spatial: &SpatialIndex,
@@ -77,9 +78,9 @@ pub fn detect_settlements(
     use crate::being::data::{BeingState, CreatureType};
 
     const CLUSTER_RADIUS: f32 = 8.0;
-    const COMFORT_THRESHOLD: f32 = 0.25; // V63: raised bar — comfort must be meaningful
+    const COMFORT_THRESHOLD: f32 = 0.15; // V70: structural stigmergy lowers bar — presence of structure implies commitment
 
-    // Collect living Human candidates on land — filter out water/invalid positions.
+    // Structural stigmergy candidates: living Humans bonded to a home position (built or claimed a structure).
     let w = signals.width as f32;
     let h = signals.height as f32;
     let candidates: Vec<usize> = (0..beings.hot.count)
@@ -87,9 +88,9 @@ pub fn detect_settlements(
             if beings.hot.states[i] == BeingState::Dead { return false; }
             if beings.hot.creature_type[i] != CreatureType::Human as u8 { return false; }
             let [px, py] = beings.hot.positions[i];
-            // V63: Exclude beings at invalid/default positions or in water
             if px <= 0.0 || py <= 0.0 || px >= w || py >= h { return false; }
-            true
+            // V70: structural stigmergy — only beings bonded to a built structure qualify
+            beings.cold.home_settlement_pos[i].is_some()
         })
         .collect();
 
@@ -147,8 +148,8 @@ pub fn detect_settlements(
     let mut next_id = existing.iter().map(|s| s.id).max().unwrap_or(0) + 1;
 
     for (_root, members) in &groups {
-        if members.len() < 5 {
-            continue; // V63: requires 5+ for settlement (structural stigmergy)
+        if members.len() < 3 {
+            continue; // V70: 3+ structure-bonded beings required (structural stigmergy lowers bar)
         }
 
         // Compute centroid of this cluster.
@@ -196,6 +197,21 @@ pub fn detect_settlements(
 
         settlement.beings = members.clone();
         settlement.recompute_center(beings);
+
+        // V70: secondary population count — all living humans within settlement radius,
+        // not just structure-bonded ones. Nomads passing through count as population.
+        let all_in_range = spatial.query_radius_with_positions(
+            settlement.center[0], settlement.center[1], CLUSTER_RADIUS * 1.5,
+            &beings.hot.positions,
+        );
+        let full_pop: Vec<usize> = all_in_range.into_iter()
+            .filter(|&i| beings.hot.states[i] != BeingState::Dead
+                && beings.hot.creature_type[i] == CreatureType::Human as u8)
+            .collect();
+        if full_pop.len() > settlement.beings.len() {
+            settlement.beings = full_pop;
+            settlement.recompute_center(beings);
+        }
 
         // Compute average warmth (belonging need) among members.
         let warmth_sum: f32 = settlement.beings.iter().map(|&i| {

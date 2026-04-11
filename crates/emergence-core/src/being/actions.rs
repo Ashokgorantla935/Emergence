@@ -1304,6 +1304,13 @@ pub fn score_actions(
                 ) {
                     score = 0.0;
                 } else {
+                // DNA-derived: only beings with meaningful aggression can hunt
+                let self_dna = beings.hot.dna[being_index];
+                if self_dna.base_aggression() < 0.1 {
+                    score = 0.0;
+                } else {
+                // Scale hunt score by DNA aggression + odor receptor (predator tracking)
+                score *= self_dna.base_aggression() * self_dna.odor_receptor();
                 // Predators find nearest prey being within perception radius
                 let prey_pos = find_nearest_prey(pos, radius, being_index, beings, &nearby);
                 if let Some(pp) = prey_pos {
@@ -1317,6 +1324,7 @@ pub fn score_actions(
                     }
                 } else {
                     score = 0.0; // no prey visible
+                }
                 }
                 }
             }
@@ -1564,11 +1572,16 @@ fn apply_species_behavior(
                         *target_pos = Some([pos[0] + angle.cos() * 12.0, pos[1] + angle.sin() * 12.0]);
                     }
                 }
-                // Direct predator in range: always flee at learned flee score
+                // Direct predator in range: flee scaled by DNA risk_tolerance
                 let predator_near = nearby.iter().any(|&ni| {
                     ni != being_index
                         && beings.hot.states[ni] != BeingState::Dead
-                        && CreatureType::from_u8(beings.hot.creature_type[ni]).is_predator()
+                        && {
+                            let ni_dna = beings.hot.dna[ni];
+                            // DNA-driven: threatening if aggressive and outmasses self
+                            let self_mass = beings.hot.dna[being_index].mass;
+                            ni_dna.base_aggression() > 0.3 && ni_dna.mass > self_mass * 0.5
+                        }
                         && {
                             let tp = beings.hot.positions[ni];
                             let dx = tp[0] - pos[0];
@@ -1577,7 +1590,8 @@ fn apply_species_behavior(
                         }
                 });
                 if predator_near {
-                    *score = 4.5 * params[FLEE]; // panic flee strength from flee_weight
+                    let panic_scale = 1.0 - beings.hot.dna[being_index].risk_tolerance();
+                    *score = 4.5 * params[FLEE] * panic_scale.max(0.5);
                 }
             }
             Action::Cluster => {
@@ -1594,10 +1608,15 @@ fn apply_species_behavior(
         CreatureType::Rabbit => match action {
             Action::Flee => {
                 // 50% chance to freeze instead of flee when predator within 8 cells
+                let self_mass = beings.hot.dna[being_index].mass;
                 let predator_close = nearby.iter().any(|&ni| {
                     ni != being_index
                         && beings.hot.states[ni] != BeingState::Dead
-                        && CreatureType::from_u8(beings.hot.creature_type[ni]).is_predator()
+                        && {
+                            let ni_dna = beings.hot.dna[ni];
+                            // DNA-driven: threatening if aggressive and outmasses self
+                            ni_dna.base_aggression() > 0.3 && ni_dna.mass > self_mass * 0.5
+                        }
                         && {
                             let tp = beings.hot.positions[ni];
                             let dx = tp[0] - pos[0];
@@ -1606,14 +1625,15 @@ fn apply_species_behavior(
                         }
                 });
                 if predator_close && beings.hot.freeze_ticks[being_index] == 0 {
+                    let panic_scale = 1.0 - beings.hot.dna[being_index].risk_tolerance();
                     if rng.f32() < 0.5 {
                         // Freeze: override flee with zero-movement wander (target = current pos)
                         // freeze_ticks will be set to 30 in movement.rs when this Flee action executes
                         // but here we DON'T flee; suppress flee score so Wander (frozen) wins
                         *score = -1.0;
                     } else {
-                        // Flee with learned flee weight
-                        *score *= params[FLEE];
+                        // Flee with learned flee weight, scaled by DNA risk aversion
+                        *score *= params[FLEE] * panic_scale.max(0.5);
                     }
                 }
                 // Already frozen: suppress flee

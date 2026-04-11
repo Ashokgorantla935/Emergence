@@ -481,9 +481,15 @@ pub fn tick_human_breeding(beings: &mut Beings, terrain: &crate::world::terrain:
             rng
         );
         let child_geno = blend_child_genotype(beings, p1, p2, rng);
-        
+        let parent_a_dna = beings.hot.dna[p1];
+        let parent_b_dna = beings.hot.dna[p2];
+        let dna_mutation = rng.f32() * 0.1 - 0.05;
+        let child_dna = crate::being::dna::BiologicalDNA::reproduce(&parent_a_dna, &parent_b_dna, dna_mutation);
+
         let child_idx = beings.spawn(child_pos, child_personality, child_life as u32, [p1 as u32, p2 as u32]);
         beings.cold.genotypes[child_idx] = child_geno;
+        beings.hot.dna[child_idx] = child_dna;
+        beings.hot.mass[child_idx] = child_dna.mass;
         beings.hot.cultural_frequency[child_idx] = beings.hot.cultural_frequency[p1]; // Inherit culture
 
         // Axiom 16: inherit memetic hash from primary parent with small mutations

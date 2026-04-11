@@ -5,6 +5,7 @@ use crate::being::data::{
     Beings, BeingState, NEED_HUNGER, EMO_FEAR, EMO_ANGER, TRAIT_BOLD,
 };
 use crate::world::signal::{SignalChannel, SignalGrid};
+use crate::world::tensor::{TensorGrid, TensorLayer};
 
 /// Resolve melee combat between attacker and defender.
 /// Uses tool_quality (formerly combat_modifier) as weapon effectiveness.
@@ -14,6 +15,7 @@ pub fn resolve_combat(
     defender: usize,
     beings: &mut Beings,
     signals: &mut SignalGrid,
+    tensor: &mut TensorGrid,
     rng: &mut fastrand::Rng,
 ) {
     if beings.hot.states[attacker] == BeingState::Dead || beings.hot.states[defender] == BeingState::Dead {
@@ -43,6 +45,9 @@ pub fn resolve_combat(
         let cx = (pos[0] as u32).min(signals.width - 1);
         let cy = (pos[1] as u32).min(signals.height - 1);
         signals.deposit(SignalChannel::Danger, cx, cy, 0.6);
+        let tx = (pos[0] as u32).min(tensor.width - 1);
+        let ty = (pos[1] as u32).min(tensor.height - 1);
+        tensor.deposit(TensorLayer::Acoustic, tx, ty, 0.6);
     }
 
     // Attacker anger boost regardless of hit

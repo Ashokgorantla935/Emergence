@@ -93,8 +93,11 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     // Horizontal flip: if bob_flip < 0, facing left — mirror UV horizontally.
     let flip_sign = select(1.0, -1.0, instance.bob_flip < -0.001);
 
-    // Use the raw interpolated world_pos from CPU. The CPU handles all simulation syncing.
-    let predicted_pos = instance.world_pos;
+    // GPU dead-reckoning: extrapolate position forward by velocity * frame_dt.
+    // instance.velocity is in world-units/second; time_u.delta_time is seconds since last frame.
+    // For static beings (velocity == 0) this is a no-op. Smooths motion between CPU ticks.
+    let dr_offset = instance.velocity * time_u.delta_time;
+    let predicted_pos = instance.world_pos + dr_offset;
 
     // Billboard quad centred on predicted_pos, shifted up by bob.
     var pos = predicted_pos;

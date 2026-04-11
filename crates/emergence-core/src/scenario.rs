@@ -408,6 +408,7 @@ pub fn create_world_from_scenario(scenario: &ScenarioConfig) -> crate::sim::worl
         climate,
         climate_grid: crate::world::climate::ClimateGrid::new(w, h),
         signals,
+        tensor: crate::world::tensor::TensorGrid::new(w, h),
         beings,
         spatial,
         events,

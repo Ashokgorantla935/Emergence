@@ -6,7 +6,12 @@ pub mod save;
 pub mod scenario;
 pub mod god_action;
 
-use being::data::{Beings, CreatureType};
+pub use being::dna::{BiologicalDNA, DietType};
+pub use world::matter::MatterProperties;
+pub use world::tensor::{TensorGrid, TensorLayer, TENSOR_LAYER_COUNT};
+pub use sim::chunks::{ChunkGrid, ChunkState, CHUNK_SIZE};
+
+use being::data::Beings;
 use being::lifecycle::generate_initial_personality;
 use being::memes::{random_meme, MemeSlotState};
 use being::names::generate_name;
@@ -27,6 +32,7 @@ pub fn create_world(config: WorldConfig) -> World {
     let climate = Climate::new(&config);
     let climate_grid = ClimateGrid::new(config.size.0, config.size.1);
     let signals = SignalGrid::new(config.size.0, config.size.1);
+    let tensor = TensorGrid::new(config.size.0, config.size.1);
     let memetic = MemeticGrid::new(config.size.0, config.size.1);
     let knowledge = KnowledgeGrid::new(config.size.0, config.size.1);
     let spatial = SpatialIndex::new(config.size.0, config.size.1, 4.0);
@@ -114,6 +120,7 @@ pub fn create_world(config: WorldConfig) -> World {
         climate,
         climate_grid,
         signals,
+        tensor,
         memetic,
         knowledge,
         beings,
@@ -172,7 +179,7 @@ pub fn spawn_fauna(beings: &mut Beings, terrain: &Terrain, rng: &mut fastrand::R
         beings: &mut Beings,
         cells: &[[f32; 2]],
         count: usize,
-        creature_type: CreatureType,
+        dna: BiologicalDNA,
         personality: [f32; 5],
         rng: &mut fastrand::Rng,
         max_x: f32,
@@ -181,25 +188,14 @@ pub fn spawn_fauna(beings: &mut Beings, terrain: &Terrain, rng: &mut fastrand::R
         if cells.is_empty() || count == 0 {
             return;
         }
-        let lifespan_base: u32 = match creature_type {
-            CreatureType::Wolf => 288_000,   // ~10 game-years
-            CreatureType::Bear => 432_000,   // ~15 game-years
-            CreatureType::Deer => 288_000,   // ~10 game-years
-            CreatureType::Rabbit => 288_000, // ~10 game-years
-            CreatureType::Fish => 288_000,   // ~10 game-years
-            CreatureType::Hawk => 288_000,   // ~10 game-years
-            CreatureType::Snake => 432_000,  // ~15 game-years
-            CreatureType::Human => 1_152_000, // ~40 years
-        };
+        let lifespan_base = dna.max_lifespan();
         for _ in 0..count {
             let base = cells[rng.usize(..cells.len())];
             let jx = (base[0] + (rng.f32() - 0.5) * 4.0).clamp(0.0, max_x);
             let jy = (base[1] + (rng.f32() - 0.5) * 4.0).clamp(0.0, max_y);
             let noise = (rng.f32() - 0.5) * 0.1 * lifespan_base as f32;
             let lifespan = (lifespan_base as f32 + noise).max(10000.0) as u32;
-            let idx = beings.spawn([jx, jy], personality, lifespan, [u32::MAX, u32::MAX]);
-            beings.hot.creature_type[idx] = creature_type as u8;
-            beings.hot.fauna_params[idx] = crate::being::data::init_fauna_params(creature_type as u8);
+            let idx = beings.spawn_with_dna([jx, jy], personality, lifespan, [u32::MAX, u32::MAX], dna);
             beings.hot.cultural_frequency[idx] = 0.0; // fauna have no culture
             // Random starting age so some fauna are already adults/elders at world start
             beings.hot.ages[idx] = rng.u32(0..lifespan);
@@ -211,30 +207,30 @@ pub fn spawn_fauna(beings: &mut Beings, terrain: &Terrain, rng: &mut fastrand::R
 
     if has_predators {
         // Forest/wetland spawn: default mix
-        spawn_batch(beings, &forest_cells, 15, CreatureType::Wolf,   wolf_personality,   rng, max_x, max_y);
-        spawn_batch(beings, &forest_cells, 45, CreatureType::Deer,   deer_personality,   rng, max_x, max_y);
-        spawn_batch(beings, &forest_cells, 10, CreatureType::Bear,   bear_personality,   rng, max_x, max_y);
-        spawn_batch(beings, &forest_cells, 60, CreatureType::Rabbit, rabbit_personality, rng, max_x, max_y);
-        spawn_batch(beings, &forest_cells, 15, CreatureType::Hawk,   hawk_personality,   rng, max_x, max_y);
-        spawn_batch(beings, &forest_cells, 6,  CreatureType::Snake,  snake_personality,  rng, max_x, max_y);
+        spawn_batch(beings, &forest_cells, 15, BiologicalDNA::WOLF,   wolf_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &forest_cells, 45, BiologicalDNA::DEER,   deer_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &forest_cells, 10, BiologicalDNA::BEAR,   bear_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &forest_cells, 60, BiologicalDNA::RABBIT, rabbit_personality, rng, max_x, max_y);
+        spawn_batch(beings, &forest_cells, 15, BiologicalDNA::HAWK,   hawk_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &forest_cells, 6,  BiologicalDNA::SNAKE,  snake_personality,  rng, max_x, max_y);
 
         // Grassland spawn: default mix
-        spawn_batch(beings, &grassland_cells, 30, CreatureType::Deer,   deer_personality,   rng, max_x, max_y);
-        spawn_batch(beings, &grassland_cells, 35, CreatureType::Rabbit, rabbit_personality, rng, max_x, max_y);
-        spawn_batch(beings, &grassland_cells, 5,  CreatureType::Hawk,   hawk_personality,   rng, max_x, max_y);
-        spawn_batch(beings, &grassland_cells, 5,  CreatureType::Wolf,   wolf_personality,   rng, max_x, max_y);
-        spawn_batch(beings, &grassland_cells, 5,  CreatureType::Snake,  snake_personality,  rng, max_x, max_y);
+        spawn_batch(beings, &grassland_cells, 30, BiologicalDNA::DEER,   deer_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &grassland_cells, 35, BiologicalDNA::RABBIT, rabbit_personality, rng, max_x, max_y);
+        spawn_batch(beings, &grassland_cells, 5,  BiologicalDNA::HAWK,   hawk_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &grassland_cells, 5,  BiologicalDNA::WOLF,   wolf_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &grassland_cells, 5,  BiologicalDNA::SNAKE,  snake_personality,  rng, max_x, max_y);
     } else {
         // Paradise Mode: Herbivores completely overrun the world without predators
-        spawn_batch(beings, &forest_cells, 100, CreatureType::Deer,   deer_personality,   rng, max_x, max_y);
-        spawn_batch(beings, &forest_cells, 120, CreatureType::Rabbit, rabbit_personality, rng, max_x, max_y);
-        
-        spawn_batch(beings, &grassland_cells, 80, CreatureType::Deer,   deer_personality,   rng, max_x, max_y);
-        spawn_batch(beings, &grassland_cells, 100, CreatureType::Rabbit, rabbit_personality, rng, max_x, max_y);
+        spawn_batch(beings, &forest_cells, 100, BiologicalDNA::DEER,   deer_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &forest_cells, 120, BiologicalDNA::RABBIT, rabbit_personality, rng, max_x, max_y);
+
+        spawn_batch(beings, &grassland_cells, 80,  BiologicalDNA::DEER,   deer_personality,   rng, max_x, max_y);
+        spawn_batch(beings, &grassland_cells, 100, BiologicalDNA::RABBIT, rabbit_personality, rng, max_x, max_y);
     }
 
     // Water spawn: ~50 fish (always safe)
-    spawn_batch(beings, &water_cells, 50, CreatureType::Fish, fish_personality, rng, max_x, max_y);
+    spawn_batch(beings, &water_cells, 50, BiologicalDNA::FISH, fish_personality, rng, max_x, max_y);
 
     // Rebuild partition indices now that fauna are spawned
     beings.rebuild_partition_indices();

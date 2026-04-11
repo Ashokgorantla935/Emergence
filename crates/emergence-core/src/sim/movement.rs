@@ -77,11 +77,12 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                         0.3,
                     );
                     if consumed > 0.0 {
-                        // Eating brings hunger near-full: one eat = substantial meal
-                        world.beings.hot.needs[being_index][NEED_HUNGER] =
-                            (world.beings.hot.needs[being_index][NEED_HUNGER] + consumed * 15.0).min(1.0);
-                        // V36: also drain terrain nutrient_density (closed-loop mass)
                         let nidx = (cy.min(world.terrain.height - 1) * world.terrain.width + cx.min(world.terrain.width - 1)) as usize;
+                        // Hunger gain scaled by caloric_yield of the cell's matter
+                        let caloric_yield = world.resources.matter[nidx].caloric_yield.max(0.1);
+                        world.beings.hot.needs[being_index][NEED_HUNGER] =
+                            (world.beings.hot.needs[being_index][NEED_HUNGER] + caloric_yield * consumed * 30.0).min(1.0);
+                        // V36: also drain terrain nutrient_density (closed-loop mass)
                         let nutrient_consumed = consumed * 0.02; // scale to 0.0-1.0 range
                         world.terrain.nutrient_density[nidx] = (world.terrain.nutrient_density[nidx] - nutrient_consumed).max(0.0);
                         // Also feed caloric energy
@@ -93,6 +94,12 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                             cx.min(world.signals.width - 1),
                             cy.min(world.signals.height - 1),
                             0.3,
+                        );
+                        world.tensor.deposit(
+                            crate::world::tensor::TensorLayer::Odor,
+                            cx.min(world.tensor.width - 1),
+                            cy.min(world.tensor.height - 1),
+                            0.5,
                         );
                     } else if world.beings.hot.carry[being_index][0] > 0.05 {
                         // Eat from carried food when ground food unavailable
@@ -150,6 +157,12 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     crate::world::signal::SignalChannel::Danger,
                     cx.min(world.signals.width - 1),
                     cy.min(world.signals.height - 1),
+                    0.8,
+                );
+                world.tensor.deposit(
+                    crate::world::tensor::TensorLayer::Acoustic,
+                    cx.min(world.tensor.width - 1),
+                    cy.min(world.tensor.height - 1),
                     0.8,
                 );
             }
@@ -437,11 +450,23 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                                 py.min(world.signals.height - 1),
                                 0.5,
                             );
+                            world.tensor.deposit(
+                                crate::world::tensor::TensorLayer::Odor,
+                                px.min(world.tensor.width - 1),
+                                py.min(world.tensor.height - 1),
+                                0.5,
+                            );
                             // Danger signal from hunt
                             world.signals.deposit(
                                 crate::world::signal::SignalChannel::Danger,
                                 px.min(world.signals.width - 1),
                                 py.min(world.signals.height - 1),
+                                0.8,
+                            );
+                            world.tensor.deposit(
+                                crate::world::tensor::TensorLayer::Acoustic,
+                                px.min(world.tensor.width - 1),
+                                py.min(world.tensor.height - 1),
                                 0.8,
                             );
 
@@ -506,6 +531,12 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                                 py.min(world.signals.height - 1),
                                 0.6,
                             );
+                            world.tensor.deposit(
+                                crate::world::tensor::TensorLayer::Acoustic,
+                                px.min(world.tensor.width - 1),
+                                py.min(world.tensor.height - 1),
+                                0.6,
+                            );
                         }
                     } else {
                         // Move toward prey at 1.3x speed
@@ -517,6 +548,12 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                             crate::world::signal::SignalChannel::Danger,
                             cx.min(world.signals.width - 1),
                             cy.min(world.signals.height - 1),
+                            0.3,
+                        );
+                        world.tensor.deposit(
+                            crate::world::tensor::TensorLayer::Acoustic,
+                            cx.min(world.tensor.width - 1),
+                            cy.min(world.tensor.height - 1),
                             0.3,
                         );
                     }
@@ -626,6 +663,19 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     let bx = cx.min(world.terrain.width - 1);
                     let by = cy.min(world.terrain.height - 1);
                     world.terrain.place_structure(bx, by, target_type, being_index as u32);
+                    // Assign material properties based on structure type
+                    world.resources.matter[cidx] = match target_type {
+                        StructureType::Campfire | StructureType::LeanTo | StructureType::Hut
+                        | StructureType::NomadTent | StructureType::WoodenHouse | StructureType::Windmill => {
+                            crate::world::matter::MatterProperties::WOOD
+                        }
+                        StructureType::Wall | StructureType::StoneRoad | StructureType::StoneHouse
+                        | StructureType::Keep | StructureType::Castle | StructureType::Mine => {
+                            crate::world::matter::MatterProperties::STONE
+                        }
+                        StructureType::Forge => crate::world::matter::MatterProperties::IRON,
+                        _ => crate::world::matter::MatterProperties::SOIL,
+                    };
                     // Deforestation: clear biomass, flora, and degrade soil
                     world.terrain.biomass[cidx] = 0.0;
                     world.resources.flora_stage[cidx] = 0;

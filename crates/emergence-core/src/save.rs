@@ -480,6 +480,18 @@ impl SaveFile {
         };
 
         // Reconstruct ResourceLayer
+        let matter = self.food_type.iter().map(|&ft| {
+            use crate::world::matter::MatterProperties;
+            match food_type_from_u8(ft) {
+                FoodType::Berries => MatterProperties::BERRIES,
+                FoodType::Fish => MatterProperties::FISH_MEAT,
+                FoodType::Grain => MatterProperties::GRAIN,
+                FoodType::Stone => MatterProperties::STONE,
+                FoodType::Iron => MatterProperties::IRON,
+                FoodType::Oil => MatterProperties::OIL,
+                FoodType::None => MatterProperties::SOIL,
+            }
+        }).collect();
         let resources = ResourceLayer {
             food: self.food.clone(),
             food_capacity: self.food_capacity.clone(),
@@ -489,6 +501,7 @@ impl SaveFile {
             flora_hydration: vec![0u8; len],
             flora_energy: vec![0u16; len],
             fire: vec![0u8; len],
+            matter,
         };
 
         // Reconstruct Climate
@@ -667,6 +680,7 @@ impl SaveFile {
             climate,
             climate_grid: ClimateGrid::new(w, h),
             signals,
+            tensor: crate::world::tensor::TensorGrid::new(w, h),
             beings,
             spatial,
             events: crate::sim::world_state::EventLog::new(100_000),

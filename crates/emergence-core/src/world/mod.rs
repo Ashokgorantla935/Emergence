@@ -12,3 +12,5 @@ pub mod map_registry;
 pub mod terrain_gen;
 pub mod earth_gen;
 pub mod map_thumbnail;
+pub mod matter;
+pub mod tensor;

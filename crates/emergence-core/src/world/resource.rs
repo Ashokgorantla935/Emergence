@@ -1,4 +1,5 @@
 use super::climate::Season;
+use super::matter::MatterProperties;
 use super::terrain::{Biome, Terrain};
 
 fn cell_hash(x: usize, y: usize) -> usize {
@@ -30,6 +31,7 @@ pub struct ResourceLayer {
     pub flora_hydration: Vec<u8>,  // 0-255 water saturation
     pub flora_energy: Vec<u16>,    // accumulates → threshold triggers stage up
     pub fire: Vec<u8>,             // 0=not burning, 1-255=burn ticks remaining (countdown)
+    pub matter: Vec<MatterProperties>, // Per-cell material properties
 }
 
 impl ResourceLayer {
@@ -43,6 +45,7 @@ impl ResourceLayer {
         let mut flora_stage = Vec::with_capacity(len);
         let mut flora_hydration = Vec::with_capacity(len);
         let mut flora_energy = Vec::with_capacity(len);
+        let mut matter = Vec::with_capacity(len);
 
         let w = terrain.width;
         let h = terrain.height;
@@ -104,6 +107,16 @@ impl ResourceLayer {
                 food.push(cap); // start at capacity
                 food_type.push(ft);
                 regrowth_rate.push(rg);
+                let mp = match ft {
+                    FoodType::Berries => MatterProperties::BERRIES,
+                    FoodType::Fish => MatterProperties::FISH_MEAT,
+                    FoodType::Grain => MatterProperties::GRAIN,
+                    FoodType::Stone => MatterProperties::STONE,
+                    FoodType::Iron => MatterProperties::IRON,
+                    FoodType::Oil => MatterProperties::OIL,
+                    FoodType::None => MatterProperties::SOIL,
+                };
+                matter.push(mp);
 
                 // Flora initialization
                 let (fs, fh) = if is_water {
@@ -136,6 +149,7 @@ impl ResourceLayer {
             flora_hydration,
             flora_energy,
             fire: vec![0u8; len],
+            matter,
         }
     }
 

@@ -6,3 +6,4 @@ pub mod event_log;
 pub mod settlement;
 pub mod kingdom;
 pub mod combat;
+pub mod chunks;

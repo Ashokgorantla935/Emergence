@@ -182,6 +182,10 @@ struct App {
     // Accumulated wall-clock time for water animation shader
     elapsed_time: f32,
 
+    // Wall-clock time accumulated since the last completed sim tick.
+    // Used to compute frame_frac for GPU dead-reckoning position interpolation.
+    tick_accumulator: f32,
+
     // God tool visual feedback
     cursor_preview: CursorPreview,
     flash_alpha: f32,
@@ -363,6 +367,7 @@ impl App {
             left_mouse_clicked: false,
             shift_held: false,
             elapsed_time: 0.0,
+            tick_accumulator: 0.0,
             cursor_preview: CursorPreview::new(),
             flash_alpha: 0.0,
             shake: ScreenShake::new(),
@@ -948,6 +953,7 @@ impl ApplicationHandler for App {
         let frame_start = now;
         let dt = (now - self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = now;
+        self.tick_accumulator += dt;
 
         // --- FPS tracking ---
         self.frames_since_last_sec += 1;
@@ -1507,12 +1513,19 @@ impl ApplicationHandler for App {
 
             let being_t = Instant::now();
             if let Some(ref mut br) = self.being_renderer {
-                // frame_frac: fractional progress into the current tick for CPU position interpolation.
-                // This engine uses a fixed N-ticks-per-frame model (no accumulator), so rendering
-                // always occurs immediately after all ticks complete → 1.0 when active.
-                // When paused (0 ticks/frame) positions are frozen, so prev == cur and the value
-                // has no visual effect; use 0.0 to express "no progress since last tick."
-                let frame_frac = if self.speed.ticks_this_frame() > 0 { 1.0f32 } else { 0.0f32 };
+                // frame_frac: fractional progress into the current tick interval for position interpolation.
+                // tick_accumulator tracks wall-clock time since the last completed tick.
+                // At 60fps 1x speed (1 tick/frame), tick_duration ≈ 1/60s, so frame_frac ≈ 1.0.
+                // At 120fps the accumulator holds ~8ms vs 16ms tick_duration → frame_frac ≈ 0.5.
+                // When paused, positions are frozen (prev == cur) so frame_frac has no visual effect.
+                const BASELINE_TICK_DURATION: f32 = 1.0 / 60.0;
+                let frame_frac = if self.speed.ticks_this_frame() > 0 {
+                    let frac = (self.tick_accumulator / BASELINE_TICK_DURATION).clamp(0.0, 1.0);
+                    self.tick_accumulator = 0.0;
+                    frac
+                } else {
+                    0.0f32
+                };
                 let cx = self.camera.position[0];
                 let cy = self.camera.position[1];
                 let half_w = self.camera.zoom * self.camera.aspect * 0.5 + 4.0;

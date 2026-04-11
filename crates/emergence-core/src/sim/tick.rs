@@ -151,6 +151,21 @@ pub fn tick(world: &mut World) {
         world.signals.diffuse_single_channel(ch);
     }
 
+    // 3b-tensor. Tensor grid physics: decay, diffusion, light sync every tick.
+    {
+        use crate::world::tensor::TensorLayer;
+        // Sync wind from climate so Odor advection tracks actual wind drift
+        world.tensor.wind_direction = [world.climate.wind_dx, world.climate.wind_dy];
+        // Decay all layers first, then diffuse
+        world.tensor.decay_all();
+        world.tensor.diffuse_layer(TensorLayer::Acoustic);
+        world.tensor.diffuse_layer(TensorLayer::Heat);
+        world.tensor.advect_odor();
+        // Set global light from climate — V70: 0.6 moonlight floor at night
+        let raw_light = world.climate.light_level();
+        world.tensor.set_global_light(raw_light.max(0.6));
+    }
+
     // 3b. Toxin greenhouse effect: accumulate global temperature every 60 ticks.
     // Toxin now lives on the downsampled ClimateGrid (bypasses Metal 128MB buffer limit).
     if world.tick % 60 == 0 {
@@ -402,7 +417,7 @@ pub fn tick(world: &mut World) {
             world.beings.hot.states[i] = BeingState::Dead;
         }
         crate::being::fauna_boids::tick_fauna_boids(
-            &mut world.beings.hot,
+            &mut world.beings,
             &world.terrain,
             &world.resources,
         );
@@ -411,7 +426,7 @@ pub fn tick(world: &mut World) {
         }
     } else {
         crate::being::fauna_boids::tick_fauna_boids(
-            &mut world.beings.hot,
+            &mut world.beings,
             &world.terrain,
             &world.resources,
         );
@@ -419,8 +434,9 @@ pub fn tick(world: &mut World) {
     // Fauna breeding check (every 200 ticks)
     if world.tick % 200 == 0 {
         crate::being::fauna_boids::tick_fauna_breeding(
-            &mut world.beings.hot,
+            &mut world.beings,
             &world.terrain,
+            &mut world.rng,
         );
     }
     
@@ -1499,6 +1515,19 @@ pub fn tick(world: &mut World) {
                 let sx = x.min(world.signals.width - 1);
                 let sy = y.min(world.signals.height - 1);
                 world.signals.deposit(SignalChannel::Comfort, sx, sy, comfort_amt);
+
+                // Tensor Heat: campfires and forges emit heat locally
+                let heat_amt = match st {
+                    StructureType::Campfire | StructureType::Forge => 1.0,
+                    StructureType::Hut | StructureType::WoodenHouse | StructureType::StoneHouse => 0.3,
+                    StructureType::Keep | StructureType::Castle => 0.5,
+                    _ => 0.0,
+                };
+                if heat_amt > 0.0 {
+                    let tx = x.min(world.tensor.width - 1);
+                    let ty = y.min(world.tensor.height - 1);
+                    world.tensor.deposit(crate::world::tensor::TensorLayer::Heat, tx, ty, heat_amt);
+                }
             }
         }
     }

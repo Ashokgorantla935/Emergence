@@ -1,5 +1,6 @@
 use super::memory::{CausalMemoryRing, RelationshipSlots};
 use super::memes::MemeSlots;
+use crate::being::dna::{BiologicalDNA, DietType};
 use crate::trace::DecisionTraceRing;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -38,17 +39,63 @@ pub const NEED_WEALTH: usize = 7;
 // pub const NEED_BLOODLUST: usize = 9;  // Orcs
 // pub const NEED_FAITH: usize = 10;     // Priests
 
+/// Map a creature_type u8 to its preset BiologicalDNA. Used as a bridge while
+/// callers outside the allowed Wave-2 files still pass creature_type u8.
+fn dna_from_creature_type(ct: u8) -> BiologicalDNA {
+    match CreatureType::from_u8(ct) {
+        CreatureType::Human  => BiologicalDNA::HUMAN,
+        CreatureType::Wolf   => BiologicalDNA::WOLF,
+        CreatureType::Deer   => BiologicalDNA::DEER,
+        CreatureType::Rabbit => BiologicalDNA::RABBIT,
+        CreatureType::Fish   => BiologicalDNA::FISH,
+        CreatureType::Hawk   => BiologicalDNA::HAWK,
+        CreatureType::Bear   => BiologicalDNA::BEAR,
+        CreatureType::Snake  => BiologicalDNA::SNAKE,
+    }
+}
+
+/// Derive creature_type u8 from DNA for backward-compat with the renderer.
+/// TEMPORARY bridge — will be removed in Wave 4+ when renderer reads DNA directly.
+fn creature_type_from_dna(dna: &BiologicalDNA) -> u8 {
+    match dna.diet {
+        DietType::Omnivore => CreatureType::Human as u8,
+        DietType::Carnivore => {
+            if dna.mass >= 30.0 { CreatureType::Bear as u8 }
+            else if dna.mass >= 14.0 { CreatureType::Wolf as u8 }
+            else if dna.mass >= 8.0 { CreatureType::Hawk as u8 }
+            else { CreatureType::Snake as u8 }
+        }
+        DietType::Herbivore => {
+            if dna.mass >= 14.0 { CreatureType::Deer as u8 }
+            else { CreatureType::Rabbit as u8 } // Fish and Rabbit share identical DNA presets
+        }
+    }
+}
+
+/// Derive fauna boid params from BiologicalDNA algebraically.
+/// [0] separation, [1] cohesion, [2] flee, [3] hunt, [4] cluster, [5] wander
+pub fn derive_fauna_params(dna: &BiologicalDNA) -> [f32; 6] {
+    let separation = (1.0 / dna.mass.sqrt()).clamp(0.1, 2.0);
+    let cohesion = match dna.diet {
+        DietType::Herbivore => 2.0,
+        DietType::Omnivore  => 1.5,
+        DietType::Carnivore => 1.0,
+    };
+    let flee  = dna.acoustic_receptor();
+    let hunt  = dna.base_aggression().min(2.5);
+    let cluster = match dna.diet {
+        DietType::Herbivore => 2.0,
+        DietType::Omnivore  => 1.5,
+        DietType::Carnivore => 0.5,
+    };
+    let wander = (1.0 / dna.mass).clamp(0.1, 2.0);
+    [separation, cohesion, flee, hunt, cluster, wander]
+}
+
 /// Bitmask of active needs per species.
 /// Bit i set means need[i] is evaluated for this species.
 pub fn active_needs_mask(creature_type: u8) -> u16 {
-    match CreatureType::from_u8(creature_type) {
-        CreatureType::Human => 0b11111111,  // indices 0-7 active
-        // Fauna: only hunger, safety, rest (indices 0, 2, 5)
-        CreatureType::Wolf | CreatureType::Bear | CreatureType::Hawk => 0b00100101,
-        CreatureType::Deer | CreatureType::Rabbit => 0b00100101,
-        CreatureType::Fish => 0b00100001,  // hunger + rest only
-        CreatureType::Snake => 0b00100001,
-    }
+    dna_from_creature_type(creature_type).active_needs_mask() as u16
 }
 
 /// Count of active needs for a species (for reward normalization).
@@ -142,52 +189,22 @@ pub const BEING_TRAIT_SURVIVOR: u64   = 1 << 13;
 pub const BEING_TRAIT_FOUNDER: u64    = 1 << 14;
 pub const BEING_TRAIT_VETERAN: u64    = 1 << 15;
 
-/// Per-being learnable behavior parameters. Updated via Hebbian learning.
-/// Fauna use these to replace hardcoded boids/scoring constants.
-/// Humans get default [1.0; 6] (no fauna-specific behavior).
-/// [0] separation_weight, [1] cohesion_weight, [2] flee_weight,
-/// [3] hunt_weight, [4] cluster_weight, [5] wander_weight
+/// Fauna boid params — delegates to DNA-derived math.
+/// Signature kept for backward compat with callers in sim/ and save.rs (Wave 4 will clean up).
 pub fn init_fauna_params(creature_type: u8) -> [f32; 6] {
-    match CreatureType::from_u8(creature_type) {
-        CreatureType::Hawk   => [1.5, 2.0, 0.5, 1.5, 2.0, 0.3],
-        CreatureType::Wolf   => [1.0, 1.5, 0.3, 2.5, 1.5, 0.4],
-        CreatureType::Deer   => [0.8, 2.0, 2.5, 0.0, 2.0, 0.8],
-        CreatureType::Rabbit => [0.5, 1.5, 2.0, 0.0, 1.5, 0.5],
-        CreatureType::Fish   => [1.0, 2.0, 1.0, 0.0, 2.0, 0.5],
-        CreatureType::Bear   => [0.3, 0.5, 0.3, 2.0, 0.3, 1.5],
-        CreatureType::Snake  => [0.1, 0.1, 1.0, 0.5, 0.1, 2.0],
-        CreatureType::Human  => [1.0; 6],
-    }
+    derive_fauna_params(&dna_from_creature_type(creature_type))
 }
 
-/// V55 §4: Initial biological mass per creature type.
-/// Chosen so `0.1 * sqrt(mass)` matches V54 visual sizes.
+/// Biological mass — read directly from DNA preset.
+/// Signature kept for backward compat with callers in sim/ and save.rs (Wave 4 will clean up).
 pub fn init_mass(creature_type: u8) -> f32 {
-    match CreatureType::from_u8(creature_type) {
-        CreatureType::Human  => 64.0,
-        CreatureType::Wolf   => 16.0,
-        CreatureType::Deer   => 16.0,
-        CreatureType::Rabbit =>  9.0,  // spec: mass=9 → scale=0.3
-        CreatureType::Fish   =>  9.0,
-        CreatureType::Hawk   =>  9.0,
-        CreatureType::Bear   => 36.0,
-        CreatureType::Snake  =>  9.0,
-    }
+    dna_from_creature_type(creature_type).mass
 }
 
-/// Initial insulation factor per creature type.
-/// Wolf=2.0, Bear=3.0, Deer=1.5, Rabbit=1.2, Hawk=1.3, Fish=0.5, Snake=0.8, Human=1.0
+/// Thermal insulation — derived algebraically from mass via DNA.
+/// Signature kept for backward compat with callers in sim/ and save.rs (Wave 4 will clean up).
 pub fn init_insulation(creature_type: u8) -> f32 {
-    match CreatureType::from_u8(creature_type) {
-        CreatureType::Wolf   => 2.0,
-        CreatureType::Bear   => 3.0,
-        CreatureType::Deer   => 1.5,
-        CreatureType::Rabbit => 1.2,
-        CreatureType::Hawk   => 1.3,
-        CreatureType::Fish   => 0.5,
-        CreatureType::Snake  => 0.8,
-        CreatureType::Human  => 1.0,
-    }
+    dna_from_creature_type(creature_type).insulation()
 }
 
 /// Hot data — accessed every tick in the simulation loop. Keep in contiguous memory.
@@ -215,7 +232,10 @@ pub struct BeingsHot {
     pub action_lock_ticks: Vec<u16>,                // ticks remaining before action re-evaluation
     pub personalities: Vec<[f32; 5]>,
     pub states: Vec<BeingState>,
-    pub creature_type: Vec<u8>,   // 0=Human. See CreatureType enum. 1 byte per being.
+    pub creature_type: Vec<u8>,   // 0=Human. See CreatureType enum. 1 byte per being. Derived from dna for renderer compat.
+    /// V70: Universal biological identity. Replaces per-species branching.
+    /// Kept alongside creature_type as a bridge until renderer migrates (Wave 4+).
+    pub dna: Vec<BiologicalDNA>,
     /// Per-being learnable behavior parameters. Updated via Hebbian learning.
     /// Fauna use these to replace hardcoded boids/scoring constants.
     /// Humans get default [1.0; 6] (no fauna-specific behavior).
@@ -367,6 +387,7 @@ impl Beings {
                 personalities: Vec::new(),
                 states: Vec::new(),
                 creature_type: Vec::new(),
+                dna: Vec::new(),
                 fauna_params: Vec::new(),
                 insulation: Vec::new(),
                 body_temp: Vec::new(),
@@ -442,12 +463,13 @@ impl Beings {
         self.hot.action_lock_ticks.push(0u16);
         self.hot.personalities.push(personality);
         self.hot.states.push(BeingState::Awake);
-        self.hot.creature_type.push(CreatureType::Human as u8); // default to Human; override after spawn for fauna
-        self.hot.fauna_params.push([1.0; 6]); // human default; call init_fauna_params after setting creature_type
-        self.hot.insulation.push(1.0); // human default; call init_insulation after setting creature_type
+        self.hot.creature_type.push(CreatureType::Human as u8); // default Human; spawn_with_dna overrides for fauna
+        self.hot.dna.push(BiologicalDNA::HUMAN);                // default Human DNA; spawn_with_dna overrides
+        self.hot.fauna_params.push([1.0; 6]); // human default; spawn_with_dna overrides for fauna
+        self.hot.insulation.push(BiologicalDNA::HUMAN.insulation());
         self.hot.body_temp.push(1.0);
         self.hot.caloric_energy.push(0.8);
-        self.hot.mass.push(init_mass(CreatureType::Human as u8));
+        self.hot.mass.push(BiologicalDNA::HUMAN.mass);
         self.hot.last_fire_tick.push(0u32);
         self.hot.target_pos.push(position);
         self.hot.last_cognitive_tick.push(0u32);
@@ -490,6 +512,26 @@ impl Beings {
     ) -> usize {
         let idx = self.spawn(position, personality, lifespan, parent_ids);
         self.hot.ages[idx] = starting_age.min(lifespan.saturating_sub(1));
+        idx
+    }
+
+    /// Spawn a being with a specific BiologicalDNA profile.
+    /// Overrides mass, insulation, fauna_params, and creature_type (bridge) from DNA.
+    /// Use this instead of `spawn()` + manual field overrides for fauna.
+    pub fn spawn_with_dna(
+        &mut self,
+        position: [f32; 2],
+        personality: [f32; 5],
+        lifespan: u32,
+        parent_ids: [u32; 2],
+        dna_param: BiologicalDNA,
+    ) -> usize {
+        let idx = self.spawn(position, personality, lifespan, parent_ids);
+        self.hot.dna[idx] = dna_param;
+        self.hot.mass[idx] = dna_param.mass;
+        self.hot.insulation[idx] = dna_param.insulation();
+        self.hot.fauna_params[idx] = derive_fauna_params(&dna_param);
+        self.hot.creature_type[idx] = creature_type_from_dna(&dna_param);
         idx
     }
 

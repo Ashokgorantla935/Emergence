@@ -142,13 +142,7 @@ pub enum CreatureType {
 }
 
 impl CreatureType {
-    pub fn is_predator(self) -> bool {
-        matches!(self, CreatureType::Wolf | CreatureType::Bear | CreatureType::Hawk)
-    }
-
-    pub fn is_prey(self) -> bool {
-        matches!(self, CreatureType::Deer | CreatureType::Rabbit | CreatureType::Fish)
-    }
+    // V70: is_predator/is_prey DELETED — use dna.base_aggression() thresholds instead
 
     pub fn from_u8(v: u8) -> Self {
         match v {

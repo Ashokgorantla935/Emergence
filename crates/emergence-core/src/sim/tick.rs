@@ -648,6 +648,10 @@ pub fn tick(world: &mut World) {
             if world.beings.hot.states[i] != BeingState::Awake {
                 return None;
             }
+            // V71 §3: Skip beings in dormant chunks
+            if !world.chunks.is_active_pos(&world.beings.hot.positions[i]) {
+                return None;
+            }
             // Inner gate: action lock still active
             if world.beings.hot.action_lock_ticks[i] > 0 {
                 return None; // use locked action (handled in execute phase)
@@ -678,6 +682,10 @@ pub fn tick(world: &mut World) {
     // 5f. Execute actions (sequential)
     for (i, decision) in decisions.iter().enumerate() {
         if world.beings.hot.states[i] != BeingState::Awake {
+            continue;
+        }
+        // V71 §3: Skip beings in dormant chunks
+        if !world.chunks.is_active_pos(&world.beings.hot.positions[i]) {
             continue;
         }
 

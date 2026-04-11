@@ -27,10 +27,13 @@ impl ObjectGrid {
         }
     }
 
-    /// Drop an item at a world position.
+    /// Max items per cell — prevents OOM from unbounded accumulation.
+    const MAX_ITEMS_PER_CELL: usize = 8;
+
+    /// Drop an item at a world position. Capped at MAX_ITEMS_PER_CELL.
     pub fn drop_item(&mut self, x: u32, y: u32, item: WorldItem) {
         let idx = (y * self.width + x) as usize;
-        if idx < self.cells.len() {
+        if idx < self.cells.len() && self.cells[idx].len() < Self::MAX_ITEMS_PER_CELL {
             self.cells[idx].push(item);
         }
     }

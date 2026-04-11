@@ -32,8 +32,8 @@ impl TensorParams {
     pub const ALL: [Self; TENSOR_LAYER_COUNT] = [Self::LIGHT, Self::HEAT, Self::ACOUSTIC, Self::ODOR, Self::MICRO_BIOMASS];
 }
 
-/// The 4D Reaction-Diffusion Tensor Grid.
-/// Replaces SignalGrid's 11 channels with 4 physics-based layers.
+/// The 5D Reaction-Diffusion Tensor Grid.
+/// Replaces SignalGrid's 11 channels with 5 physics-based layers (V71: +MicroBiomass).
 #[derive(Clone, Encode, Decode)]
 pub struct TensorGrid {
     pub layers: Vec<Vec<f32>>,  // [4][width * height] flat arrays

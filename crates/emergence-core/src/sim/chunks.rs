@@ -72,6 +72,15 @@ impl ChunkGrid {
         self.chunks.get(idx).map_or(false, |c| c.is_active)
     }
 
+    /// Check if a being at a float position is in an active chunk.
+    /// Used as skip guard in tick loops: `if !chunks.is_active_pos(pos) { continue; }`
+    #[inline]
+    pub fn is_active_pos(&self, pos: &[f32; 2]) -> bool {
+        let tx = (pos[0] as u32).min(self.world_width.saturating_sub(1));
+        let ty = (pos[1] as u32).min(self.world_height.saturating_sub(1));
+        self.is_active_at(tx, ty)
+    }
+
     /// Dormancy check: deactivate chunks outside camera frustum with no urgency.
     /// `camera_min/max` are tile coordinates of the visible region.
     /// `urgency_positions` are tile positions of beings with active cognition (humans, active predators).

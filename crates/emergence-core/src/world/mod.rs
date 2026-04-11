@@ -14,3 +14,4 @@ pub mod earth_gen;
 pub mod map_thumbnail;
 pub mod matter;
 pub mod tensor;
+pub mod object_grid;

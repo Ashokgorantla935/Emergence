@@ -1,6 +1,7 @@
 use crate::being::data::{BeingState, Beings};
 use crate::being::dna::DietType;
 use crate::world::resource::ResourceLayer;
+use crate::world::tensor::{TensorGrid, TensorLayer};
 use crate::world::terrain::Terrain;
 
 /// Enhanced fauna boids tick — staggered cognitive + kinetic update.
@@ -11,6 +12,7 @@ pub fn tick_fauna_boids(
     beings: &mut Beings,
     terrain: &Terrain,
     resources: &ResourceLayer,
+    tensor: &mut TensorGrid,
 ) {
     let hot = &mut beings.hot;
     if hot.fauna_indices.is_empty() {
@@ -37,6 +39,20 @@ pub fn tick_fauna_boids(
             && terrain.water[cur_idx];
         if (is_aquatic && is_water) || (!is_aquatic && !is_water) {
             hot.positions[i] = [new_x, new_y];
+
+            // Biomass consumption: carnivores/omnivores with high hunger consume micro-biomass.
+            let diet = hot.dna[i].diet;
+            let is_predator = diet == DietType::Carnivore || diet == DietType::Omnivore;
+            if is_predator && hot.caloric_energy[i] < 0.5 {
+                let nx = new_x as u32;
+                let ny = new_y as u32;
+                let biomass = tensor.read(TensorLayer::MicroBiomass, nx, ny);
+                if biomass > 0.2 {
+                    tensor.layers[TensorLayer::MicroBiomass as usize][new_idx] =
+                        (biomass - 0.2).max(0.0);
+                    hot.caloric_energy[i] = (hot.caloric_energy[i] + 0.1).min(1.0);
+                }
+            }
         } else {
             hot.velocities[i] = [0.0, 0.0];
         }

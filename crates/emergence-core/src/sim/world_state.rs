@@ -5,12 +5,14 @@ use crate::being::data::Beings;
 use crate::god_action::GodActionQueue;
 use crate::world::climate::{Climate, ClimateGrid};
 use crate::world::config::WorldConfig;
+use crate::world::object_grid::ObjectGrid;
 use crate::world::resource::ResourceLayer;
 use crate::world::signal::SignalGrid;
 use crate::world::memetic::MemeticGrid;
 use crate::world::knowledge::KnowledgeGrid;
 use crate::world::tensor::TensorGrid;
 use crate::world::terrain::Terrain;
+use super::chunks::ChunkGrid;
 use super::spatial::SpatialIndex;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -236,6 +238,10 @@ pub struct World {
     pub total_energy: u64,
     /// V55 §2: Maximum energy cap set from config at genesis.
     pub energy_cap: u64,
+    /// V71: Physical item grid — items dropped on terrain cells, auto-forged by heat.
+    pub objects: ObjectGrid,
+    /// V71: Chunk-based being iteration — tracks being index bounds per 32×32 chunk.
+    pub chunks: ChunkGrid,
 }
 
 /// Energy cost (in abstract units) per structure type for energy accounting.

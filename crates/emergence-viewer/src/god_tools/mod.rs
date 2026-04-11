@@ -8,7 +8,7 @@ pub mod preview;
 pub use mod_types::{GodToolState, ToolTab};
 pub use preview::CursorPreview;
 
-use emergence_core::being::data::CreatureType;
+use emergence_core::being::dna::BiologicalDNA;
 use emergence_core::god_action::{GodAction, Rect};
 use emergence_core::world::terrain::Biome;
 use emergence_core::world::climate::{Season, WeatherKind};
@@ -138,11 +138,11 @@ fn build_action(
             lifespan: 86000,
         }),
         1..=5 => Some(GodAction::SpawnBeingPreset { pos: safe_pos, preset: pid - 1 }),
-        6 => Some(GodAction::SpawnFauna { kind: CreatureType::Hawk,   pos: safe_pos, count: 3 }),
-        7 => Some(GodAction::SpawnFauna { kind: CreatureType::Deer,   pos: safe_pos, count: 3 }),
-        8 => Some(GodAction::SpawnFauna { kind: CreatureType::Wolf,   pos: safe_pos, count: 2 }),
-        9 => Some(GodAction::SpawnFauna { kind: CreatureType::Rabbit, pos: safe_pos, count: 5 }),
-        10 => Some(GodAction::SpawnFauna { kind: CreatureType::Fish,  pos: safe_pos, count: 5 }),
+        6 => Some(GodAction::SpawnFauna { dna: BiologicalDNA::HAWK,   pos: safe_pos, count: 3 }),
+        7 => Some(GodAction::SpawnFauna { dna: BiologicalDNA::DEER,   pos: safe_pos, count: 3 }),
+        8 => Some(GodAction::SpawnFauna { dna: BiologicalDNA::WOLF,   pos: safe_pos, count: 2 }),
+        9 => Some(GodAction::SpawnFauna { dna: BiologicalDNA::RABBIT, pos: safe_pos, count: 5 }),
+        10 => Some(GodAction::SpawnFauna { dna: BiologicalDNA::FISH,  pos: safe_pos, count: 5 }),
         11 => Some(GodAction::SpawnShelter { x: tx, y: ty }),
 
         // ── Terrain ───────────────────────────────────────────────────────────

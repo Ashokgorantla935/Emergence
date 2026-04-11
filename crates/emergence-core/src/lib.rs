@@ -8,6 +8,7 @@ pub mod god_action;
 
 pub use being::dna::{BiologicalDNA, DietType};
 pub use world::matter::MatterProperties;
+pub use world::object_grid::{ObjectGrid, WorldItem};
 pub use world::tensor::{TensorGrid, TensorLayer, TENSOR_LAYER_COUNT};
 pub use sim::chunks::{ChunkGrid, ChunkState, CHUNK_SIZE};
 
@@ -113,6 +114,8 @@ pub fn create_world(config: WorldConfig) -> World {
     // Spawn fauna distributed by biome (~280 total)
     spawn_fauna(&mut beings, &terrain, &mut rng, config.has_predators);
 
+    let objects = world::object_grid::ObjectGrid::new(config.size.0, config.size.1);
+    let chunks = sim::chunks::ChunkGrid::new(config.size.0, config.size.1);
     let energy_cap = config.energy_cap;
     let mut world = World {
         terrain,
@@ -136,6 +139,8 @@ pub fn create_world(config: WorldConfig) -> World {
         wars: Vec::new(),
         total_energy: 0,
         energy_cap,
+        objects,
+        chunks,
     };
     // V55 §2: Calculate initial energy after world is fully constructed
     world.total_energy = crate::sim::world_state::recalculate_total_energy(&world);

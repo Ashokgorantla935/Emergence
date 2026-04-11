@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::being::data::{BeingState, Beings};
 use crate::being::memory::{CausalMemory, Impression};
+use crate::sim::chunks::ChunkGrid;
 use crate::sim::spatial::SpatialIndex;
 use crate::sim::world_state::{World, WorldLaws};
 use crate::world::climate::{Climate, ClimateGrid, DayPhase, Season};
@@ -238,6 +239,9 @@ pub struct SaveFile {
 
     // RNG state
     pub rng_state: u64,
+
+    // V71: Physical item grid (bitcode-encoded ObjectGrid)
+    pub object_grid_bytes: Vec<u8>,
 }
 
 impl SaveFile {
@@ -430,6 +434,8 @@ impl SaveFile {
             knowledge_height: world.knowledge.height,
 
             rng_state: world.rng.get_seed(),
+
+            object_grid_bytes: bitcode::encode(&world.objects),
         }
     }
 
@@ -716,6 +722,13 @@ impl SaveFile {
             },
             total_energy: 0,
             energy_cap: 500_000,
+            objects: if self.object_grid_bytes.is_empty() {
+                crate::world::object_grid::ObjectGrid::new(w, h)
+            } else {
+                bitcode::decode(&self.object_grid_bytes)
+                    .unwrap_or_else(|_| crate::world::object_grid::ObjectGrid::new(w, h))
+            },
+            chunks: ChunkGrid::new(w, h),
         }
     }
 }

@@ -13,6 +13,11 @@ pub struct ChunkState {
     pub dormant_since: u32,
     /// Count of entities stored in frozen_blob (for stats/debugging).
     pub frozen_entity_count: u32,
+    /// First being index (in SoA) whose position falls in this chunk.
+    /// Only valid after update_being_bounds() is called.
+    pub being_index_start: usize,
+    /// One-past-last being index in this chunk (exclusive upper bound).
+    pub being_index_end: usize,
 }
 
 impl ChunkState {
@@ -22,6 +27,8 @@ impl ChunkState {
             frozen_blob: None,
             dormant_since: 0,
             frozen_entity_count: 0,
+            being_index_start: 0,
+            being_index_end: 0,
         }
     }
 }
@@ -114,5 +121,46 @@ impl ChunkGrid {
     pub fn missed_ticks(&self, chunk_idx: usize, current_tick: u32) -> u32 {
         if self.chunks[chunk_idx].dormant_since == 0 { return 0; }
         current_tick.saturating_sub(self.chunks[chunk_idx].dormant_since)
+    }
+
+    /// Sort beings by chunk and populate index bounds.
+    /// Call after spatial index rebuild in tick.rs.
+    /// Tracks the min/max SoA indices of beings belonging to each chunk.
+    /// Beings at indices being_index_start..being_index_end include those in this chunk,
+    /// though the range may also include beings from adjacent chunks — callers should verify
+    /// chunk membership when strict correctness is required.
+    pub fn update_being_bounds(
+        &mut self,
+        positions: &[[f32; 2]],
+        states: &[crate::being::data::BeingState],
+        count: usize,
+    ) {
+        let total_chunks = self.chunks.len();
+        let mut chunk_min: Vec<usize> = vec![usize::MAX; total_chunks];
+        let mut chunk_max: Vec<usize> = vec![0; total_chunks];
+        let mut chunk_has: Vec<bool> = vec![false; total_chunks];
+
+        for i in 0..count {
+            if states[i] == crate::being::data::BeingState::Dead { continue; }
+            let pos = positions[i];
+            let tx = (pos[0] as u32).min(self.world_width.saturating_sub(1));
+            let ty = (pos[1] as u32).min(self.world_height.saturating_sub(1));
+            let cidx = self.chunk_index(tx, ty);
+            if cidx < total_chunks {
+                if i < chunk_min[cidx] { chunk_min[cidx] = i; }
+                if i + 1 > chunk_max[cidx] { chunk_max[cidx] = i + 1; }
+                chunk_has[cidx] = true;
+            }
+        }
+
+        for cidx in 0..total_chunks {
+            if chunk_has[cidx] {
+                self.chunks[cidx].being_index_start = chunk_min[cidx];
+                self.chunks[cidx].being_index_end = chunk_max[cidx];
+            } else {
+                self.chunks[cidx].being_index_start = 0;
+                self.chunks[cidx].being_index_end = 0;
+            }
+        }
     }
 }

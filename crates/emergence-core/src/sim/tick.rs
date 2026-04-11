@@ -167,6 +167,30 @@ pub fn tick(world: &mut World) {
         world.tensor.set_global_light(raw_light.max(0.6));
     }
 
+    // 3b-biomass. Micro-biomass fluid: forests and grasslands grow biomass every 30 ticks.
+    if world.tick % 30 == 0 {
+        use crate::world::tensor::TensorLayer;
+        use crate::world::terrain::Biome;
+        let tw = world.terrain.width;
+        for y in 0..world.terrain.height {
+            for x in 0..tw {
+                let idx = (y * tw + x) as usize;
+                let biome = world.terrain.biome[idx];
+                if biome == Biome::Forest || biome == Biome::Grassland {
+                    let current = world.tensor.read(TensorLayer::MicroBiomass, x, y);
+                    if current < 1.0 {
+                        world.tensor.deposit(TensorLayer::MicroBiomass, x, y, 0.001);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3b-forge. Auto-forge tick: merge items on hot cells every 60 ticks.
+    if world.tick % 60 == 0 {
+        world.objects.tick_forge(&world.tensor);
+    }
+
     // 3b. Toxin greenhouse effect: accumulate global temperature every 60 ticks.
     // Toxin now lives on the downsampled ClimateGrid (bypasses Metal 128MB buffer limit).
     if world.tick % 60 == 0 {
@@ -212,6 +236,13 @@ pub fn tick(world: &mut World) {
 
     // 4. Rebuild spatial index
     world.spatial.rebuild(&world.beings.hot.positions, &world.beings.hot.states);
+
+    // 4b. Update chunk being-index bounds for chunk-based iteration.
+    world.chunks.update_being_bounds(
+        &world.beings.hot.positions,
+        &world.beings.hot.states,
+        world.beings.hot.count,
+    );
 
     // 5. Being updates
 
@@ -416,6 +447,7 @@ pub fn tick(world: &mut World) {
             &mut world.beings,
             &world.terrain,
             &world.resources,
+            &mut world.tensor,
         );
         for &(i, original_state) in &predator_states {
             world.beings.hot.states[i] = original_state;
@@ -425,6 +457,7 @@ pub fn tick(world: &mut World) {
             &mut world.beings,
             &world.terrain,
             &world.resources,
+            &mut world.tensor,
         );
     }
     // Fauna breeding check (every 200 ticks)

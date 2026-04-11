@@ -1,17 +1,18 @@
 use bitcode::{Decode, Encode};
 
-/// The 4 universal physics layers that replace all signal channels.
+/// The 5 universal physics layers that replace all signal channels.
 /// Beings sense ONLY through their local cell's tensor values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode)]
 #[repr(u8)]
 pub enum TensorLayer {
-    Light = 0,     // Day/night cycle controls global level. Campfires emit 1.0 locally.
-    Heat = 1,      // Locks to radius 0 unless dispersed. Campfires, forges, body heat.
-    Acoustic = 2,  // High-speed rippling pulse, resolves to 0.0 in ~120 ticks (2 sec).
-    Odor = 3,      // Slow diffusion, pushed by wind vector from climate_diffuse.wgsl.
+    Light = 0,        // Day/night cycle controls global level. Campfires emit 1.0 locally.
+    Heat = 1,         // Locks to radius 0 unless dispersed. Campfires, forges, body heat.
+    Acoustic = 2,     // High-speed rippling pulse, resolves to 0.0 in ~120 ticks (2 sec).
+    Odor = 3,         // Slow diffusion, pushed by wind vector from climate_diffuse.wgsl.
+    MicroBiomass = 4, // Ecosystem biomass density: grows in Forest/Grassland, consumed by carnivores.
 }
 
-pub const TENSOR_LAYER_COUNT: usize = 4;
+pub const TENSOR_LAYER_COUNT: usize = 5;
 
 /// Diffusion parameters per tensor layer.
 #[derive(Clone, Copy, Debug)]
@@ -26,8 +27,9 @@ impl TensorParams {
     pub const HEAT: Self = Self { decay_factor: 0.995, diffusion_rate: 0.02, max_value: 2.0 };   // Slow spread, moderate decay
     pub const ACOUSTIC: Self = Self { decay_factor: 0.95, diffusion_rate: 0.25, max_value: 1.0 }; // Fast spread, fast decay (2 sec lifetime = ~120 ticks at 60/sec)
     pub const ODOR: Self = Self { decay_factor: 0.997, diffusion_rate: 0.0, max_value: 1.0 };     // No isotropic diffusion — wind-pushed only via climate shader
+    pub const MICRO_BIOMASS: Self = Self { decay_factor: 0.999, diffusion_rate: 0.0, max_value: 1.0 }; // Very slow decay, no diffusion — grows locally in fertile biomes
 
-    pub const ALL: [Self; TENSOR_LAYER_COUNT] = [Self::LIGHT, Self::HEAT, Self::ACOUSTIC, Self::ODOR];
+    pub const ALL: [Self; TENSOR_LAYER_COUNT] = [Self::LIGHT, Self::HEAT, Self::ACOUSTIC, Self::ODOR, Self::MICRO_BIOMASS];
 }
 
 /// The 4D Reaction-Diffusion Tensor Grid.

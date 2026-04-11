@@ -383,23 +383,17 @@ pub fn create_world_from_scenario(scenario: &ScenarioConfig) -> crate::sim::worl
     };
 
     for (i, pos) in spawn_positions.iter().enumerate() {
-        let personality = if config.has_predators && (i as u32) < predator_count {
-            [0.9f32, -0.8, 0.3, -0.9, 0.5]
-        } else {
-            generate_initial_personality(&mut rng)
-        };
         let lifespan = 1_152_000 + rng.u32(0..288_001); // 40-50 years
-        let idx = beings.spawn(*pos, personality, lifespan, [u32::MAX, u32::MAX]);
+        let idx = if config.has_predators && (i as u32) < predator_count {
+            let dna = crate::being::dna::BiologicalDNA::WOLF;
+            let personality = [0.9f32, -0.8, 0.3, -0.9, 0.5];
+            beings.spawn_with_dna(*pos, personality, lifespan, [u32::MAX, u32::MAX], dna)
+        } else {
+            let personality = generate_initial_personality(&mut rng);
+            beings.spawn(*pos, personality, lifespan, [u32::MAX, u32::MAX])
+        };
         // Starting ages: mix of children, young adults, adults (0..50% of lifespan). No elders at start.
         beings.hot.ages[idx] = rng.u32(0..(lifespan / 2));
-        if config.has_predators && (i as u32) < predator_count {
-            let wolf_dna = crate::being::dna::BiologicalDNA::WOLF;
-            beings.hot.dna[idx] = wolf_dna;
-            beings.hot.mass[idx] = wolf_dna.mass;
-            beings.hot.insulation[idx] = wolf_dna.insulation();
-            beings.hot.fauna_params[idx] = crate::being::data::derive_fauna_params(&wolf_dna);
-            beings.hot.creature_type[idx] = crate::being::data::CreatureType::Wolf as u8;
-        }
     }
 
     // Spawn fauna (wolves, deer, rabbits, hawks, fish, etc.) distributed by biome
@@ -428,6 +422,8 @@ pub fn create_world_from_scenario(scenario: &ScenarioConfig) -> crate::sim::worl
         knowledge: crate::world::knowledge::KnowledgeGrid::new(w, h),
         total_energy: 0,
         energy_cap: 500_000,
+        objects: crate::world::object_grid::ObjectGrid::new(w, h),
+        chunks: crate::sim::chunks::ChunkGrid::new(w, h),
     }
 }
 

@@ -58,23 +58,24 @@ Critical performance rules:
 ## Key Data Layout
 
 `Beings` splits into `BeingsHot` and `BeingsCold`:
-- **Hot** (every tick): positions, velocities, needs `[f32; 16]`, emotions `[f32; 6]`, ages, states, creature_type `u8`, personalities `[f32; 5]`, brain_weights `[f32; 318]`, fauna_params `[f32; 6]`
+- **Hot** (every tick): positions, velocities, needs `[f32; 16]`, emotions `[f32; 6]`, ages, states, creature_type `u8`, dna `BiologicalDNA` (mass, neural_density, jaw_strength, manipulation_paws), personalities `[f32; 5]`, brain_weights `[f32; 165]`, brain_output `[f32; 5]`, brain_noise `[f32; 5]`, caloric_history `[f32; 10]`, fauna_params `[f32; 6]`
 - **Cold** (rare access): names, causal memory rings, relationship slots, meme slots, decision traces
 
 Emotions are exactly 6 (fear, joy, curiosity, anger, grief, contentment) — this is a hard constraint. Needs are 16 slots; humans use 8 (hunger, warmth, safety, belonging, purpose, rest, food_security, wealth), fauna use subsets via bitmask.
 
-Creature types: Human(0), Wolf(1), Deer(2), Rabbit(3), Fish(4), Hawk(5), Bear(6), Snake(7). Stored as `u8` in SoA. Humans get full behavior; fauna get simplified boids via `fauna_params`.
+Creature types: Human(0), Wolf(1), Deer(2), Rabbit(3), Fish(4), Hawk(5), Bear(6), Snake(7). Stored as `u8` in SoA + `BiologicalDNA` per being. Cognitive beings (neural_density > 0.5) get full brain; fauna get boid heuristics via `fauna_params`. DietType enum DELETED in V78 — all behavior derived from continuous DNA fields.
 
 ## Core Concepts
 
-- **Signal Grid** — stigmergy substrate. Multiple channels (danger, food-trail, comfort, grief, celebration, anger) on a discrete grid. Signals diffuse and evaporate. Beings communicate indirectly through environmental modification.
-- **Memetic Grid** — separate grid for cultural transmission. Memes follow SIRS (Susceptible → Infected → Recovered → Susceptible) propagation model.
-- **Consequence Architecture** — three layers: (1) rate-of-change sensing on needs, (2) causal memory ring `(action, context, outcome)`, (3) internal 50-tick need projection before action selection.
-- **Neural Brain** — per-human MLP: 14 inputs → 8 hidden (tanh) → 22 output Q-values. Weights in `brain_weights [f32; 318]`. Hebbian learning updates weights based on need deltas.
+- **TensorGrid** — 7-layer physics grid (Light, Heat, Acoustic, Odor, MicroBiomass, Moisture, Culture). Inverse-square diffusion with elevation blocking. Replaces old SignalGrid.
+- **Memetic Grid** — separate grid for cultural transmission. Memes follow SIRS propagation model.
+- **Consequence Architecture** — rate-of-change sensing on needs + causal memory ring `(behavior_tag, context, outcome)`.
+- **Neural Brain (V78)** — per-cognitive-being MLP: 14 inputs → 8 hidden (tanh) → 5 outputs (NeuralOutput). Weights in `brain_weights [f32; 165]`. REINFORCE continuous gradient descent with caloric reward. No discrete actions — all behavior emerges from continuous physics vectors.
+- **NeuralOutput** — `{ velocity_x, velocity_y, push_force, pull_force, thermal_friction }`. Pull=absorb (eat/mine/hunt), Push=expel (build/share/attack), Thermal=rest/warm. Movement.rs interprets these physically.
 - **Relational Memory** — per-being relationship slots (`trust`, `warmth`, `debt`). Social emotions emerge from accumulated interaction residue.
-- **Witnessing** — all actions observed within perception radius update observer relationship maps, creating reputation without communication.
-- **Behavior Selection** — no state machine. Score ~15 actions against lowest Maslow need, personality, emotions, signals, causal memories, relationships, and projected future needs.
-- **World Laws** — 28 named booleans (not bitfield) that override simulation behavior at runtime (e.g., `immortal`, `no_bonding`, `eternal_spring`, `infinite_food`).
+- **Witnessing** — observed behavior (inferred from NeuralOutput) updates observer relationship maps.
+- **Active Injections** — 13 sustained physical god powers that write to tensor/terrain each tick (eternal_spring, infinite_food, war_drums, etc.). Replaced boolean WorldLaws for environmental powers.
+- **Divine Constraints** — 15 irreducible behavioral gates (immortal, no_reproduction, etc.). Cannot be expressed as physics.
 - **God Actions** — player interventions queued via `GodActionQueue`, processed at tick start before simulation.
 - **Settlements & Kingdoms** — emergent political structures detected from spatial clustering. Wars track inter-kingdom conflicts.
 
@@ -82,19 +83,20 @@ Creature types: Human(0), Wolf(1), Deer(2), Rabbit(3), Fish(4), Hawk(5), Bear(6)
 
 Order matters — this is the simulation heartbeat:
 1. Process god action queue
-2. Climate tick (season, weather, day/night cycle) + law overrides
-3. Resource tick (food regrowth, depletion)
-4. Signal diffusion + evaporation
-5. Spatial index rebuild
-6. Age beings, check death, spawn births
-7. For each alive being: sense context → score actions → execute chosen action → update needs/emotions
-8. Settlement/kingdom detection (periodic)
+2. Apply sustained injections (tensor/terrain physics from active god powers)
+3. Climate tick (season, weather, day/night cycle)
+4. Resource tick (food regrowth, depletion)
+5. TensorGrid physics: decay, diffuse, moisture gravity, biomass growth
+6. Spatial index rebuild
+7. Age beings, check death, spawn births
+8. For each alive being: brain forward pass → NeuralOutput → apply_neural_output() → REINFORCE learning
+9. Settlement/kingdom detection (periodic)
 
 Fixed timestep: `FIXED_DT = 1.0`, never variable. Speed multiplier controls ticks-per-frame in the app layer.
 
 ## Save System
 
-Binary save/load via bitcode. Slots 0-7 manual, slot 8 is autosave (every 18,000 ticks). Save files include full world state. Version field for forward compatibility.
+Binary save/load via bitcode. Slots 0-7 manual, slot 8 is autosave (every 18,000 ticks). Save files include full world state. Version 3 (V78). Old v2 saves get brain re-init on load (318→165 weights incompatible). Persistent intelligence: `.c_swrm` format for ancestral genome.
 
 ## Design Spec
 

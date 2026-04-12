@@ -33,13 +33,13 @@ pub enum StructureType {
     Factory = 11,      // produces advanced goods like automobiles
     Automobile = 12,   // built vehicle for fast transport
     OilPump = 13,      // extracts oil from lowland deposits
-    // Progressive architecture (tech-gated)
-    NomadTent = 14,    // basic shelter, no tech required
-    WoodenHouse = 15,  // requires TECH_AGRICULTURE knowledge
-    StoneHouse = 16,   // requires TECH_MASONRY
-    Windmill = 17,     // requires TECH_AGRICULTURE + TECH_MASONRY
-    Keep = 18,         // requires TECH_MASONRY + TECH_SMELTING
-    Castle = 19,       // requires TECH_MASONRY + TECH_SMELTING + TECH_ENGINEERING
+    // V77: Progressive architecture — now driven by structural_density thresholds, not tech tree
+    NomadTent = 14,
+    WoodenHouse = 15,
+    StoneHouse = 16,   // density ≥ 25
+    Windmill = 17,
+    Keep = 18,         // density ≥ 50
+    Castle = 19,       // density ≥ 100
     FarmField = 20,    // tilled agricultural land
     Canal = 21,        // irrigation channel: sets water flag, clears biomass
 }

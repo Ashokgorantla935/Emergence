@@ -909,10 +909,9 @@ fn collect_chunk_decor(
     for y in cell_y0..cell_y1 {
         for x in cell_x0..cell_x1 {
             let idx = y * w + x;
-            let s = terrain.structure[idx];
-            if s == 0 { continue; }
-            // V77: density-threshold sprite selection.
+            // V77: structure existence = density > 0.5 (no StructureType gate)
             let raw_density = terrain.structural_density[idx];
+            if raw_density <= 0.5 { continue; }
 
             let (atlas_uv, tint, alpha) = if raw_density >= 100.0 {
                 (ARCH_190_CASTLE, [0.8_f32, 0.8, 0.9], 1.0_f32)

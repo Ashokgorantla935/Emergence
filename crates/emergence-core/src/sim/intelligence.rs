@@ -4,6 +4,7 @@ use crate::sim::world_state::World;
 
 pub const INTELLIGENCE_FILE: &str = "evolution.swrm";
 pub const DISTILL_INTERVAL: u32 = 18_000;
+pub const MIN_TICKS_FOR_WISDOM: u32 = 30_000; // Only capture civilizations that survived 30K+ ticks
 const BLEND_FACTOR: f32 = 0.3;
 const MIN_AGE_FRACTION: f32 = 0.5;
 const BRAIN_SIZE: usize = 318;

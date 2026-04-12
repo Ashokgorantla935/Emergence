@@ -1604,8 +1604,9 @@ pub fn tick(world: &mut World) {
         }
     }
 
-    // Periodic intelligence distillation
-    if world.tick > 0 && world.tick % crate::sim::intelligence::DISTILL_INTERVAL == 0 {
+    // Periodic intelligence distillation (only after civilization has matured)
+    if world.tick >= crate::sim::intelligence::MIN_TICKS_FOR_WISDOM
+        && world.tick % crate::sim::intelligence::DISTILL_INTERVAL == 0 {
         let (genome, result) = crate::sim::intelligence::distill_from_world(world);
         if result.sampled_humans > 0 {
             let tick = world.tick;

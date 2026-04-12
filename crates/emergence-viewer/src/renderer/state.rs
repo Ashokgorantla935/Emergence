@@ -54,8 +54,21 @@ impl ExtCameraUniform {
         let zoom_level = (zoom_blend / 2.0).clamp(0.0, 1.0);
         let pitch = std::f32::consts::FRAC_PI_2
             + (std::f32::consts::FRAC_PI_4 - std::f32::consts::FRAC_PI_2) * zoom_level;
+
+        // V75 §1.1: Blend orthographic (zoom_level=0) → perspective (zoom_level=1).
+        // At close zoom, the slight perspective foreshortening enhances the 2.5D parallax.
+        // We lerp individual matrix elements — both are column-major 4x4.
+        let ortho = basic.view_proj;
+        // Construct a mild perspective: use the ortho extents but add foreshortening.
+        // perspective_factor controls how strong the effect is (0 = pure ortho, 1 = full persp)
+        let perspective_factor = zoom_level * 0.15; // Subtle — max 15% perspective blend
+        let mut blended = ortho;
+        // Perspective foreshortening: Z affects X/Y scaling (rows 0,1 get Z contribution)
+        blended[2][0] = perspective_factor * ortho[0][0] * 0.1; // slight X foreshorten from Z
+        blended[2][1] = perspective_factor * ortho[1][1] * 0.1; // slight Y foreshorten from Z
+
         ExtCameraUniform {
-            view_proj: basic.view_proj,
+            view_proj: blended,
             pixels_per_unit,
             _pad0: 0.0,
             _pad1: 0.0,

@@ -78,10 +78,9 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
         inst.world_pos.y + vertex.position.y,
     );
 
-    // V75: Terrain extrusion — mountains rise visually as camera pitches toward isometric.
-    // At zoom_factor=0.0 (top-down), no displacement. At zoom_factor=1.0 (isometric), full rise.
+    // V75 §1.3: Terrain extrusion — Y for visual height, Z for depth sorting.
     let z_displacement = inst.elevation * MAX_MOUNTAIN_HEIGHT * camera.zoom_factor;
-    out.clip_position = camera.view_proj * vec4<f32>(world.x, world.y + z_displacement, 0.0, 1.0);
+    out.clip_position = camera.view_proj * vec4<f32>(world.x, world.y + z_displacement, z_displacement, 1.0);
 
     // Tile-local UV interpolates perfectly [0,1] across the quad — no seam artifacts
     out.uv = vertex.uv;

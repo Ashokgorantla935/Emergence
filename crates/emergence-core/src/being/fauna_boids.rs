@@ -68,9 +68,10 @@ pub fn tick_fauna_boids(
         if (is_aquatic && is_water_uphill) || (!is_aquatic && !is_water_uphill) {
             hot.positions[i] = [uphill_new_x, uphill_new_y];
 
-            // V75 §3.2: Double caloric drain when climbing
+            // V75 §3.2: Double caloric drain when climbing — DNA-derived, not hardcoded
             if delta_z > 0.0 {
-                hot.caloric_energy[i] = (hot.caloric_energy[i] - 0.0002).max(0.0);
+                let climb_drain = hot.dna[i].metabolism_rate() * 2.0;
+                hot.caloric_energy[i] = (hot.caloric_energy[i] - climb_drain).max(0.0);
             }
 
             // Biomass consumption: carnivores/omnivores with high hunger consume micro-biomass.

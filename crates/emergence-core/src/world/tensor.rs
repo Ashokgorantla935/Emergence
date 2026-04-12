@@ -182,7 +182,8 @@ impl TensorGrid {
                     }
                 }
 
-                dst[idx] = center + rate * (inv_sq_sum - center);
+                // V75 §2.2: Pure additive inverse-square — neighbors push into center cell
+                dst[idx] = (center * (1.0 - rate) + inv_sq_sum * rate).min(params.max_value);
             }
         }
 

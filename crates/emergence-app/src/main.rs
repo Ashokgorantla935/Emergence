@@ -925,6 +925,17 @@ impl ApplicationHandler for App {
     fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         // --- Resolve pending actions from previous frame's UI ---
         if self.pending_quit {
+            // Final intelligence distillation — synchronous, must complete before exit
+            if let Some(ref world_arc) = self.world {
+                let world = world_arc.read().unwrap();
+                let (genome, result) = emergence_core::sim::intelligence::distill_from_world(&world);
+                if result.sampled_humans > 0 {
+                    let tick = world.tick;
+                    let _ = emergence_core::sim::intelligence::blend_and_save(&genome, tick);
+                    println!("[INTELLIGENCE] Saved ancestral wisdom ({} humans sampled, gen {})",
+                             result.sampled_humans, genome.generation_depth);
+                }
+            }
             event_loop.exit();
             return;
         }
@@ -2677,6 +2688,17 @@ impl ApplicationHandler for App {
                     }
                     PauseMenuAction::Quit => {
                         self.screen = ScreenState::MainMenu;
+                        // Final intelligence distillation before world is dropped
+                        if let Some(ref world_arc) = self.world {
+                            let world = world_arc.read().unwrap();
+                            let (genome, result) = emergence_core::sim::intelligence::distill_from_world(&world);
+                            if result.sampled_humans > 0 {
+                                let tick = world.tick;
+                                let _ = emergence_core::sim::intelligence::blend_and_save(&genome, tick);
+                                println!("[INTELLIGENCE] Saved ancestral wisdom ({} humans sampled, gen {})",
+                                         result.sampled_humans, genome.generation_depth);
+                            }
+                        }
                         self.world = None;
                     }
                     PauseMenuAction::Settings | PauseMenuAction::None => {}

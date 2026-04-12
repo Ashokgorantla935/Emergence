@@ -1604,6 +1604,17 @@ pub fn tick(world: &mut World) {
         }
     }
 
+    // Periodic intelligence distillation
+    if world.tick > 0 && world.tick % crate::sim::intelligence::DISTILL_INTERVAL == 0 {
+        let (genome, result) = crate::sim::intelligence::distill_from_world(world);
+        if result.sampled_humans > 0 {
+            let tick = world.tick;
+            std::thread::spawn(move || {
+                let _ = crate::sim::intelligence::blend_and_save(&genome, tick);
+            });
+        }
+    }
+
     // 9. Increment tick
     world.tick += 1;
 }

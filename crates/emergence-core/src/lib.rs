@@ -40,6 +40,7 @@ pub fn create_world(config: WorldConfig) -> World {
     let events = EventLog::new(100_000);
 
     let mut rng = fastrand::Rng::with_seed(config.terrain_seed.wrapping_add(42));
+    let genome = crate::sim::intelligence::load_genome();
     let mut beings = Beings::new();
 
     let predator_count = (config.initial_beings as f32 * config.predator_fraction) as u32;
@@ -84,9 +85,17 @@ pub fn create_world(config: WorldConfig) -> World {
             }
         };
 
-        let personality = if config.has_predators && i < predator_count {
+        let is_predator = config.has_predators && i < predator_count;
+        let human_seed = if !is_predator {
+            genome.as_ref().map(|g| crate::sim::intelligence::seed_human_from_genome(g, &mut rng))
+        } else {
+            None
+        };
+        let personality = if is_predator {
             // Predator personality: bold=0.9, social=-0.8, curious=0.3, generous=-0.9, diurnal=0.5
             [0.9, -0.8, 0.3, -0.9, 0.5]
+        } else if let Some(ref s) = human_seed {
+            s.personality
         } else {
             generate_initial_personality(&mut rng)
         };
@@ -94,6 +103,10 @@ pub fn create_world(config: WorldConfig) -> World {
         // Varied lifespan: 40-50 sim-year range (using tick scale: 1 sim-year ≈ 28800 ticks)
         let lifespan = 1_152_000 + rng.u32(0..288_001); // 40-50 years
         let idx = beings.spawn([x, y], personality, lifespan, [u32::MAX, u32::MAX]);
+        if let Some(ref s) = human_seed {
+            beings.hot.brain_weights[idx] = s.brain_weights;
+            beings.cold.genotypes[idx].q_baselines = s.q_baselines;
+        }
         beings.cold.names[idx] = generate_name(&mut rng);
         // Starting ages: mix of children, young adults, adults (0..~50% of lifespan).
         // No elders at world start — population begins in its reproductive prime.
@@ -113,6 +126,11 @@ pub fn create_world(config: WorldConfig) -> World {
 
     // Spawn fauna distributed by biome (~280 total)
     spawn_fauna(&mut beings, &terrain, &mut rng, config.has_predators);
+    if let Some(ref g) = genome {
+        for i in human_count..beings.hot.count {
+            beings.hot.fauna_params[i] = crate::sim::intelligence::seed_fauna_from_genome(g, &mut rng);
+        }
+    }
 
     let objects = world::object_grid::ObjectGrid::new(config.size.0, config.size.1);
     let chunks = sim::chunks::ChunkGrid::new(config.size.0, config.size.1);
@@ -144,6 +162,10 @@ pub fn create_world(config: WorldConfig) -> World {
     };
     // V55 §2: Calculate initial energy after world is fully constructed
     world.total_energy = crate::sim::world_state::recalculate_total_energy(&world);
+    if let Some(ref g) = genome {
+        println!("[INTELLIGENCE] Loaded ancestral wisdom from {} civilizations (gen {})",
+                 g.runs_accumulated, g.generation_depth);
+    }
     world
 }
 

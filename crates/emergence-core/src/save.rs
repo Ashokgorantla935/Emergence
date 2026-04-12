@@ -15,7 +15,7 @@ use crate::world::resource::{FoodType, ResourceLayer};
 use crate::world::signal::SignalGrid;
 use crate::world::terrain::{Biome, Terrain};
 
-pub const CURRENT_VERSION: u32 = 1;
+pub const CURRENT_VERSION: u32 = 2;
 pub const AUTOSAVE_SLOT: u8 = 8; // slots 0-7 are manual, 8 is autosave
 pub const AUTO_SAVE_INTERVAL: u32 = 18_000; // ~5 minutes at 60fps
 
@@ -169,6 +169,11 @@ pub struct SaveFile {
     pub kill_count: Vec<u16>,
     pub last_birth_tick: Vec<u32>,
     pub names: Vec<String>,
+
+    // Brain weights (V72: persisted for ancestral intelligence)
+    // serde only handles arrays ≤32; bitcode handles 318-element arrays directly.
+    #[serde(skip)]
+    pub brain_weights: Vec<[f32; 318]>,
 
     // Genotype (evolution) — parallel to being index
     pub genotype_generation: Vec<u32>,
@@ -373,6 +378,7 @@ impl SaveFile {
             kill_count: beings.cold.kill_count.clone(),
             last_birth_tick: beings.cold.last_birth_tick.clone(),
             names: beings.cold.names.clone(),
+            brain_weights: beings.hot.brain_weights.clone(),
 
             genotype_generation: beings.cold.genotypes.iter().map(|g| g.generation).collect(),
             genotype_q_baselines: beings.cold.genotypes.iter().map(|g| g.q_baselines).collect(),
@@ -595,6 +601,9 @@ impl SaveFile {
             beings.hot.target_pos.push(self.positions[i]);
             beings.hot.last_cognitive_tick.push(0u32);
             beings.hot.current_action.push(0u8);
+            beings.hot.brain_weights.push(
+                if i < self.brain_weights.len() { self.brain_weights[i] } else { [0.0f32; 318] }
+            );
             beings.cold.parent_ids.push(self.parent_ids[i]);
             beings.cold.traits.push(if i < self.traits.len() { self.traits[i] } else { 0 });
             beings.cold.kill_count.push(if i < self.kill_count.len() { self.kill_count[i] } else { 0 });

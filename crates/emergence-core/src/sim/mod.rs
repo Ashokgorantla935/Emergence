@@ -7,3 +7,4 @@ pub mod settlement;
 pub mod kingdom;
 pub mod combat;
 pub mod chunks;
+pub mod intelligence;

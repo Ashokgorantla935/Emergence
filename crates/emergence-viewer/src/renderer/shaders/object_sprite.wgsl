@@ -3,11 +3,16 @@
 // One pipeline handles all objects via the shared atlas.
 
 struct CameraUniform {
-    view_proj: mat4x4<f32>,
+    view_proj:       mat4x4<f32>,
     pixels_per_unit: f32,
-    _pad0: f32,
-    _pad1: f32,
-    _pad2: f32,
+    _pad0:           f32,
+    _pad1:           f32,
+    zoom_blend:      f32,
+    // V75: parallax pipeline fields
+    pitch:           f32,  // radians: π/2 at zoom-out, π/4 at zoom-in
+    zoom_factor:     f32,  // [0=out, 1=in]
+    _pad2:           f32,
+    _pad3:           f32,
 };
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
 @group(1) @binding(0) var sprite_atlas: texture_2d<f32>;
@@ -78,8 +83,16 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
         world_pos.x += sway;
     }
 
-    let world       = world_pos + vertex.vertex_pos * bio_size;
-    var clip        = camera.view_proj * vec4<f32>(world, 0.0, 1.0);
+    // V75: Rotate the 2D quad inverse to Camera Pitch X-axis so objects stand upright.
+    var billboard_rotation = mat3x3<f32>(
+        1.0, 0.0, 0.0,
+        0.0, cos(-camera.pitch), -sin(-camera.pitch),
+        0.0, sin(-camera.pitch),  cos(-camera.pitch)
+    );
+    let model_pos = vec3<f32>(vertex.vertex_pos.x * bio_size, vertex.vertex_pos.y * bio_size, 0.0);
+    let rotated   = billboard_rotation * model_pos;
+    let world     = world_pos + rotated.xy;
+    var clip      = camera.view_proj * vec4<f32>(world, rotated.z, 1.0);
     // Y-sort depth bias: objects further south (higher world Y) render behind northern ones.
     let depth_bias  = clamp(inst.world_pos.y / 512.0, 0.0, 1.0) * 0.9;
     clip.z          = depth_bias * clip.w;

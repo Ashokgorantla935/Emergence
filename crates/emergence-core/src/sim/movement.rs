@@ -1073,8 +1073,22 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
 
     let ncx = new_x as u32;
     let ncy = new_y as u32;
-    
-    let dest_idx = (ncy.min(world.terrain.height - 1) * world.terrain.width + ncx.min(world.terrain.width - 1)) as usize;
+
+    // V75 §3.2: Z-axis cliff check — impassable elevation jump
+    const CLIFF_THRESHOLD: f32 = 0.3;
+    const ELEVATION_FRICTION: f32 = 3.0;
+    let cur_elev_idx = (cy * world.terrain.width + cx) as usize;
+    let dest_elev_idx = (ncy.min(world.terrain.height - 1) * world.terrain.width + ncx.min(world.terrain.width - 1)) as usize;
+    let delta_z = if dest_elev_idx < world.terrain.elevation.len() && cur_elev_idx < world.terrain.elevation.len() {
+        world.terrain.elevation[dest_elev_idx] - world.terrain.elevation[cur_elev_idx]
+    } else {
+        0.0
+    };
+    if delta_z.abs() > CLIFF_THRESHOLD {
+        return; // Impassable cliff
+    }
+
+    let dest_idx = dest_elev_idx;
     let is_water = world.terrain.water[dest_idx];
     let is_solid_struct = match world.terrain.structure[dest_idx] {
         0 | 6 | 7 | 20 => false, // Walkable
@@ -1113,11 +1127,19 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
     } else if !is_obstacle {
         let old_pos = world.beings.hot.positions[being_index];
         world.beings.hot.positions[being_index] = [new_x, new_y];
-        let vx = (nx * clamped_dist).clamp(-MAX_VEL, MAX_VEL);
-        let vy = (ny * clamped_dist).clamp(-MAX_VEL, MAX_VEL);
+        // V75 §3.2: Uphill velocity penalty
+        let uphill_scale = if delta_z > 0.0 {
+            (1.0 - delta_z * ELEVATION_FRICTION).max(0.1)
+        } else {
+            1.0
+        };
+        let vx = (nx * clamped_dist * uphill_scale).clamp(-MAX_VEL, MAX_VEL);
+        let vy = (ny * clamped_dist * uphill_scale).clamp(-MAX_VEL, MAX_VEL);
 
         // Axiom 1: Kinetic caloric cost — movement drains energy proportional to distance
-        let kinetic_cost = clamped_dist * 0.001;
+        // V75 §3.2: Uphill climbing doubles metabolism drain
+        let climb_multiplier = if delta_z > 0.0 { 2.0 } else { 1.0 };
+        let kinetic_cost = clamped_dist * 0.001 * climb_multiplier;
         world.beings.hot.caloric_energy[being_index] = (world.beings.hot.caloric_energy[being_index] - kinetic_cost).max(0.0);
         // Teleport guard
         let dx = new_x - old_pos[0];

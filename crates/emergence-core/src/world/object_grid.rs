@@ -58,11 +58,12 @@ impl ObjectGrid {
                 if self.cells[idx].len() < 2 { continue; }
 
                 let heat = tensor.read(crate::world::tensor::TensorLayer::Heat, x, y);
-                if heat < 0.5 { continue; } // Need significant heat source
-
-                // Merge first two items via forge()
                 let a = self.cells[idx][0];
                 let b = self.cells[idx][1];
+                let req_energy = (a.properties.combustibility + b.properties.malleability) / 2.0;
+                if heat <= req_energy { continue; }
+
+                // Merge first two items via forge()
                 if let Some(forged) = MatterProperties::forge(&a.properties, &b.properties, heat) {
                     let combined_mass = a.quantity_mass + b.quantity_mass;
                     self.cells[idx].remove(0);

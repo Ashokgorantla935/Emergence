@@ -107,8 +107,12 @@ impl TensorGrid {
         }
     }
 
-    /// Diffuse a single layer (except Odor which is wind-pushed).
-    pub fn diffuse_layer(&mut self, layer: TensorLayer) {
+    /// Elevation difference beyond which a neighbor blocks Light/Acoustic diffusion.
+    pub const TENSOR_SHADOW_LIMIT: f32 = 0.3;
+
+    /// Diffuse a single layer using inverse-square formula (except Odor which is wind-pushed).
+    /// Elevation blocking: mountains cast shadows that stop Light and Acoustic propagation.
+    pub fn diffuse_layer(&mut self, layer: TensorLayer, elevation: &[f32]) {
         let li = layer as usize;
         let params = TensorParams::ALL[li];
         if params.diffusion_rate <= 0.0 { return; }
@@ -116,6 +120,9 @@ impl TensorGrid {
         let w = self.width as usize;
         let h = self.height as usize;
         let size = w * h;
+
+        // Terrain-blocked layers: Light and Acoustic
+        let elevation_blocked = matches!(layer, TensorLayer::Light | TensorLayer::Acoustic);
 
         // Ensure scratch is big enough
         if self.scratch.len() < size { self.scratch.resize(size, 0.0); }
@@ -128,14 +135,54 @@ impl TensorGrid {
             for x in 0..w {
                 let idx = y * w + x;
                 let center = src[idx];
-                let mut sum = 0.0f32;
-                let mut count = 0u32;
-                if x > 0     { sum += src[idx - 1]; count += 1; }
-                if x + 1 < w { sum += src[idx + 1]; count += 1; }
-                if y > 0     { sum += src[idx - w]; count += 1; }
-                if y + 1 < h { sum += src[idx + w]; count += 1; }
-                let avg_neighbor = if count > 0 { sum / count as f32 } else { center };
-                dst[idx] = center + rate * (avg_neighbor - center);
+                let center_elev = if elevation_blocked && idx < elevation.len() { elevation[idx] } else { 0.0 };
+
+                // V75: Inverse-square diffusion — each orthogonal neighbor pushes to center
+                // dist_sq = 1.0 for orthogonal → contribution = neighbor_val / (1.0 + 1.0)
+                let mut inv_sq_sum = 0.0f32;
+
+                // Left neighbor
+                if x > 0 {
+                    let nidx = idx - 1;
+                    let blocked = elevation_blocked
+                        && nidx < elevation.len()
+                        && (elevation[nidx] - center_elev) > Self::TENSOR_SHADOW_LIMIT;
+                    if !blocked {
+                        inv_sq_sum += src[nidx] / 2.0; // dist_sq=1 → 1/(1+1)
+                    }
+                }
+                // Right neighbor
+                if x + 1 < w {
+                    let nidx = idx + 1;
+                    let blocked = elevation_blocked
+                        && nidx < elevation.len()
+                        && (elevation[nidx] - center_elev) > Self::TENSOR_SHADOW_LIMIT;
+                    if !blocked {
+                        inv_sq_sum += src[nidx] / 2.0;
+                    }
+                }
+                // Up neighbor
+                if y > 0 {
+                    let nidx = idx - w;
+                    let blocked = elevation_blocked
+                        && nidx < elevation.len()
+                        && (elevation[nidx] - center_elev) > Self::TENSOR_SHADOW_LIMIT;
+                    if !blocked {
+                        inv_sq_sum += src[nidx] / 2.0;
+                    }
+                }
+                // Down neighbor
+                if y + 1 < h {
+                    let nidx = idx + w;
+                    let blocked = elevation_blocked
+                        && nidx < elevation.len()
+                        && (elevation[nidx] - center_elev) > Self::TENSOR_SHADOW_LIMIT;
+                    if !blocked {
+                        inv_sq_sum += src[nidx] / 2.0;
+                    }
+                }
+
+                dst[idx] = center + rate * (inv_sq_sum - center);
             }
         }
 

@@ -11,6 +11,10 @@ use super::entity_compute::EntityComputePipeline;
 
 /// Extended camera uniform including sprite rendering fields.
 /// Kept backward-compatible: the original view_proj is always binding 0.
+/// Layout (96 bytes, 6 × 16-byte rows):
+///   row 0-3: view_proj mat4x4
+///   row 4:   pixels_per_unit, _pad0, _pad1, zoom_blend
+///   row 5:   pitch, zoom_factor, _pad2, _pad3
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ExtCameraUniform {
@@ -19,6 +23,12 @@ pub struct ExtCameraUniform {
     pub _pad0:           f32,
     pub _pad1:           f32,
     pub zoom_blend:      f32,  // 0.0=LOD0(macro), 1.0=LOD1(medium), 2.0=LOD2(close); fractional=blend
+    /// V75: Camera pitch in radians. 90° (π/2) at full zoom-out, 45° (π/4) at full zoom-in.
+    pub pitch:           f32,
+    /// V75: Normalized zoom level [0.0=out, 1.0=in]. Controls terrain extrusion magnitude.
+    pub zoom_factor:     f32,
+    pub _pad2:           f32,
+    pub _pad3:           f32,
 }
 
 impl ExtCameraUniform {
@@ -39,12 +49,21 @@ impl ExtCameraUniform {
         } else {
             2.0f32
         };
+        // V75: zoom_level normalizes zoom_blend from [0, 2] to [0, 1].
+        // pitch lerps from 90° (top-down) at zoom_level=0.0 to 45° (isometric) at zoom_level=1.0.
+        let zoom_level = (zoom_blend / 2.0).clamp(0.0, 1.0);
+        let pitch = std::f32::consts::FRAC_PI_2
+            + (std::f32::consts::FRAC_PI_4 - std::f32::consts::FRAC_PI_2) * zoom_level;
         ExtCameraUniform {
             view_proj: basic.view_proj,
             pixels_per_unit,
             _pad0: 0.0,
             _pad1: 0.0,
             zoom_blend,
+            pitch,
+            zoom_factor: zoom_level,
+            _pad2: 0.0,
+            _pad3: 0.0,
         }
     }
 }
@@ -404,6 +423,10 @@ impl RenderState {
             _pad0: 0.0,
             _pad1: 0.0,
             zoom_blend: 1.0f32,
+            pitch: std::f32::consts::FRAC_PI_2,
+            zoom_factor: 0.0,
+            _pad2: 0.0,
+            _pad3: 0.0,
         };
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

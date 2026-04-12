@@ -23,6 +23,10 @@ pub fn tick_fauna_boids(
     let h = terrain.height as usize;
     let current_tick = hot.ages.get(0).copied().unwrap_or(0) as u32; // approximate global tick
 
+    // V75 §3.2: Cliff and uphill constants for fauna kinetic push
+    const CLIFF_THRESHOLD: f32 = 0.3;
+    const ELEVATION_FRICTION: f32 = 3.0;
+
     // ── Kinetic push: ALL fauna move along cached velocity every tick ──
     for &i in &hot.fauna_indices {
         if hot.states[i] == BeingState::Dead { continue; }
@@ -37,18 +41,47 @@ pub fn tick_fauna_boids(
         let is_aquatic = hot.dna[i].mass < 10.0
             && hot.dna[i].diet == DietType::Herbivore
             && terrain.water[cur_idx];
-        if (is_aquatic && is_water) || (!is_aquatic && !is_water) {
-            hot.positions[i] = [new_x, new_y];
+
+        // V75 §3.2: Cliff check — block movement across impassable elevation jumps
+        let delta_z = if cur_idx < terrain.elevation.len() && new_idx < terrain.elevation.len() {
+            terrain.elevation[new_idx] - terrain.elevation[cur_idx]
+        } else {
+            0.0
+        };
+        if delta_z.abs() > CLIFF_THRESHOLD {
+            hot.velocities[i] = [0.0, 0.0];
+            continue; // Cliff — impassable
+        }
+
+        // V75 §3.2: Uphill penalty — reduce velocity when climbing
+        let (effective_vx, effective_vy) = if delta_z > 0.0 {
+            let scale = (1.0 - delta_z * ELEVATION_FRICTION).max(0.1);
+            (vx * scale, vy * scale)
+        } else {
+            (vx, vy)
+        };
+        let uphill_new_x = (hot.positions[i][0] + effective_vx).clamp(0.0, (w - 1) as f32);
+        let uphill_new_y = (hot.positions[i][1] + effective_vy).clamp(0.0, (h - 1) as f32);
+        let uphill_new_idx = (uphill_new_y as usize).min(h - 1) * w + (uphill_new_x as usize).min(w - 1);
+        let is_water_uphill = terrain.water[uphill_new_idx];
+
+        if (is_aquatic && is_water_uphill) || (!is_aquatic && !is_water_uphill) {
+            hot.positions[i] = [uphill_new_x, uphill_new_y];
+
+            // V75 §3.2: Double caloric drain when climbing
+            if delta_z > 0.0 {
+                hot.caloric_energy[i] = (hot.caloric_energy[i] - 0.0002).max(0.0);
+            }
 
             // Biomass consumption: carnivores/omnivores with high hunger consume micro-biomass.
             let diet = hot.dna[i].diet;
             let is_predator = diet == DietType::Carnivore || diet == DietType::Omnivore;
             if is_predator && hot.caloric_energy[i] < 0.5 {
-                let nx = new_x as u32;
-                let ny = new_y as u32;
+                let nx = uphill_new_x as u32;
+                let ny = uphill_new_y as u32;
                 let biomass = tensor.read(TensorLayer::MicroBiomass, nx, ny);
                 if biomass > 0.2 {
-                    tensor.layers[TensorLayer::MicroBiomass as usize][new_idx] =
+                    tensor.layers[TensorLayer::MicroBiomass as usize][uphill_new_idx] =
                         (biomass - 0.2).max(0.0);
                     hot.caloric_energy[i] = (hot.caloric_energy[i] + 0.1).min(1.0);
                 }

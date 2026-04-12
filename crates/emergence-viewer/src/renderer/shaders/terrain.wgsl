@@ -7,6 +7,11 @@ struct CameraUniform {
     _pad0:           f32,
     _pad1:           f32,
     zoom_blend:      f32,  // 0.0=LOD0(macro), 1.0=LOD1(medium), 2.0=LOD2(close); fractional=blend
+    // V75: parallax pipeline fields
+    pitch:           f32,  // radians: π/2 at zoom-out, π/4 at zoom-in
+    zoom_factor:     f32,  // [0=out, 1=in]; controls terrain extrusion magnitude
+    _pad2:           f32,
+    _pad3:           f32,
 };
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
 @group(1) @binding(0) var t_atlas: texture_2d<f32>;
@@ -60,6 +65,9 @@ struct VertexOutput {
     @location(10) @interpolate(flat) ne_elev:       f32, // topo shadow: northeast neighbor elevation
 };
 
+// V75: Maximum vertical displacement in world units for highest-elevation terrain.
+const MAX_MOUNTAIN_HEIGHT: f32 = 2.0;
+
 @vertex
 fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
@@ -70,7 +78,10 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
         inst.world_pos.y + vertex.position.y,
     );
 
-    out.clip_position = camera.view_proj * vec4<f32>(world, 0.0, 1.0);
+    // V75: Terrain extrusion — mountains rise visually as camera pitches toward isometric.
+    // At zoom_factor=0.0 (top-down), no displacement. At zoom_factor=1.0 (isometric), full rise.
+    let z_displacement = inst.elevation * MAX_MOUNTAIN_HEIGHT * camera.zoom_factor;
+    out.clip_position = camera.view_proj * vec4<f32>(world.x, world.y + z_displacement, 0.0, 1.0);
 
     // Tile-local UV interpolates perfectly [0,1] across the quad — no seam artifacts
     out.uv = vertex.uv;

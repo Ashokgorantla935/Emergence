@@ -10,7 +10,12 @@ struct CameraUniform {
     pixels_per_unit:      f32,
     _pad0:                f32,
     _pad1:                f32,
+    zoom_blend:           f32,
+    // V75: parallax pipeline fields
+    pitch:                f32,  // radians: π/2 at zoom-out, π/4 at zoom-in
+    zoom_factor:          f32,  // [0=out, 1=in]
     _pad2:                f32,
+    _pad3:                f32,
 };
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
 
@@ -97,13 +102,19 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     // instance.velocity is in world-units/second; time_u.delta_time is seconds since last frame.
     // For static beings (velocity == 0) this is a no-op. Smooths motion between CPU ticks.
     let dr_offset = instance.velocity * time_u.delta_time;
-    let predicted_pos = instance.world_pos + dr_offset;
 
-    // Billboard quad centred on predicted_pos, shifted up by bob.
-    var pos = predicted_pos;
-    pos.y += bob_offset;
-    let world_xy = pos + vertex.vertex_pos * bio_size;
-    var clip_pos = camera.view_proj * vec4<f32>(world_xy, 0.0, 1.0);
+    // V75: Rotate the 2D quad inverse to Camera Pitch X-axis so sprites stand upright
+    // at the current tilt angle instead of lying flat on the ground plane.
+    var billboard_rotation = mat3x3<f32>(
+        1.0, 0.0, 0.0,
+        0.0, cos(-camera.pitch), -sin(-camera.pitch),
+        0.0, sin(-camera.pitch),  cos(-camera.pitch)
+    );
+    // Build the 3D local vertex: quad vertex scaled by bio_size, bob on Y, Z=0 (flat sprite).
+    let model_pos = vec3<f32>(vertex.vertex_pos.x * bio_size, vertex.vertex_pos.y * bio_size + bob_offset, 0.0);
+    let rotated = billboard_rotation * model_pos;
+    let upright_pos = instance.world_pos + dr_offset + rotated.xy;
+    var clip_pos = camera.view_proj * vec4<f32>(upright_pos, rotated.z, 1.0);
     // Y-sort depth bias: beings further south (higher world Y) render behind northern ones.
     let depth_bias = clamp(instance.world_pos.y / 512.0, 0.0, 1.0) * 0.9;
     clip_pos.z = depth_bias * clip_pos.w;

@@ -159,8 +159,9 @@ pub fn tick(world: &mut World) {
         world.tensor.wind_direction = [world.climate.wind_dx, world.climate.wind_dy];
         // Decay all layers first, then diffuse
         world.tensor.decay_all();
-        world.tensor.diffuse_layer(TensorLayer::Acoustic);
-        world.tensor.diffuse_layer(TensorLayer::Heat);
+        let elevation = world.terrain.elevation.clone();
+        world.tensor.diffuse_layer(TensorLayer::Acoustic, &elevation);
+        world.tensor.diffuse_layer(TensorLayer::Heat, &elevation);
         world.tensor.advect_odor();
         // Set global light from climate — V70: 0.6 moonlight floor at night
         let raw_light = world.climate.light_level();

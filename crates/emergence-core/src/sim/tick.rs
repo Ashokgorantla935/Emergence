@@ -1147,7 +1147,7 @@ pub fn tick(world: &mut World) {
 
             world.tensor.deposit(crate::world::tensor::TensorLayer::Odor, sx, sy, 0.03); // 0.1 × 0.3
             let freq = world.beings.hot.cultural_frequency[i];
-            world.tensor.deposit(crate::world::tensor::TensorLayer::Odor, sx, sy, freq * 0.02); // × 0.2
+            world.tensor.deposit(crate::world::tensor::TensorLayer::Odor, sx, sy, freq * 0.2); // CultureFreq Rosetta: ×0.2
         }
     }
 

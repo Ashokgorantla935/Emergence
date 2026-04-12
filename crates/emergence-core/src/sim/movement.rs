@@ -1061,10 +1061,11 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
     let max_speed = world.beings.hot.dna[being_index].speed_scalar() * BASE_SPEED;
     let clamped_dist = move_dist.min(max_speed);
 
-    // V75.6: Inventory density reduces velocity — heavier loads create drag
+    // V75.6: Inventory density reduces velocity — read ACTUAL MatterProperties.density
     let carry_food = world.beings.hot.carry[being_index][0];
     let carry_stone = world.beings.hot.carry[being_index][1];
-    let inventory_density = carry_food * 0.3 + carry_stone * 3.0;
+    let inventory_density = carry_food * crate::world::matter::MatterProperties::BERRIES.density
+                          + carry_stone * crate::world::matter::MatterProperties::STONE.density;
     let drag_scalar = inventory_density * 0.1;
     let clamped_dist = clamped_dist / (1.0 + drag_scalar);
 

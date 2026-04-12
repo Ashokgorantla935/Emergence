@@ -551,163 +551,29 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
             }
         }
         Action::Build => {
-            // Progress build at current position
             let cx = pos[0] as u32;
             let cy = pos[1] as u32;
             let cidx = (cy.min(world.terrain.height - 1) * world.terrain.width
                 + cx.min(world.terrain.width - 1)) as usize;
 
-            let current_struct = world.terrain.structure[cidx];
-            if (current_struct == 0 || current_struct == StructureType::DirtPath as u8) 
-                && !world.terrain.is_water(cx.min(world.terrain.width - 1), cy.min(world.terrain.height - 1)) 
-            {
-                // Determine target structure type based on available techs + stone carried
-                let kcx = cx.min(world.knowledge.width - 1);
-                let kcy = cy.min(world.knowledge.height - 1);
-                let has_masonry = world.knowledge.has_tech(kcx, kcy, crate::world::knowledge::TECH_MASONRY);
-                let has_smelting = world.knowledge.has_tech(kcx, kcy, crate::world::knowledge::TECH_SMELTING);
-                let has_agriculture = world.knowledge.has_tech(kcx, kcy, crate::world::knowledge::TECH_AGRICULTURE);
-                let has_engineering = world.knowledge.has_tech(kcx, kcy, crate::world::knowledge::TECH_ENGINEERING);
-                let stone_carry = world.beings.hot.carry[being_index][1];
+            let carried_stone = world.beings.hot.carry[being_index][1];
+            if carried_stone > 0.01 {
+                world.beings.hot.carry[being_index][1] = 0.0;
 
-                let target_type = if current_struct == StructureType::DirtPath as u8 && has_masonry && stone_carry >= 0.2 {
-                    StructureType::StoneRoad
-                } else if has_masonry && has_smelting && has_engineering && stone_carry >= 3.0 {
-                    StructureType::Castle
-                } else if has_masonry && has_smelting && stone_carry >= 2.0 {
-                    StructureType::Keep
-                } else if has_masonry && has_agriculture && stone_carry >= 1.0 {
-                    StructureType::Windmill
-                } else if has_masonry && stone_carry >= 1.0 {
-                    StructureType::StoneHouse
-                } else if has_agriculture && stone_carry >= 0.5 {
-                    StructureType::WoodenHouse
-                } else if stone_carry >= 0.5 {
-                    StructureType::Hut
-                } else if stone_carry >= 0.3 {
-                    StructureType::LeanTo
-                } else if stone_carry >= 0.1 {
-                    StructureType::NomadTent
-                } else {
-                    StructureType::Campfire
-                };
-                let build_ticks = target_type.build_ticks();
-                // V61: fast_construction doubles progress per tick
-                let base_increment = if world.laws.fast_construction { 2u32 } else { 1u32 };
-                world.terrain.build_progress[cidx] += base_increment;
-                // tool_quality speeds up building: each point adds 15% progress per tick
-                let extra = (world.beings.hot.tool_quality[being_index] * 1.5) as u32;
-                world.terrain.build_progress[cidx] += extra;
-                
-                // Clear out flora visually while building so scaffolding isn't inside a tree
-                if world.resources.flora_stage[cidx] > 0 {
-                    world.resources.flora_stage[cidx] = 0;
-                    world.resources.flora_energy[cidx] = 0;
-                }
+                // Structure = accumulated density on the tile
+                world.terrain.structural_density[cidx] += carried_stone;
 
-                if world.terrain.build_progress[cidx] >= build_ticks {
-                    // Consume stone
-                    let stone_cost: f32 = match target_type {
-                        StructureType::Campfire => 0.1,
-                        StructureType::LeanTo => 0.2,
-                        StructureType::Hut => 0.4,
-                        StructureType::NomadTent => 0.0,
-                        StructureType::StoneRoad => 0.2, // Road costs 0.2
-                        StructureType::WoodenHouse => 1.0,
-                        StructureType::StoneHouse => 3.0,
-                        StructureType::Windmill => 2.0,
-                        StructureType::Keep => 5.0,
-                        StructureType::Castle => 10.0,
-                        _ => 0.1,
-                    };
-                    let consumed = stone_cost.min(world.beings.hot.carry[being_index][1]);
-                    world.beings.hot.carry[being_index][1] -= consumed;
-                    let bx = cx.min(world.terrain.width - 1);
-                    let by = cy.min(world.terrain.height - 1);
-                    world.terrain.place_structure(bx, by, target_type, being_index as u32);
-                    // Assign material properties based on structure type
-                    world.resources.matter[cidx] = match target_type {
-                        StructureType::Campfire | StructureType::LeanTo | StructureType::Hut
-                        | StructureType::NomadTent | StructureType::WoodenHouse | StructureType::Windmill => {
-                            crate::world::matter::MatterProperties::WOOD
-                        }
-                        StructureType::Wall | StructureType::StoneRoad | StructureType::StoneHouse
-                        | StructureType::Keep | StructureType::Castle | StructureType::Mine => {
-                            crate::world::matter::MatterProperties::STONE
-                        }
-                        StructureType::Forge => crate::world::matter::MatterProperties::IRON,
-                        _ => crate::world::matter::MatterProperties::SOIL,
-                    };
-                    // Deforestation: clear biomass, flora, and degrade soil
-                    world.terrain.biomass[cidx] = 0.0;
-                    world.resources.flora_stage[cidx] = 0;
-                    world.resources.flora_energy[cidx] = 0;
-                    world.terrain.nutrient_density[cidx] *= 0.5;
-                    // Clear adjacent tiles (1-tile radius) to prevent flora clipping
-                    let tw = world.terrain.width as i32;
-                    let th = world.terrain.height as i32;
-                    for dy in -1i32..=1 {
-                        for dx in -1i32..=1 {
-                            if dx == 0 && dy == 0 { continue; }
-                            let nx = (bx as i32 + dx).clamp(0, tw - 1) as usize;
-                            let ny = (by as i32 + dy).clamp(0, th - 1) as usize;
-                            let nidx = ny * world.terrain.width as usize + nx;
-                            if world.terrain.structure[nidx] == 0 {
-                                world.terrain.biomass[nidx] = 0.0;
-                                world.resources.flora_stage[nidx] = 0;
-                                world.resources.flora_energy[nidx] = 0;
-                            }
-                        }
-                    }
-                    // Structure presence increases mineralize (foundation)
-                    world.terrain.mineralize[cidx] = (world.terrain.mineralize[cidx] + 0.5).min(1.0);
-                    // Bond builder to this location as home settlement
-                    world.beings.cold.home_settlement_pos[being_index] = Some([bx, by]);
-                    // Claim territory for builder's tribe (Wave 27)
-                    if let Some(home) = world.beings.cold.home_settlement_pos[being_index] {
-                        let tribe = home[1] as u32 * world.terrain.width + home[0] as u32 + 1;
-                        world.terrain.territory[cidx] = tribe;
-                    }
-                    // Flora degradation from construction traffic handled by thermodynamic deforestation in tick_flora
-                    trigger_emotion(&mut world.beings, being_index, EMO_JOY, 0.3);
-                    world.beings.hot.needs[being_index][NEED_PURPOSE] =
-                        (world.beings.hot.needs[being_index][NEED_PURPOSE] + 0.1).min(1.0);
-                    // Deposit comfort signal at build site
-                    world.tensor.deposit(
-                        crate::world::tensor::TensorLayer::Heat,
-                        bx.min(world.tensor.width - 1),
-                        by.min(world.tensor.height - 1),
-                        0.5,
-                    );
-                    // Toxin emission: civilization building accumulates greenhouse gases.
-                    // Toxin lives on the downsampled ClimateGrid (not SignalGrid).
-                    world.climate_grid.deposit_toxin(bx as f32, by as f32, 0.1);
-                    world.events.push(Event {
-                        tick: world.tick,
-                        actor_id: being_index as u32,
-                        target_id: target_type as u32,
-                        event_type: EventType::BuildingComplete,
-                        location: [bx as f32, by as f32],
-                        cause: crate::sim::world_state::EventCause::None,
-                    });
-                }
-            } else {
-                // Repair: reset age if owned or warmth positive
-                let owner_id = world.terrain.builder_id[cidx];
-                let is_owner = owner_id == being_index as u32 || owner_id == 0;
-                let warmth_ok = if owner_id > 0 && (owner_id as usize) < world.beings.hot.count {
-                    world.beings.cold.relationships[being_index]
-                        .find(owner_id)
-                        .map(|imp| imp.warmth > 0.0)
-                        .unwrap_or(true)
-                } else {
-                    true
-                };
-                if is_owner || warmth_ok {
-                    world.terrain.structure_age[cidx] =
-                        world.terrain.structure_age[cidx].saturating_sub(100);
-                }
+                world.beings.hot.needs[being_index][NEED_PURPOSE] =
+                    (world.beings.hot.needs[being_index][NEED_PURPOSE] + 0.1).min(1.0);
+                world.beings.hot.caloric_energy[being_index] =
+                    (world.beings.hot.caloric_energy[being_index] - 0.05).max(0.0);
+
+                // Emit Heat (attractor pheromone)
+                world.tensor.deposit(crate::world::tensor::TensorLayer::Heat, cx, cy, carried_stone);
+                // Emit Culture (successful structural manipulation)
+                world.tensor.deposit(crate::world::tensor::TensorLayer::Culture, cx, cy, 10.0);
             }
+
         }
         Action::Craft => {
             // V75 §2.1: Drop carried materials onto ObjectGrid cell for physics-based forging.

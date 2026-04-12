@@ -8,10 +8,7 @@ pub struct MemeticGrid {
 }
 
 pub const MEMETIC_CHANNELS: usize = 4;
-pub const TECH_TOOLMAKING: usize = 0;
-pub const TECH_CONSTRUCTION: usize = 1;
-pub const TECH_ENERGY: usize = 2;
-pub const TECH_ARCANE: usize = 3;
+// V77: TECH_ constants DELETED — technology is viral memetics via Culture tensor, not booleans
 
 /// Downsampling factor: memetic grid runs at world_size / MEMETIC_SCALE
 pub const MEMETIC_SCALE: u32 = 2;

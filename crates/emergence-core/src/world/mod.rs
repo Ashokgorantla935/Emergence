@@ -3,7 +3,6 @@ pub mod terrain;
 pub mod resource;
 pub mod climate;
 pub mod memetic;
-pub mod knowledge;
 pub mod physics;
 pub mod map;
 pub mod map_assets;

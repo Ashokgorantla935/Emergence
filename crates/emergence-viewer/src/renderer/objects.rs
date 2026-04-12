@@ -10,7 +10,7 @@ use emergence_core::being::data::{BeingState, Beings};
 use emergence_core::world::climate::ClimateGrid;
 use emergence_core::world::resource::{FoodType, ResourceLayer};
 use emergence_core::world::tensor::{TensorGrid, TensorLayer};
-use emergence_core::world::terrain::{Biome, Terrain, StructureType};
+use emergence_core::world::terrain::{Biome, Terrain};
 use wgpu::util::DeviceExt;
 
 /// Max carry indicator instances (2 per being, up to 20K beings)
@@ -911,99 +911,29 @@ fn collect_chunk_decor(
             let idx = y * w + x;
             let s = terrain.structure[idx];
             if s == 0 { continue; }
-            let struct_hash = cell_hash(x, y);
+            // V77: density-threshold sprite selection.
+            let raw_density = terrain.structural_density[idx];
 
-            let (_atlas_uv, tint, size, alpha) = match StructureType::from_u8(s) {
-                StructureType::Campfire => {
-                    let a = if terrain.build_progress[idx] < StructureType::Campfire.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_CAMPFIRE, [1.0, 1.0, 1.0], 2.5, a)
-                }
-                StructureType::LeanTo => {
-                    let a = if terrain.build_progress[idx] < StructureType::LeanTo.build_ticks() { 0.5 } else { 1.0 };
-                    let v = [ARCH_190_LEAN_TO, ARCH_190_HUT, ARCH_190_CACHE][struct_hash % 3];
-                    (v, [1.0, 1.0, 1.0], 3.0, a)
-                }
-                StructureType::Hut => {
-                    let a = if terrain.build_progress[idx] < StructureType::Hut.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_HUT, [1.0, 1.0, 1.0], 3.5, a)
-                }
-                StructureType::Wall => {
-                    let a = if terrain.build_progress[idx] < StructureType::Wall.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_WALL, [0.8, 0.8, 0.8], 3.0, a)
-                }
-                StructureType::Mine => {
-                    let a = if terrain.build_progress[idx] < StructureType::Mine.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_MINE, [0.6, 0.4, 0.4], 3.0, a)
-                }
-                StructureType::Forge => {
-                    let a = if terrain.build_progress[idx] < StructureType::Forge.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_FORGE, [0.5, 0.2, 0.2], 3.8, a)
-                }
-                StructureType::Factory => {
-                    let a = if terrain.build_progress[idx] < StructureType::Factory.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_FACTORY, [0.4, 0.4, 0.5], 4.2, a)
-                }
-                StructureType::Automobile => {
-                    let a = if terrain.build_progress[idx] < StructureType::Automobile.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_WOOD_HOUSE_B, [0.2, 0.2, 0.2], 2.5, a)
-                }
-                StructureType::DirtPath => continue,
-                StructureType::StoneRoad => continue,
-                StructureType::ResourceCache => {
-                    let a = if terrain.build_progress[idx] < StructureType::ResourceCache.build_ticks() { 0.5 } else { 1.0 };
-                    let stored = terrain.cache_food[idx] + terrain.cache_stone[idx];
-                    let fill_alpha = 0.4 + (stored / 10.0).min(1.0) * 0.6;
-                    (ARCH_190_CACHE, [0.9, 0.75, 0.2], 3.0, fill_alpha * a)
-                }
-                StructureType::OilPump => {
-                    let a = if terrain.build_progress[idx] < StructureType::OilPump.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_OILPUMP, [0.15, 0.15, 0.15], 3.0, a)
-                }
-                StructureType::NomadTent => {
-                    let a = if terrain.build_progress[idx] < StructureType::NomadTent.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_NOMAD, [0.8, 0.6, 0.3], 3.0, a)
-                }
-                StructureType::WoodenHouse => {
-                    let a = if terrain.build_progress[idx] < StructureType::WoodenHouse.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_WOOD_HOUSE, [0.7, 0.5, 0.3], 3.5, a)
-                }
-                StructureType::StoneHouse => {
-                    let a = if terrain.build_progress[idx] < StructureType::StoneHouse.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_STONE_HOUSE, [0.6, 0.6, 0.65], 3.5, a)
-                }
-                StructureType::Windmill => {
-                    let a = if terrain.build_progress[idx] < StructureType::Windmill.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_WINDMILL, [0.9, 0.85, 0.7], 3.8, a)
-                }
-                StructureType::Keep => {
-                    let a = if terrain.build_progress[idx] < StructureType::Keep.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_KEEP, [0.5, 0.5, 0.55], 3.8, a)
-                }
-                StructureType::Castle => {
-                    let a = if terrain.build_progress[idx] < StructureType::Castle.build_ticks() { 0.5 } else { 1.0 };
-                    (ARCH_190_CASTLE, [0.8, 0.8, 0.9], 4.2, a)
-                }
-                StructureType::FarmField => {
-                    (ARCH_190_FARM, [0.8, 0.65, 0.3], 3.0, 1.0)
-                }
-                StructureType::None => continue,
-                _ => (ARCH_190_HUT, [0.7, 0.7, 0.7], 1.0, 1.0),
+            let (atlas_uv, tint, alpha) = if raw_density >= 100.0 {
+                (ARCH_190_CASTLE, [0.8_f32, 0.8, 0.9], 1.0_f32)
+            } else if raw_density >= 50.0 {
+                (ARCH_190_KEEP, [0.5, 0.5, 0.55], 1.0)
+            } else if raw_density >= 25.0 {
+                (ARCH_190_STONE_HOUSE, [0.6, 0.6, 0.65], 1.0)
+            } else if raw_density >= 5.0 {
+                (ARCH_190_HUT, [1.0, 1.0, 1.0], 1.0)
+            } else if raw_density > 0.5 {
+                (ARCH_190_CAMPFIRE, [1.0, 1.0, 1.0], 1.0)
+            } else {
+                continue;
             };
 
-            // V55 §3: T-Mass drives architecture column (tech tier 0-7)
-            let tech_tier = terrain.tech_tier.get(idx).copied().unwrap_or(0);
-            let race_row = 0u8; // TODO: race-based row selection
-            let atlas_uv = uv_190(tech_tier, race_row);
-
-            // V55 §2: sqrt(mass) scale for buildings
-            let building_mass = match StructureType::from_u8(s) {
-                StructureType::Campfire     => 25.0f32,
-                StructureType::LeanTo       => 100.0,
-                StructureType::Hut          => 400.0,
-                StructureType::Wall         => 225.0,
-                StructureType::ResourceCache => 100.0,
-                _                           => 100.0,
-            };
+            // Scale by density-derived mass so larger settlements appear larger.
+            let building_mass = if raw_density >= 100.0 { 900.0_f32 }
+                else if raw_density >= 50.0 { 625.0 }
+                else if raw_density >= 25.0 { 400.0 }
+                else if raw_density >= 5.0  { 100.0 }
+                else                        {  25.0 };
             let building_size = UNIFIED_VISUAL_K * building_mass.sqrt();
 
             building_out.push(ObjectInstance {

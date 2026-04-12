@@ -731,7 +731,6 @@ pub fn tick(world: &mut World) {
                 &world.tensor,
                 &world.climate,
                 &world.spatial,
-                &world.knowledge,
                 &world.laws,
                 &mut rng,
             ))
@@ -1249,7 +1248,7 @@ pub fn tick(world: &mut World) {
         let bx = (pos[0] as u32).min(world.terrain.width - 1);
         let by = (pos[1] as u32).min(world.terrain.height - 1);
         let cidx = (by * world.terrain.width + bx) as usize;
-        if world.terrain.builder_id[cidx] == i as u32 && world.terrain.structure[cidx] != 0 {
+        if world.terrain.builder_id[cidx] == i as u32 && world.terrain.structural_density[cidx] > 0.5 {
             world.beings.hot.needs[i][NEED_WARMTH] =
                 (world.beings.hot.needs[i][NEED_WARMTH] + 0.002).min(1.0);
             world.beings.hot.needs[i][NEED_SAFETY] =
@@ -1327,98 +1326,6 @@ pub fn tick(world: &mut World) {
                 // Convert released energy back to biomass (scale: 100 energy units = 1.0 biomass)
                 let biomass_gain = released_energy as f32 / 100.0;
                 world.terrain.biomass[idx] = (world.terrain.biomass[idx] + biomass_gain).min(1.0);
-            }
-        }
-    }
-
-    // 7b. Geographic tech discovery (every 100 ticks) — humans only
-    if world.tick % 100 == 0 {
-        use crate::world::knowledge::{
-            TECH_AGRICULTURE, TECH_FISHING, TECH_MASONRY, TECH_SMELTING, TECH_WEAVING, TECH_MEDICINE,
-        };
-        use crate::world::terrain::Biome;
-        use crate::world::resource::FoodType;
-        let tw = world.terrain.width;
-        let th = world.terrain.height;
-
-        for i in 0..world.beings.hot.count {
-            if world.beings.hot.states[i] != BeingState::Awake { continue; }
-            if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; } // humans only
-
-            let pos = world.beings.hot.positions[i];
-            let x = (pos[0] as u32).min(tw - 1);
-            let y = (pos[1] as u32).min(th - 1);
-            let idx = (y * tw + x) as usize;
-
-            // Deterministic discovery probability per being per check (2% chance)
-            let hash = (x as usize).wrapping_mul(2654435761)
-                ^ (y as usize).wrapping_mul(2246822519)
-                ^ (i.wrapping_mul(31));
-            let roll = (hash ^ (world.tick as usize)) % 1000;
-            if roll > 20 { continue; }
-
-            // FISHING: near water cell
-            let near_water = world.terrain.water[idx]
-                || (x > 0 && world.terrain.water[(y * tw + x - 1) as usize])
-                || (x + 1 < tw && world.terrain.water[(y * tw + x + 1) as usize])
-                || (y > 0 && world.terrain.water[((y - 1) * tw + x) as usize])
-                || (y + 1 < th && world.terrain.water[((y + 1) * tw + x) as usize]);
-            if near_water && !world.knowledge.has_tech(x, y, TECH_FISHING) {
-                world.knowledge.deposit_tech(x, y, TECH_FISHING, 8);
-            }
-
-            // Check 3x3 area for structures since beings now collide and stand adjacent
-            let mut has_fire = false;
-            let mut has_hut = false;
-            for dy in -1..=1 {
-                for dx in -1..=1 {
-                    let cx = (x as i32 + dx).clamp(0, tw as i32 - 1) as usize;
-                    let cy = (y as i32 + dy).clamp(0, th as i32 - 1) as usize;
-                    let s = world.terrain.structure[cy * tw as usize + cx];
-                    if s == 1 || s == 10 { has_fire = true; } // Campfire or Forge
-                    if s == 3 { has_hut = true; }             // Hut
-                }
-            }
-
-            // SMELTING: campfire or forge on mountain biome
-            if has_fire
-                && matches!(world.terrain.biome[idx], Biome::Mountain)
-                && !world.knowledge.has_tech(x, y, TECH_SMELTING)
-            {
-                world.knowledge.deposit_tech(x, y, TECH_SMELTING, 6);
-            }
-
-            // MASONRY: hut present + carrying stone
-            if has_hut
-                && world.beings.hot.carry[i][1] > 0.1
-                && !world.knowledge.has_tech(x, y, TECH_MASONRY)
-            {
-                world.knowledge.deposit_tech(x, y, TECH_MASONRY, 6);
-            }
-
-            // AGRICULTURE: adult+ flora + grain food type
-            if world.resources.flora_stage[idx] >= 2
-                && world.resources.food_type[idx] == FoodType::Grain
-                && !world.knowledge.has_tech(x, y, TECH_AGRICULTURE)
-            {
-                world.knowledge.deposit_tech(x, y, TECH_AGRICULTURE, 10);
-            }
-
-            // WEAVING: near grassland flora (hemp/flax simulation)
-            if matches!(world.terrain.biome[idx], Biome::Grassland) && world.resources.flora_stage[idx] >= 1 {
-                if !world.knowledge.has_tech(x, y, TECH_WEAVING) {
-                    world.knowledge.deposit_tech(x, y, TECH_WEAVING, 8);
-                }
-            }
-
-            // MEDICINE: near flora + extreme grief signal (desperate herbal experimentation)
-            if world.resources.flora_stage[idx] >= 2 {
-                let grief = world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, x.min(world.tensor.width - 1), y.min(world.tensor.height - 1)) * 0.5;
-                if grief > 0.5 {
-                    if !world.knowledge.has_tech(x, y, TECH_MEDICINE) {
-                        world.knowledge.deposit_tech(x, y, TECH_MEDICINE, 6);
-                    }
-                }
             }
         }
     }
@@ -1637,9 +1544,8 @@ pub fn tick(world: &mut World) {
         }
     }
 
-    // 8. Agrarian sprawl: beings near settlements with TECH_AGRICULTURE cultivate nearby tiles
+    // 8. Agrarian sprawl: beings near settlements cultivate nearby tiles (Culture tensor gates)
     if world.tick % 30 == 0 {
-        use crate::world::knowledge::TECH_AGRICULTURE;
         use crate::world::terrain::StructureType;
         use crate::world::resource::FoodType;
         let tw = world.terrain.width;
@@ -1654,17 +1560,14 @@ pub fn tick(world: &mut World) {
             let y = (pos[1] as u32).min(th - 1);
             let idx = (y * tw + x) as usize;
 
-            // Must have TECH_AGRICULTURE locally
-            if !world.knowledge.has_tech(x, y, TECH_AGRICULTURE) { continue; }
-
             // Must be near a settlement (high Heat tensor = near campfire/hut)
             let sx = x.min(world.tensor.width - 1);
             let sy = y.min(world.tensor.height - 1);
             let comfort = world.tensor.read(crate::world::tensor::TensorLayer::Heat, sx, sy);
             if comfort < 0.2 { continue; } // must be near settlement
 
-            // Only farm on empty land cells (no existing structure, not water)
-            if world.terrain.structure[idx] != 0 { continue; }
+            // Only farm on empty land cells (no built density, not water)
+            if world.terrain.structural_density[idx] > 0.5 { continue; }
             if world.terrain.water[idx] { continue; }
 
             // Deterministic hash check — ~10% chance per eligible being per check

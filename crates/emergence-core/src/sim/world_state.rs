@@ -8,7 +8,6 @@ use crate::world::config::WorldConfig;
 use crate::world::object_grid::ObjectGrid;
 use crate::world::resource::ResourceLayer;
 use crate::world::memetic::MemeticGrid;
-use crate::world::knowledge::KnowledgeGrid;
 use crate::world::tensor::TensorGrid;
 use crate::world::terrain::Terrain;
 use super::chunks::ChunkGrid;
@@ -214,7 +213,6 @@ pub struct World {
     pub climate_grid: ClimateGrid,
     pub tensor: TensorGrid,
     pub memetic: MemeticGrid,
-    pub knowledge: KnowledgeGrid,
     pub beings: Beings,
     pub spatial: SpatialIndex,
     pub events: EventLog,

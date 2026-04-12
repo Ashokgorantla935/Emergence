@@ -6,7 +6,6 @@ use super::projection::projection_bonus;
 use crate::sim::spatial::SpatialIndex;
 use crate::sim::world_state::WorldLaws;
 use crate::world::climate::Climate;
-use crate::world::knowledge::KnowledgeGrid;
 use crate::world::resource::ResourceLayer;
 use crate::world::tensor::{TensorGrid, TensorLayer};
 use crate::world::terrain::{Biome, Terrain};
@@ -183,7 +182,6 @@ pub fn score_actions(
     tensor: &TensorGrid,
     climate: &Climate,
     spatial: &SpatialIndex,
-    knowledge: &KnowledgeGrid,
     laws: &WorldLaws,
     rng: &mut fastrand::Rng,
 ) -> ScoredAction {
@@ -823,59 +821,52 @@ pub fn score_actions(
             }
         }
 
-        // ── Farm override: humans with TECH_AGRICULTURE terraform nearby grassland ─
-        {
-            use crate::world::knowledge::TECH_AGRICULTURE;
-            let kcx = cx.min(knowledge.width - 1);
-            let kcy = cy.min(knowledge.height - 1);
-            if knowledge.has_tech(kcx, kcy, TECH_AGRICULTURE) {
-                if let Some(home) = beings.cold.home_settlement_pos[being_index] {
-                    let dist_home = ((pos[0] - home[0] as f32).powi(2)
-                        + (pos[1] - home[1] as f32).powi(2))
-                        .sqrt();
-                    if dist_home <= 20.0 {
-                        let cell_idx = (cy.min(terrain.height - 1) * terrain.width
-                            + cx.min(terrain.width - 1)) as usize;
-                        let on_grassland = cell_idx < terrain.biome.len()
-                            && terrain.biome[cell_idx] == Biome::Grassland;
-                        let no_structure = cell_idx < terrain.structure.len()
-                            && terrain.structure[cell_idx] == 0;
-                        if on_grassland && no_structure {
-                            let food_sec = needs[NEED_FOOD_SECURITY];
-                            // V76 §4: High culture tiles multiply Farm drive 10x
-                            let culture = tensor.read(TensorLayer::Culture, cx, cy);
-                            let culture_mult = if culture > 10.0 { 10.0 } else { 1.0 };
-                            let farm_score = ((1.0 - food_sec) * 2.0 + 1.0) * culture_mult;
-                            if farm_score > chosen_q {
-                                let signal_levels = local.values;
-                                let biome = terrain.biome_at(cx, cy);
-                                let nearby_count = nearby.len().min(255) as u8;
-                                let context_hash = compute_context_hash(
-                                    biome,
-                                    signal_levels,
-                                    nearby_count,
-                                    climate.day_phase(),
-                                );
-                                let causal = beings.cold.causal_memories[being_index]
-                                    .score_for_action(Action::Farm as u8, context_hash);
-                                let signal_contrib = local
-                                    .values
-                                    .iter()
-                                    .map(|v| v.abs())
-                                    .fold(0.0f32, f32::max);
-                                return ScoredAction {
-                                    action: Action::Farm,
-                                    score: farm_score,
-                                    target_being: None,
-                                    target_pos: Some(pos),
-                                    runner_up_action: chosen_action as u8,
-                                    runner_up_score: chosen_q,
-                                    causal_contrib: causal.abs(),
-                                    relationship_contrib: 0.0,
-                                    signal_contrib,
-                                };
-                            }
-                        }
+        // ── Farm override: humans terraform nearby grassland (baseline probability, Culture tensor amplifies) ─
+        if let Some(home) = beings.cold.home_settlement_pos[being_index] {
+            let dist_home = ((pos[0] - home[0] as f32).powi(2)
+                + (pos[1] - home[1] as f32).powi(2))
+                .sqrt();
+            if dist_home <= 20.0 {
+                let cell_idx = (cy.min(terrain.height - 1) * terrain.width
+                    + cx.min(terrain.width - 1)) as usize;
+                let on_grassland = cell_idx < terrain.biome.len()
+                    && terrain.biome[cell_idx] == Biome::Grassland;
+                let no_structure = cell_idx < terrain.structural_density.len()
+                    && terrain.structural_density[cell_idx] < 0.5;
+                if on_grassland && no_structure {
+                    let food_sec = needs[NEED_FOOD_SECURITY];
+                    // V76 §4: High culture tiles multiply Farm drive 10x
+                    let culture = tensor.read(TensorLayer::Culture, cx, cy);
+                    let culture_mult = if culture > 10.0 { 10.0 } else { 1.0 };
+                    let farm_score = ((1.0 - food_sec) * 2.0 + 1.0) * culture_mult;
+                    if farm_score > chosen_q {
+                        let signal_levels = local.values;
+                        let biome = terrain.biome_at(cx, cy);
+                        let nearby_count = nearby.len().min(255) as u8;
+                        let context_hash = compute_context_hash(
+                            biome,
+                            signal_levels,
+                            nearby_count,
+                            climate.day_phase(),
+                        );
+                        let causal = beings.cold.causal_memories[being_index]
+                            .score_for_action(Action::Farm as u8, context_hash);
+                        let signal_contrib = local
+                            .values
+                            .iter()
+                            .map(|v| v.abs())
+                            .fold(0.0f32, f32::max);
+                        return ScoredAction {
+                            action: Action::Farm,
+                            score: farm_score,
+                            target_being: None,
+                            target_pos: Some(pos),
+                            runner_up_action: chosen_action as u8,
+                            runner_up_score: chosen_q,
+                            causal_contrib: causal.abs(),
+                            relationship_contrib: 0.0,
+                            signal_contrib,
+                        };
                     }
                 }
             }
@@ -2485,9 +2476,8 @@ mod tests {
         let mut tensor = crate::world::tensor::TensorGrid::new(64, 64);
         tensor.deposit(TensorLayer::Odor, spawn_pos[0] as u32 + 3, spawn_pos[1] as u32, 3.0);
 
-        let knowledge = crate::world::knowledge::KnowledgeGrid::new(64, 64);
         let laws = crate::sim::world_state::WorldLaws::default();
-        let result = score_actions(0, &beings, &terrain, &resources, &tensor, &climate, &spatial, &knowledge, &laws, &mut rng);
+        let result = score_actions(0, &beings, &terrain, &resources, &tensor, &climate, &spatial, &laws, &mut rng);
         assert_eq!(
             result.action,
             Action::SeekFood,
@@ -2542,9 +2532,8 @@ mod tests {
         let mut tensor = crate::world::tensor::TensorGrid::new(64, 64);
         tensor.deposit(TensorLayer::Acoustic, spawn_pos[0] as u32, spawn_pos[1] as u32, 5.0);
 
-        let knowledge = crate::world::knowledge::KnowledgeGrid::new(64, 64);
         let laws = crate::sim::world_state::WorldLaws::default();
-        let result = score_actions(0, &beings, &terrain, &resources, &tensor, &climate, &spatial, &knowledge, &laws, &mut rng);
+        let result = score_actions(0, &beings, &terrain, &resources, &tensor, &climate, &spatial, &laws, &mut rng);
         assert_eq!(
             result.action,
             Action::Flee,

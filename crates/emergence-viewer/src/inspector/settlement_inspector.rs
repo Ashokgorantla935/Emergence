@@ -1,9 +1,14 @@
 use emergence_core::being::data::{Beings, BeingState};
 use emergence_core::sim::world_state::World;
-use emergence_core::world::knowledge::{
-    TECH_FISHING, TECH_SMELTING, TECH_MASONRY, TECH_AGRICULTURE, TECH_WEAVING, TECH_MEDICINE,
-    TECH_ENGINEERING,
-};
+
+// V77: KnowledgeGrid removed — tech constants kept locally for UI backward compat; all techs show as undiscovered
+const TECH_FISHING: u32     = 1 << 0;
+const TECH_SMELTING: u32    = 1 << 1;
+const TECH_MASONRY: u32     = 1 << 2;
+const TECH_AGRICULTURE: u32 = 1 << 3;
+const TECH_WEAVING: u32     = 1 << 4;
+const TECH_MEDICINE: u32    = 1 << 5;
+const TECH_ENGINEERING: u32 = 1 << 6;
 
 pub struct SettlementData {
     pub center: [f32; 2],
@@ -59,26 +64,11 @@ pub fn aggregate_settlement(world: &World, cx: f32, cy: f32, radius: f32) -> Set
     let avg_tool_quality = tool_sum / n;
     let avg_cultural_frequency = culture_sum / n;
 
-    // Sample KnowledgeGrid at center cell — accumulate OR across a small sample
+    // V77: KnowledgeGrid removed — tech discovery replaced by Culture tensor accumulation
     let terrain = &world.terrain;
-    let cell_cx = cx.max(0.0) as u32;
-    let cell_cy = cy.max(0.0) as u32;
-    let cell_cx = cell_cx.min(terrain.width.saturating_sub(1));
-    let cell_cy = cell_cy.min(terrain.height.saturating_sub(1));
-    let sample_r = (radius as i32).min(4);
-    let mut techs = 0u32;
-    for dy in -sample_r..=sample_r {
-        for dx in -sample_r..=sample_r {
-            let nx = cell_cx as i32 + dx;
-            let ny = cell_cy as i32 + dy;
-            if nx < 0 || ny < 0 {
-                continue;
-            }
-            let nx = nx as u32;
-            let ny = ny as u32;
-            techs |= world.knowledge.techs.get((ny * terrain.width + nx) as usize).copied().unwrap_or(0);
-        }
-    }
+    let cell_cx = (cx.max(0.0) as u32).min(terrain.width.saturating_sub(1));
+    let cell_cy = (cy.max(0.0) as u32).min(terrain.height.saturating_sub(1));
+    let techs = 0u32; // always zero in V77 — knowledge tree eliminated
 
     // Count structures in radius
     let mut structure_counts: [u32; 21] = [0; 21];

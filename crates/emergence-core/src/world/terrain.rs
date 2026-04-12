@@ -180,6 +180,8 @@ pub struct Terrain {
     /// V55 §3: Technology tier per cell (0-7), painted by settlement detection.
     /// Drives architecture spritesheet column selection in the renderer.
     pub tech_tier: Vec<u8>,
+    /// V77: Accumulated structural density from Build actions. 0.0 = empty, >0.5 = campfire-level, higher = fortress.
+    pub structural_density: Vec<f32>,
 }
 
 impl Terrain {
@@ -384,6 +386,7 @@ impl Terrain {
             nutrient_density,
             pathogen: vec![0.0f32; len],
             tech_tier: vec![0u8; len],
+            structural_density: vec![0.0f32; len],
         }
     }
 

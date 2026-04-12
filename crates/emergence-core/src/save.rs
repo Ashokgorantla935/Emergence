@@ -233,11 +233,6 @@ pub struct SaveFile {
     // World Laws (Phase 6)
     pub laws: WorldLaws,
 
-    // Knowledge grid (geographic tech bitmasks)
-    pub knowledge_techs: Vec<u32>,
-    pub knowledge_width: u32,
-    pub knowledge_height: u32,
-
     // RNG state
     pub rng_state: u64,
 
@@ -428,11 +423,6 @@ impl SaveFile {
             // World Laws
             laws: world.laws.clone(),
 
-            // Knowledge grid
-            knowledge_techs: world.knowledge.techs.clone(),
-            knowledge_width: world.knowledge.width,
-            knowledge_height: world.knowledge.height,
-
             rng_state: world.rng.get_seed(),
 
             object_grid_bytes: bitcode::encode(&world.objects),
@@ -483,6 +473,7 @@ impl SaveFile {
             nutrient_density: if self.terrain_nutrient_density.len() == len { self.terrain_nutrient_density.clone() } else { vec![0.3; len] },
             pathogen: if self.terrain_pathogen.len() == len { self.terrain_pathogen.clone() } else { vec![0.0; len] },
             tech_tier: vec![0u8; len],
+            structural_density: vec![0.0f32; len],
         };
 
         // Reconstruct ResourceLayer
@@ -707,16 +698,6 @@ impl SaveFile {
                     mg.channels = self.memetic_channels.clone();
                 }
                 mg
-            },
-            knowledge: {
-                let mut kg = crate::world::knowledge::KnowledgeGrid::new(w, h);
-                if self.knowledge_techs.len() == (w * h) as usize
-                    && self.knowledge_width == w
-                    && self.knowledge_height == h
-                {
-                    kg.techs = self.knowledge_techs.clone();
-                }
-                kg
             },
             total_energy: 0,
             energy_cap: 500_000,

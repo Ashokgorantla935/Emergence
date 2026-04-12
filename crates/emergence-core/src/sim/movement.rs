@@ -404,6 +404,14 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                 );
                 world.beings.hot.carry[being_index][0] += picked;
             }
+            // V75: Also pick up physical WorldItems with caloric_yield from ObjectGrid
+            let items = world.objects.pickup_all(cx, cy);
+            for item in items {
+                if item.properties.caloric_yield > 0.0 {
+                    let food_val = item.properties.caloric_yield * item.quantity_mass;
+                    world.beings.hot.carry[being_index][0] += food_val;
+                }
+            }
         }
         Action::Hunt => {
             if let Some(prey_idx) = action.target_being {
@@ -732,17 +740,32 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
             }
         }
         Action::Craft => {
-            // Improve tool_quality near mountain when carrying stone
+            // V75 §2.1: Drop carried materials onto ObjectGrid cell for physics-based forging.
+            // If near a campfire (Heat tensor > 0), tick_forge() handles the merge.
+            let cx = pos[0] as u32;
+            let cy = pos[1] as u32;
             if world.beings.hot.carry[being_index][1] >= 0.1 {
-                // Consume stone for crafting
                 let consumed = 0.1_f32.min(world.beings.hot.carry[being_index][1]);
                 world.beings.hot.carry[being_index][1] -= consumed;
-                // tool_quality += 0.1 per craft, cap at 1.0 (Phase 3 cap: 0.3 before unlocking higher tier)
+                // Drop stone as a physical WorldItem onto the grid
+                world.objects.drop_item(cx, cy, crate::world::object_grid::WorldItem {
+                    properties: crate::world::matter::MatterProperties::STONE,
+                    quantity_mass: consumed,
+                });
                 world.beings.hot.tool_quality[being_index] =
                     (world.beings.hot.tool_quality[being_index] + 0.1).min(0.3);
                 trigger_emotion(&mut world.beings, being_index, EMO_JOY, 0.2);
                 world.beings.hot.needs[being_index][NEED_PURPOSE] =
                     (world.beings.hot.needs[being_index][NEED_PURPOSE] + 0.05).min(1.0);
+            }
+            if world.beings.hot.carry[being_index][0] >= 0.1 {
+                let consumed = 0.1_f32.min(world.beings.hot.carry[being_index][0]);
+                world.beings.hot.carry[being_index][0] -= consumed;
+                // Drop food as a physical WorldItem
+                world.objects.drop_item(cx, cy, crate::world::object_grid::WorldItem {
+                    properties: crate::world::matter::MatterProperties::BERRIES,
+                    quantity_mass: consumed,
+                });
             }
         }
         Action::Teach => {

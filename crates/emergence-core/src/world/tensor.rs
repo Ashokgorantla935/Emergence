@@ -87,14 +87,7 @@ impl TensorGrid {
         }
     }
 
-    /// Perception multiplier for a being at position (x, y).
-    /// When Light → 0, perception drops to 0.01 (nearly blind).
-    /// Local Heat/Light emitters (campfires) restore perception.
-    pub fn perception_multiplier(&self, x: u32, y: u32) -> f32 {
-        let light = self.read(TensorLayer::Light, x, y);
-        // Floor at 0.01 so beings aren't completely blind — per V70 spec
-        light.max(0.01)
-    }
+    // perception_multiplier() DELETED — redundant with inline tensor.read(Light) + clamp in actions.rs
 
     /// Decay all layers by their per-layer decay factors.
     pub fn decay_all(&mut self) {
@@ -182,8 +175,11 @@ impl TensorGrid {
                     }
                 }
 
-                // V75 §2.2: Pure additive inverse-square — neighbors push into center cell
-                dst[idx] = (center * (1.0 - rate) + inv_sq_sum * rate).min(params.max_value);
+                // V75 §2.2: Pure additive — center keeps value, neighbors push IN.
+                // Spec: cell_b.tensor[i] += source / (distance² + 1.0)
+                // inv_sq_sum already contains neighbor_val/(dist²+1) for each unblocked neighbor.
+                // rate scales the contribution. Decay is separate (decay_all).
+                dst[idx] = (center + inv_sq_sum * rate).min(params.max_value);
             }
         }
 

@@ -55,17 +55,34 @@ impl ExtCameraUniform {
         let pitch = std::f32::consts::FRAC_PI_2
             + (std::f32::consts::FRAC_PI_4 - std::f32::consts::FRAC_PI_2) * zoom_level;
 
-        // V75 §1.1: Blend orthographic (zoom_level=0) → perspective (zoom_level=1).
-        // At close zoom, the slight perspective foreshortening enhances the 2.5D parallax.
-        // We lerp individual matrix elements — both are column-major 4x4.
+        // V75 §1.1: Blend orthographic → perspective based on zoom_level.
+        // Build a real perspective projection from the same extents, then element-wise lerp.
         let ortho = basic.view_proj;
-        // Construct a mild perspective: use the ortho extents but add foreshortening.
-        // perspective_factor controls how strong the effect is (0 = pure ortho, 1 = full persp)
-        let perspective_factor = zoom_level * 0.15; // Subtle — max 15% perspective blend
-        let mut blended = ortho;
-        // Perspective foreshortening: Z affects X/Y scaling (rows 0,1 get Z contribution)
-        blended[2][0] = perspective_factor * ortho[0][0] * 0.1; // slight X foreshorten from Z
-        blended[2][1] = perspective_factor * ortho[1][1] * 0.1; // slight Y foreshorten from Z
+
+        // Perspective projection using same viewport extents as ortho.
+        // near/far define the depth range where terrain extrusion lives.
+        let near = 0.1_f32;
+        let far = 100.0_f32;
+        // Extract ortho extents from the matrix: sx = 2/(r-l), tx = -(r+l)/(r-l)
+        let sx_ortho = ortho[0][0];
+        let sy_ortho = ortho[1][1];
+        // Perspective matrix (column-major): maps the same view volume but with Z foreshortening.
+        // Standard OpenGL-style perspective with the same aspect/scale as ortho.
+        let persp: [[f32; 4]; 4] = [
+            [sx_ortho * near, 0.0,             0.0,                               0.0],
+            [0.0,             sy_ortho * near,  0.0,                               0.0],
+            [0.0,             0.0,              -(far + near) / (far - near),      -1.0],
+            [ortho[3][0] * near, ortho[3][1] * near, -2.0 * far * near / (far - near), 0.0],
+        ];
+
+        // Element-wise lerp: ortho at zoom_level=0, perspective at zoom_level=1
+        let t = zoom_level;
+        let mut blended = [[0.0f32; 4]; 4];
+        for r in 0..4 {
+            for c in 0..4 {
+                blended[r][c] = ortho[r][c] * (1.0 - t) + persp[r][c] * t;
+            }
+        }
 
         ExtCameraUniform {
             view_proj: blended,

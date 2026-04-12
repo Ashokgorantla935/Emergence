@@ -9,7 +9,7 @@
 use emergence_core::being::data::{BeingState, Beings};
 use emergence_core::world::climate::ClimateGrid;
 use emergence_core::world::resource::{FoodType, ResourceLayer};
-use emergence_core::world::signal::{SignalChannel, SignalGrid};
+use emergence_core::world::tensor::{TensorGrid, TensorLayer};
 use emergence_core::world::terrain::{Biome, Terrain, StructureType};
 use wgpu::util::DeviceExt;
 
@@ -625,7 +625,7 @@ impl ChunkedObjectRenderer {
         queue:          &wgpu::Queue,
         terrain:        &Terrain,
         resources:      &ResourceLayer,
-        signals:        &SignalGrid,
+        tensor:         &TensorGrid,
         climate:        &ClimateGrid,
         pixels_per_unit: f32,
         cam_x:          f32,
@@ -696,7 +696,7 @@ impl ChunkedObjectRenderer {
                     let ft = self.frame_tick;
                     let chunk = &mut self.chunks[idx];
                     // Inline rebuild to avoid &self/&mut self conflict
-                    rebuild_chunk_standalone(chunk, queue, terrain, resources, signals, climate, ppu, ft);
+                    rebuild_chunk_standalone(chunk, queue, terrain, resources, climate, ppu, ft);
                 }
             }
         }
@@ -710,7 +710,7 @@ impl ChunkedObjectRenderer {
             for cx in cx_min..cx_max {
                 if ((cy * grid_w + cx) as usize) < self.chunks.len() {
                     collect_chunk_decor(
-                        cx, cy, terrain, resources, signals, climate,
+                        cx, cy, terrain, resources, tensor, climate,
                         self.pixels_per_unit, self.frame_tick,
                         &mut flora_instances, &mut small_plant_instances, &mut building_instances,
                     );
@@ -888,7 +888,7 @@ fn collect_chunk_decor(
     chunk_y: u32,
     terrain: &Terrain,
     resources: &ResourceLayer,
-    signals: &SignalGrid,
+    tensor: &TensorGrid,
     climate: &ClimateGrid,
     pixels_per_unit: f32,
     frame_tick: u32,
@@ -1147,7 +1147,8 @@ fn collect_chunk_decor(
             let wy = y as f32 + 0.5;
             let mut tint = [1.0f32, 1.0, 1.0];
             let toxin = climate.read_toxin(wx, wy);
-            let crime = signals.read(SignalChannel::Crime, x as u32, y as u32);
+            // Crime → Acoustic × 0.8
+            let crime = tensor.read(TensorLayer::Acoustic, (x as u32).min(tensor.width - 1), (y as u32).min(tensor.height - 1)) * 0.8;
             if toxin > 0.3 {
                 let t = ((toxin - 0.3) / 0.7).min(1.0);
                 tint[0] = tint[0] * (1.0 - t) + 0.3 * t;
@@ -1188,7 +1189,6 @@ fn rebuild_chunk_standalone(
     queue: &wgpu::Queue,
     terrain: &Terrain,
     resources: &ResourceLayer,
-    _signals: &SignalGrid,
     _climate: &ClimateGrid,
     pixels_per_unit: f32,
     _frame_tick: u32,

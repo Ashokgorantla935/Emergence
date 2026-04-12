@@ -7,7 +7,6 @@ use crate::world::climate::{Climate, ClimateGrid};
 use crate::world::config::WorldConfig;
 use crate::world::object_grid::ObjectGrid;
 use crate::world::resource::ResourceLayer;
-use crate::world::signal::SignalGrid;
 use crate::world::memetic::MemeticGrid;
 use crate::world::knowledge::KnowledgeGrid;
 use crate::world::tensor::TensorGrid;
@@ -213,7 +212,6 @@ pub struct World {
     pub resources: ResourceLayer,
     pub climate: Climate,
     pub climate_grid: ClimateGrid,
-    pub signals: SignalGrid,
     pub tensor: TensorGrid,
     pub memetic: MemeticGrid,
     pub knowledge: KnowledgeGrid,

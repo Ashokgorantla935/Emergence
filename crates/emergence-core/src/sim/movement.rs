@@ -73,14 +73,14 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                         world.terrain.nutrient_density[nidx] = (world.terrain.nutrient_density[nidx] - nutrient_consumed).max(0.0);
                         // Also feed caloric energy
                         world.beings.hot.caloric_energy[being_index] = (world.beings.hot.caloric_energy[being_index] + consumed * 0.01).min(1.0);
+                        // V75.6: Toxic food damages caloric energy and triggers fear
+                        let toxicity = world.resources.matter[nidx].toxicity;
+                        if toxicity > 0.0 {
+                            world.beings.hot.caloric_energy[being_index] = (world.beings.hot.caloric_energy[being_index] - toxicity * 0.1).max(0.0);
+                            trigger_emotion(&mut world.beings, being_index, EMO_FEAR, toxicity * 0.3);
+                        }
                         trigger_emotion(&mut world.beings, being_index, EMO_JOY, 0.1);
                         // Deposit food trail
-                        world.signals.deposit(
-                            crate::world::signal::SignalChannel::FoodTrail,
-                            cx.min(world.signals.width - 1),
-                            cy.min(world.signals.height - 1),
-                            0.3,
-                        );
                         world.tensor.deposit(
                             crate::world::tensor::TensorLayer::Odor,
                             cx.min(world.tensor.width - 1),
@@ -131,20 +131,14 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
             }
             let cx = pos[0] as u32;
             let cy = pos[1] as u32;
-            let danger = world.signals.read(
-                crate::world::signal::SignalChannel::Danger,
-                cx.min(world.signals.width - 1),
-                cy.min(world.signals.height - 1),
+            let danger = world.tensor.read(
+                crate::world::tensor::TensorLayer::Acoustic,
+                cx.min(world.tensor.width - 1),
+                cy.min(world.tensor.height - 1),
             );
             // Herbivore herd alarm: fleeing herbivore deposits a strong danger signal so
             // herd members within 20 cells sense it and also flee (cascading alarm)
             if world.beings.hot.dna[being_index].diet == DietType::Herbivore {
-                world.signals.deposit(
-                    crate::world::signal::SignalChannel::Danger,
-                    cx.min(world.signals.width - 1),
-                    cy.min(world.signals.height - 1),
-                    0.8,
-                );
                 world.tensor.deposit(
                     crate::world::tensor::TensorLayer::Acoustic,
                     cx.min(world.tensor.width - 1),
@@ -440,12 +434,6 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                             // Deposit food trail at kill site
                             let px = prey_pos[0] as u32;
                             let py = prey_pos[1] as u32;
-                            world.signals.deposit(
-                                crate::world::signal::SignalChannel::FoodTrail,
-                                px.min(world.signals.width - 1),
-                                py.min(world.signals.height - 1),
-                                0.5,
-                            );
                             world.tensor.deposit(
                                 crate::world::tensor::TensorLayer::Odor,
                                 px.min(world.tensor.width - 1),
@@ -453,12 +441,6 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                                 0.5,
                             );
                             // Danger signal from hunt
-                            world.signals.deposit(
-                                crate::world::signal::SignalChannel::Danger,
-                                px.min(world.signals.width - 1),
-                                py.min(world.signals.height - 1),
-                                0.8,
-                            );
                             world.tensor.deposit(
                                 crate::world::tensor::TensorLayer::Acoustic,
                                 px.min(world.tensor.width - 1),
@@ -474,11 +456,11 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                                 if victim_was_peaceful {
                                     let ax = pos[0] as u32;
                                     let ay = pos[1] as u32;
-                                    world.signals.deposit(
-                                        crate::world::signal::SignalChannel::Crime,
-                                        ax.min(world.signals.width - 1),
-                                        ay.min(world.signals.height - 1),
-                                        100.0,
+                                    world.tensor.deposit(
+                                        crate::world::tensor::TensorLayer::Acoustic,
+                                        ax.min(world.tensor.width - 1),
+                                        ay.min(world.tensor.height - 1),
+                                        80.0, // Crime × 0.8 → Acoustic
                                     );
                                 }
                             }
@@ -517,12 +499,6 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                             // Danger signal so nearby prey flee
                             let px = prey_pos[0] as u32;
                             let py = prey_pos[1] as u32;
-                            world.signals.deposit(
-                                crate::world::signal::SignalChannel::Danger,
-                                px.min(world.signals.width - 1),
-                                py.min(world.signals.height - 1),
-                                0.6,
-                            );
                             world.tensor.deposit(
                                 crate::world::tensor::TensorLayer::Acoustic,
                                 px.min(world.tensor.width - 1),
@@ -536,12 +512,6 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                         // Deposit predator scent while pursuing
                         let cx = pos[0] as u32;
                         let cy = pos[1] as u32;
-                        world.signals.deposit(
-                            crate::world::signal::SignalChannel::Danger,
-                            cx.min(world.signals.width - 1),
-                            cy.min(world.signals.height - 1),
-                            0.3,
-                        );
                         world.tensor.deposit(
                             crate::world::tensor::TensorLayer::Acoustic,
                             cx.min(world.tensor.width - 1),
@@ -703,10 +673,10 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     world.beings.hot.needs[being_index][NEED_PURPOSE] =
                         (world.beings.hot.needs[being_index][NEED_PURPOSE] + 0.1).min(1.0);
                     // Deposit comfort signal at build site
-                    world.signals.deposit(
-                        crate::world::signal::SignalChannel::Comfort,
-                        bx.min(world.signals.width - 1),
-                        by.min(world.signals.height - 1),
+                    world.tensor.deposit(
+                        crate::world::tensor::TensorLayer::Heat,
+                        bx.min(world.tensor.width - 1),
+                        by.min(world.tensor.height - 1),
                         0.5,
                     );
                     // Toxin emission: civilization building accumulates greenhouse gases.
@@ -801,10 +771,10 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                             // Deposit comfort signal (learning happened here)
                             let cx = pos[0] as u32;
                             let cy = pos[1] as u32;
-                            world.signals.deposit(
-                                crate::world::signal::SignalChannel::Comfort,
-                                cx.min(world.signals.width - 1),
-                                cy.min(world.signals.height - 1),
+                            world.tensor.deposit(
+                                crate::world::tensor::TensorLayer::Heat,
+                                cx.min(world.tensor.width - 1),
+                                cy.min(world.tensor.height - 1),
                                 0.1,
                             );
                             world.beings.hot.needs[being_index][NEED_PURPOSE] =
@@ -826,10 +796,10 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
             world.terrain.landmark[cidx] = (world.terrain.landmark[cidx] + 0.1).min(1.0);
             world.terrain.landmark_style[cidx] = style;
             // Emit comfort signal from memorial
-            world.signals.deposit(
-                crate::world::signal::SignalChannel::Comfort,
-                cx.min(world.signals.width - 1),
-                cy.min(world.signals.height - 1),
+            world.tensor.deposit(
+                crate::world::tensor::TensorLayer::Heat,
+                cx.min(world.tensor.width - 1),
+                cy.min(world.tensor.height - 1),
                 0.05,
             );
             world.beings.hot.needs[being_index][NEED_PURPOSE] =
@@ -844,12 +814,12 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
             let style = world.beings.hot.signal_style[being_index];
             world.terrain.landmark[cidx] = (world.terrain.landmark[cidx] + 0.1).min(1.0);
             world.terrain.landmark_style[cidx] = style;
-            // Art emits celebration signal
-            world.signals.deposit(
-                crate::world::signal::SignalChannel::Celebration,
-                cx.min(world.signals.width - 1),
-                cy.min(world.signals.height - 1),
-                0.02,
+            // Art emits celebration signal (Celebration → Heat × 0.3)
+            world.tensor.deposit(
+                crate::world::tensor::TensorLayer::Heat,
+                cx.min(world.tensor.width - 1),
+                cy.min(world.tensor.height - 1),
+                0.006,
             );
             world.beings.hot.needs[being_index][NEED_PURPOSE] =
                 (world.beings.hot.needs[being_index][NEED_PURPOSE] + 0.04).min(1.0);
@@ -901,10 +871,10 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
 
                         // Threatener gets a Comfort reward signal at their position
                         let tp = world.beings.hot.positions[target_idx];
-                        let tx = (tp[0] as u32).min(world.signals.width - 1);
-                        let ty = (tp[1] as u32).min(world.signals.height - 1);
-                        world.signals.deposit(
-                            crate::world::signal::SignalChannel::Comfort,
+                        let tx = (tp[0] as u32).min(world.tensor.width - 1);
+                        let ty = (tp[1] as u32).min(world.tensor.height - 1);
+                        world.tensor.deposit(
+                            crate::world::tensor::TensorLayer::Heat,
                             tx,
                             ty,
                             0.5,
@@ -994,12 +964,12 @@ pub fn execute_action(world: &mut World, being_index: usize, action: &ScoredActi
                     // Massive Comfort signal in 5-cell radius — no Toxin (clean energy)
                     for dy in -5_i32..=5 {
                         for dx in -5_i32..=5 {
-                            let nx = (bx as i32 + dx).clamp(0, world.signals.width as i32 - 1) as u32;
-                            let ny = (by as i32 + dy).clamp(0, world.signals.height as i32 - 1) as u32;
+                            let nx = (bx as i32 + dx).clamp(0, world.tensor.width as i32 - 1) as u32;
+                            let ny = (by as i32 + dy).clamp(0, world.tensor.height as i32 - 1) as u32;
                             let dist_sq = (dx * dx + dy * dy) as f32;
                             let falloff = (1.0 - dist_sq / 25.0).max(0.0);
-                            world.signals.deposit(
-                                crate::world::signal::SignalChannel::Comfort,
+                            world.tensor.deposit(
+                                crate::world::tensor::TensorLayer::Heat,
                                 nx,
                                 ny,
                                 2.0 * falloff,
@@ -1090,6 +1060,13 @@ fn move_toward(world: &mut World, being_index: usize, target: [f32; 2], speed: f
     // producing teleporting velocity vectors that appear as dark streaks).
     let max_speed = world.beings.hot.dna[being_index].speed_scalar() * BASE_SPEED;
     let clamped_dist = move_dist.min(max_speed);
+
+    // V75.6: Inventory density reduces velocity — heavier loads create drag
+    let carry_food = world.beings.hot.carry[being_index][0];
+    let carry_stone = world.beings.hot.carry[being_index][1];
+    let inventory_density = carry_food * 0.3 + carry_stone * 3.0;
+    let drag_scalar = inventory_density * 0.1;
+    let clamped_dist = clamped_dist / (1.0 + drag_scalar);
 
     let new_x = (pos[0] + nx * clamped_dist).clamp(0.0, world.terrain.width as f32 - 1.0);
     let new_y = (pos[1] + ny * clamped_dist).clamp(0.0, world.terrain.height as f32 - 1.0);

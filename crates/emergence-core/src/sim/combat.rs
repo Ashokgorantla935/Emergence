@@ -4,7 +4,6 @@
 use crate::being::data::{
     Beings, BeingState, NEED_HUNGER, EMO_FEAR, EMO_ANGER, TRAIT_BOLD,
 };
-use crate::world::signal::{SignalChannel, SignalGrid};
 use crate::world::tensor::{TensorGrid, TensorLayer};
 
 /// Resolve melee combat between attacker and defender.
@@ -14,7 +13,6 @@ pub fn resolve_combat(
     attacker: usize,
     defender: usize,
     beings: &mut Beings,
-    signals: &mut SignalGrid,
     tensor: &mut TensorGrid,
     rng: &mut fastrand::Rng,
 ) {
@@ -40,11 +38,8 @@ pub fn resolve_combat(
         beings.hot.emotions[defender][EMO_ANGER] =
             (beings.hot.emotions[defender][EMO_ANGER] + 0.2).min(1.0);
 
-        // Deposit danger signal at defender's location
+        // Danger deposit via tensor Acoustic (Rosetta: Danger → Acoustic × 1.0)
         let pos = beings.hot.positions[defender];
-        let cx = (pos[0] as u32).min(signals.width - 1);
-        let cy = (pos[1] as u32).min(signals.height - 1);
-        signals.deposit(SignalChannel::Danger, cx, cy, 0.6);
         let tx = (pos[0] as u32).min(tensor.width - 1);
         let ty = (pos[1] as u32).min(tensor.height - 1);
         tensor.deposit(TensorLayer::Acoustic, tx, ty, 0.6);

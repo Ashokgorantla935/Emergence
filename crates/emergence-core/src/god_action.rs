@@ -793,11 +793,11 @@ fn apply_god_action(world: &mut World, action: GodAction) {
                     }
                 }
             }
-            // Danger + anger signal burst
-            let scx = (pos[0] as u32).min(world.signals.width - 1);
-            let scy = (pos[1] as u32).min(world.signals.height - 1);
-            world.signals.deposit(crate::world::signal::SignalChannel::Danger, scx, scy, 5.0);
-            world.signals.deposit(crate::world::signal::SignalChannel::Anger, scx, scy, 2.0);
+            // Danger + anger burst via Acoustic tensor (Rosetta: Danger→Acoustic×1.0, Anger→Acoustic×0.3)
+            let scx = (pos[0] as u32).min(world.tensor.width - 1);
+            let scy = (pos[1] as u32).min(world.tensor.height - 1);
+            world.tensor.deposit(crate::world::tensor::TensorLayer::Acoustic, scx, scy, 5.0);
+            world.tensor.deposit(crate::world::tensor::TensorLayer::Acoustic, scx, scy, 2.0 * 0.3);
         }
 
         GodAction::WildfireIgnite { x, y } => {

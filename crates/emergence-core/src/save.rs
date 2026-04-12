@@ -12,7 +12,6 @@ use crate::world::climate::{Climate, ClimateGrid, DayPhase, Season};
 use crate::world::config::WorldConfig;
 use crate::world::map::MapSelection;
 use crate::world::resource::{FoodType, ResourceLayer};
-use crate::world::signal::SignalGrid;
 use crate::world::terrain::{Biome, Terrain};
 
 pub const CURRENT_VERSION: u32 = 2;
@@ -130,9 +129,6 @@ pub struct SaveFile {
     pub food_capacity: Vec<f32>,
     pub food_type: Vec<u8>,
     pub regrowth_rate: Vec<f32>,
-
-    // Signals (9 channels x width*height)
-    pub signals: Vec<Vec<f32>>,
 
     // MemeticGrid (4 channels x width*height — CPU mirror, GPU re-uploads on load)
     pub memetic_channels: Vec<Vec<f32>>,
@@ -343,8 +339,6 @@ impl SaveFile {
             food_type: world.resources.food_type.iter().map(|ft| *ft as u8).collect(),
             regrowth_rate: world.resources.regrowth_rate.clone(),
 
-            signals: world.signals.channels.clone(),
-
             memetic_channels: world.memetic.channels.clone(),
             memetic_width: world.memetic.width,
             memetic_height: world.memetic.height,
@@ -542,10 +536,6 @@ impl SaveFile {
         climate.global_temperature = self.climate_global_temperature;
         climate.water_level_offset = self.climate_water_level_offset;
 
-        // Reconstruct SignalGrid
-        let mut signals = SignalGrid::new(w, h);
-        signals.channels = self.signals.clone();
-
         // Reconstruct Beings
         let mut beings = Beings::new();
         for i in 0..n {
@@ -696,7 +686,6 @@ impl SaveFile {
             resources,
             climate,
             climate_grid: ClimateGrid::new(w, h),
-            signals,
             tensor: crate::world::tensor::TensorGrid::new(w, h),
             beings,
             spatial,

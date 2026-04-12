@@ -8,7 +8,6 @@ use crate::sim::world_state::WorldLaws;
 use crate::world::climate::Climate;
 use crate::world::knowledge::KnowledgeGrid;
 use crate::world::resource::ResourceLayer;
-use crate::world::signal::{SignalChannel, SignalGrid};
 use crate::world::tensor::{TensorGrid, TensorLayer};
 use crate::world::terrain::{Biome, Terrain};
 
@@ -181,7 +180,6 @@ pub fn score_actions(
     beings: &Beings,
     terrain: &Terrain,
     resources: &ResourceLayer,
-    signals: &SignalGrid,
     tensor: &TensorGrid,
     climate: &Climate,
     spatial: &SpatialIndex,
@@ -200,28 +198,31 @@ pub fn score_actions(
     let radius = beings.perception_radius(being_index, light);
 
     // Build per-being signal cache: read once, use for all 15 action scores.
-    let cx = (pos[0] as u32).min(signals.width - 1);
-    let cy = (pos[1] as u32).min(signals.height - 1);
+    let cx = (pos[0] as u32).min(tensor.width - 1);
+    let cy = (pos[1] as u32).min(tensor.height - 1);
     let local = LocalSignals {
         values: [
-            signals.read(SignalChannel::Danger, cx, cy),
-            signals.read(SignalChannel::FoodTrail, cx, cy),
-            signals.read(SignalChannel::Comfort, cx, cy),
-            signals.read(SignalChannel::Grief, cx, cy),
-            signals.read(SignalChannel::Celebration, cx, cy),
-            signals.read(SignalChannel::Anger, cx, cy),
-            signals.read(SignalChannel::Scent, cx, cy),
+            tensor.read(TensorLayer::Acoustic, cx, cy),               // Danger
+            tensor.read(TensorLayer::Odor, cx, cy),                   // FoodTrail
+            tensor.read(TensorLayer::Heat, cx, cy),                   // Comfort
+            tensor.read(TensorLayer::Acoustic, cx, cy) * 0.5,         // Grief
+            tensor.read(TensorLayer::Heat, cx, cy) * 0.3,             // Celebration
+            tensor.read(TensorLayer::Acoustic, cx, cy) * 0.3,         // Anger
+            tensor.read(TensorLayer::Odor, cx, cy) * 0.5,             // Scent
         ],
         gradients: {
-            let g = |ch| { let (x, y) = signals.gradient(ch, pos[0], pos[1], radius); [x, y] };
+            let g = |layer: TensorLayer, scale: f32| {
+                let (x, y) = tensor.gradient(layer, pos[0], pos[1], radius);
+                [x * scale, y * scale]
+            };
             [
-                g(SignalChannel::Danger),
-                g(SignalChannel::FoodTrail),
-                g(SignalChannel::Comfort),
-                g(SignalChannel::Grief),
-                g(SignalChannel::Celebration),
-                g(SignalChannel::Anger),
-                g(SignalChannel::Scent),
+                g(TensorLayer::Acoustic, 1.0),  // Danger
+                g(TensorLayer::Odor, 1.0),      // FoodTrail
+                g(TensorLayer::Heat, 1.0),      // Comfort
+                g(TensorLayer::Acoustic, 0.5),  // Grief
+                g(TensorLayer::Heat, 0.3),      // Celebration
+                g(TensorLayer::Acoustic, 0.3),  // Anger
+                g(TensorLayer::Odor, 0.5),      // Scent
             ]
         },
     };
@@ -344,8 +345,8 @@ pub fn score_actions(
         }
 
         // Guard behavior: bold humans detect Crime signal and prioritize hunting the criminal.
-        // Read Crime separately (channel 7, not in LocalSignals cache which only holds 7 channels).
-        let crime_at_pos = signals.read(SignalChannel::Crime, cx, cy);
+        // Crime → Acoustic × 0.8; threshold scaled from 2.0 to 1.6
+        let crime_at_pos = tensor.read(TensorLayer::Acoustic, cx, cy) * 0.8;
         if crime_at_pos > 2.0 && beings.hot.personalities[being_index][TRAIT_BOLD] > 0.8 {
             q_values[Action::Hunt as usize] += 20.0;
         }
@@ -687,7 +688,7 @@ pub fn score_actions(
             Action::Hunt => {
                 // If Crime signal detected, chase the crime gradient (guard behavior — bold guards only, near source)
                 if crime_at_pos > 2.0 && beings.hot.personalities[being_index][TRAIT_BOLD] > 0.8 {
-                    let (gdx, gdy) = signals.gradient(SignalChannel::Crime, pos[0], pos[1], radius * 2.0);
+                    let (gdx, gdy) = tensor.gradient(TensorLayer::Acoustic, pos[0], pos[1], radius * 2.0);
                     if gdx.abs() > 0.01 || gdy.abs() > 0.01 {
                         target_pos = Some([pos[0] + gdx * radius, pos[1] + gdy * radius]);
                         // Check if any human near the crime peak is the criminal
@@ -740,9 +741,9 @@ pub fn score_actions(
                     && beings.hot.personalities[ni][TRAIT_BOLD] > 0.6
                     && {
                         let np = beings.hot.positions[ni];
-                        let nx = (np[0] as u32).min(signals.width - 1);
-                        let ny = (np[1] as u32).min(signals.height - 1);
-                        signals.read(SignalChannel::Danger, nx, ny) > 0.3
+                        let nx = (np[0] as u32).min(tensor.width - 1);
+                        let ny = (np[1] as u32).min(tensor.height - 1);
+                        tensor.read(TensorLayer::Acoustic, nx, ny) > 0.3
                     }
             });
             if let Some(appease_idx) = appease_target {
@@ -904,9 +905,9 @@ pub fn score_actions(
                         }
 
                         if let Some(ep) = enemy_pos {
-                            let sx = (pos[0] as u32).min(signals.width - 1);
-                            let sy = (pos[1] as u32).min(signals.height - 1);
-                            let danger = signals.read(SignalChannel::Danger, sx, sy);
+                            let sx = (pos[0] as u32).min(tensor.width - 1);
+                            let sy = (pos[1] as u32).min(tensor.height - 1);
+                            let danger = tensor.read(TensorLayer::Acoustic, sx, sy);
 
                             let danger_threshold = if laws.total_war { 0.05 } else { 0.3 };
                             if danger > danger_threshold {
@@ -1343,7 +1344,6 @@ pub fn score_actions(
             being_index,
             beings,
             terrain,
-            signals,
             pos,
             radius,
             &nearby,
@@ -1438,7 +1438,6 @@ fn apply_species_behavior(
     being_index: usize,
     beings: &Beings,
     terrain: &Terrain,
-    signals: &SignalGrid,
     pos: [f32; 2],
     radius: f32,
     nearby: &[usize],
@@ -1620,7 +1619,7 @@ fn apply_species_behavior(
                         let w = terrain.width as usize;
                         let h = terrain.height as usize;
                         if tx as usize >= w || ty as usize >= h || !terrain.water[ty as usize * w + tx as usize] {
-                            *target_pos = find_water_direction(pos, signals, terrain, rng);
+                            *target_pos = find_water_direction(pos, terrain, rng);
                         }
                     }
                 }
@@ -1878,7 +1877,6 @@ fn flock_centroid(
 /// Find a direction from current pos that moves toward water.
 fn find_water_direction(
     pos: [f32; 2],
-    _signals: &SignalGrid,
     terrain: &Terrain,
     rng: &mut fastrand::Rng,
 ) -> Option<[f32; 2]> {
@@ -2443,7 +2441,6 @@ mod tests {
         let config = test_config();
         let terrain = Terrain::generate(&config);
         let resources = ResourceLayer::new(&terrain);
-        let mut signals = SignalGrid::new(64, 64);
         let climate = Climate::new(&config);
         let spatial = SpatialIndex::new(64, 64, 4.0);
 
@@ -2471,13 +2468,13 @@ mod tests {
             n
         };
 
-        // Deposit food trail signal nearby
-        signals.deposit(SignalChannel::FoodTrail, spawn_pos[0] as u32 + 3, spawn_pos[1] as u32, 3.0);
+        // Deposit food trail into tensor Odor channel
+        let mut tensor = crate::world::tensor::TensorGrid::new(64, 64);
+        tensor.deposit(TensorLayer::Odor, spawn_pos[0] as u32 + 3, spawn_pos[1] as u32, 3.0);
 
         let knowledge = crate::world::knowledge::KnowledgeGrid::new(64, 64);
         let laws = crate::sim::world_state::WorldLaws::default();
-        let tensor = crate::world::tensor::TensorGrid::new(64, 64);
-        let result = score_actions(0, &beings, &terrain, &resources, &signals, &tensor, &climate, &spatial, &knowledge, &laws, &mut rng);
+        let result = score_actions(0, &beings, &terrain, &resources, &tensor, &climate, &spatial, &knowledge, &laws, &mut rng);
         assert_eq!(
             result.action,
             Action::SeekFood,
@@ -2491,7 +2488,6 @@ mod tests {
         let config = test_config();
         let terrain = Terrain::generate(&config);
         let resources = ResourceLayer::new(&terrain);
-        let mut signals = SignalGrid::new(64, 64);
         let climate = Climate::new(&config);
         let spatial = SpatialIndex::new(64, 64, 4.0);
 
@@ -2515,13 +2511,13 @@ mod tests {
         beings.hot.emotions[0][EMO_FEAR] = 0.9;
         beings.hot.needs[0][NEED_SAFETY] = 0.1;
 
-        // Deposit danger signal nearby
-        signals.deposit(SignalChannel::Danger, spawn_pos[0] as u32 + 2, spawn_pos[1] as u32, 5.0);
+        // Deposit danger signal into tensor Acoustic channel
+        let mut tensor = crate::world::tensor::TensorGrid::new(64, 64);
+        tensor.deposit(TensorLayer::Acoustic, spawn_pos[0] as u32 + 2, spawn_pos[1] as u32, 5.0);
 
         let knowledge = crate::world::knowledge::KnowledgeGrid::new(64, 64);
         let laws = crate::sim::world_state::WorldLaws::default();
-        let tensor = crate::world::tensor::TensorGrid::new(64, 64);
-        let result = score_actions(0, &beings, &terrain, &resources, &signals, &tensor, &climate, &spatial, &knowledge, &laws, &mut rng);
+        let result = score_actions(0, &beings, &terrain, &resources, &tensor, &climate, &spatial, &knowledge, &laws, &mut rng);
         assert_eq!(
             result.action,
             Action::Flee,

@@ -60,7 +60,8 @@ impl ObjectGrid {
                 let heat = tensor.read(crate::world::tensor::TensorLayer::Heat, x, y);
                 let a = self.cells[idx][0];
                 let b = self.cells[idx][1];
-                let req_energy = (a.properties.combustibility + b.properties.malleability) / 2.0;
+                let req_energy = (a.properties.combustibility + b.properties.malleability) / 2.0
+                               + (a.properties.hardness + b.properties.hardness) * 0.1;
                 if heat <= req_energy { continue; }
 
                 // Merge first two items via forge()

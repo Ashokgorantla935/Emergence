@@ -2,7 +2,6 @@ use super::actions::Action;
 use super::data::*;
 use super::dna::DietType;
 use crate::sim::spatial::SpatialIndex;
-use crate::world::signal::{SignalChannel, SignalGrid};
 use crate::world::tensor::{TensorGrid, TensorLayer};
 use smallvec::SmallVec;
 
@@ -197,15 +196,13 @@ pub fn init_kinship_warmth(beings: &mut Beings, new_idx: usize, current_tick: u3
 
 /// Deposit emotion-based signals for all alive beings.
 /// Fauna deposit to tensor grid (predator acoustic, herbivore odor). No species-name branches.
-pub fn deposit_emotion_signals(beings: &Beings, signals: &mut SignalGrid, tensor: &mut TensorGrid) {
+pub fn deposit_emotion_signals(beings: &Beings, tensor: &mut TensorGrid) {
     for i in 0..beings.hot.count {
         if beings.hot.states[i] == BeingState::Dead {
             continue;
         }
 
         let pos = beings.hot.positions[i];
-        let cx = (pos[0] as u32).min(signals.width - 1);
-        let cy = (pos[1] as u32).min(signals.height - 1);
         let tcx = (pos[0] as u32).min(tensor.width - 1);
         let tcy = (pos[1] as u32).min(tensor.height - 1);
 
@@ -213,19 +210,17 @@ pub fn deposit_emotion_signals(beings: &Beings, signals: &mut SignalGrid, tensor
         let is_omnivore = dna.diet == DietType::Omnivore;
 
         if is_omnivore {
-            // Map emotions to signal channels.
-            // Fear is intentionally excluded: internal fear (from hunger/cold) must NOT
-            // deposit Danger onto the grid — that creates a self-reinforcing flee loop.
-            // Danger is reserved for predator presence, combat, and god actions.
-            let emotion_signal_map: [(usize, SignalChannel); 4] = [
-                (EMO_JOY, SignalChannel::Celebration),
-                (EMO_ANGER, SignalChannel::Anger),
-                (EMO_GRIEF, SignalChannel::Grief),
-                (EMO_CONTENTMENT, SignalChannel::Comfort),
-                // Curiosity has no signal deposit
+            // Rosetta: emotions map to tensor layers with scale factors.
+            // Fear excluded: self-reinforcing flee loop risk.
+            // Danger reserved for predator presence, combat, god actions.
+            let emotion_tensor_map: [(usize, TensorLayer, f32); 4] = [
+                (EMO_JOY, TensorLayer::Heat, 0.3),         // Celebration → Heat×0.3
+                (EMO_ANGER, TensorLayer::Acoustic, 0.3),   // Anger → Acoustic×0.3
+                (EMO_GRIEF, TensorLayer::Acoustic, 0.5),   // Grief → Acoustic×0.5
+                (EMO_CONTENTMENT, TensorLayer::Heat, 1.0), // Comfort → Heat×1.0
             ];
 
-            for &(emo_idx, channel) in &emotion_signal_map {
+            for &(emo_idx, layer, scale) in &emotion_tensor_map {
                 let intensity = beings.hot.emotions[i][emo_idx];
                 if intensity > 0.1 {
                     let deposit = if intensity > 0.7 {
@@ -233,13 +228,13 @@ pub fn deposit_emotion_signals(beings: &Beings, signals: &mut SignalGrid, tensor
                     } else {
                         intensity * 0.3
                     };
-                    signals.deposit(channel, cx, cy, deposit);
+                    tensor.deposit(layer, tcx, tcy, deposit * scale);
                 }
             }
 
-            // Elder wisdom aura: extra comfort
+            // Elder wisdom aura: extra comfort (Heat × 1.0)
             if beings.life_phase(i) == LifePhase::Elder {
-                signals.deposit(SignalChannel::Comfort, cx, cy, 0.15);
+                tensor.deposit(TensorLayer::Heat, tcx, tcy, 0.15);
             }
         } else {
             // Fauna: DNA-driven tensor deposits — no species-name branches.
@@ -259,8 +254,8 @@ pub fn deposit_emotion_signals(beings: &Beings, signals: &mut SignalGrid, tensor
             }
         }
 
-        // Scent: all alive beings deposit (universal)
-        signals.deposit(SignalChannel::Scent, cx, cy, 0.1);
+        // Scent: all alive beings deposit Odor × 0.5 (Rosetta: Scent → Odor × 0.5)
+        tensor.deposit(TensorLayer::Odor, tcx, tcy, 0.05);
     }
 }
 

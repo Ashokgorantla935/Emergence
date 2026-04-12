@@ -187,6 +187,71 @@ impl TensorGrid {
         self.layers[li][..size].copy_from_slice(&self.scratch[..size]);
     }
 
+    /// Compute gradient direction toward strongest signal within radius.
+    /// Returns (dx, dy) pointing toward the centroid of max-value cells, or (0, 0) if none.
+    pub fn gradient(&self, layer: TensorLayer, x: f32, y: f32, radius: f32) -> (f32, f32) {
+        let li = layer as usize;
+        let grid = &self.layers[li];
+        let w = self.width as i32;
+        let h = self.height as i32;
+
+        let cx = x as i32;
+        let cy = y as i32;
+        let r = radius.ceil() as i32;
+
+        let min_x = (cx - r).max(0);
+        let max_x = (cx + r).min(w - 1);
+        let min_y = (cy - r).max(0);
+        let max_y = (cy + r).min(h - 1);
+
+        let r_sq = radius * radius;
+        const EPSILON: f32 = 1e-4;
+
+        let mut best_val = 0.0f32;
+        let mut sum_x = 0.0f32;
+        let mut sum_y = 0.0f32;
+        let mut count = 0u32;
+
+        for sy in min_y..=max_y {
+            for sx in min_x..=max_x {
+                let fdx = sx as f32 - x;
+                let fdy = sy as f32 - y;
+                if fdx * fdx + fdy * fdy > r_sq {
+                    continue;
+                }
+                let val = grid[(sy * w + sx) as usize];
+
+                if val > best_val + EPSILON {
+                    best_val = val;
+                    sum_x = sx as f32;
+                    sum_y = sy as f32;
+                    count = 1;
+                } else if (val - best_val).abs() < EPSILON && val > 0.0 {
+                    sum_x += sx as f32;
+                    sum_y += sy as f32;
+                    count += 1;
+                }
+            }
+        }
+
+        if count == 0 || best_val < 0.001 {
+            return (0.0, 0.0);
+        }
+
+        let center_x = sum_x / count as f32;
+        let center_y = sum_y / count as f32;
+
+        let dx = center_x - x;
+        let dy = center_y - y;
+
+        if dx * dx + dy * dy < 0.25 {
+            return (0.0, 0.0);
+        }
+
+        let len = (dx * dx + dy * dy).sqrt();
+        (dx / len, dy / len)
+    }
+
     /// Wind-push the Odor layer along wind_direction.
     /// Called by climate system instead of isotropic diffusion.
     pub fn advect_odor(&mut self) {

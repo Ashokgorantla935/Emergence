@@ -3,7 +3,7 @@
 
 use crate::being::data::Beings;
 use crate::sim::spatial::SpatialIndex;
-use crate::world::signal::{SignalChannel, SignalGrid};
+use crate::world::tensor::{TensorGrid, TensorLayer};
 use crate::world::terrain::{StructureType, Terrain};
 
 /// V55 §3: Maximum technological wealth a settlement can accumulate.
@@ -69,7 +69,7 @@ impl Settlement {
 /// Settlements persist as long as beings remember their home position — abandoned areas
 /// dissolve when no bonded beings remain nearby.
 pub fn detect_settlements(
-    signals: &SignalGrid,
+    tensor: &TensorGrid,
     spatial: &SpatialIndex,
     beings: &Beings,
     tick: u32,
@@ -82,8 +82,8 @@ pub fn detect_settlements(
     const COMFORT_THRESHOLD: f32 = 0.15; // V70: structural stigmergy lowers bar — presence of structure implies commitment
 
     // Structural stigmergy candidates: living Humans bonded to a home position (built or claimed a structure).
-    let w = signals.width as f32;
-    let h = signals.height as f32;
+    let w = tensor.width as f32;
+    let h = tensor.height as f32;
     let candidates: Vec<usize> = (0..beings.hot.count)
         .filter(|&i| {
             if beings.hot.states[i] == BeingState::Dead { return false; }
@@ -165,10 +165,10 @@ pub fn detect_settlements(
         let center_x = cx_sum / n_m;
         let center_y = cy_sum / n_m;
 
-        // Quality gate: average comfort at member positions must be >= threshold.
+        // Quality gate: average heat (Comfort→Heat Rosetta) at member positions must be >= threshold.
         let comfort_sum: f32 = members.iter().map(|&bi| {
             let [px, py] = beings.hot.positions[bi];
-            signals.read(SignalChannel::Comfort, px as u32, py as u32)
+            tensor.read(TensorLayer::Heat, px as u32, py as u32)
         }).sum();
         if comfort_sum / n_m < COMFORT_THRESHOLD {
             continue;

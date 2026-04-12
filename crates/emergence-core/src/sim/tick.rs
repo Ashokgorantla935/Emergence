@@ -17,7 +17,6 @@ use crate::being::needs::decay_needs;
 use crate::being::social::{deposit_emotion_signals, init_kinship_warmth};
 use crate::sim::movement::execute_action;
 use crate::sim::world_state::{Event, EventCause, EventType, World};
-use crate::world::signal::SignalChannel;
 use crate::being::dna::DietType;
 
 pub fn tick(world: &mut World) {
@@ -83,7 +82,7 @@ pub fn tick(world: &mut World) {
     if world.tick % 30 == 0 {
         // V55 §2: Conservation — suppress biomass regrowth if energy cap is reached
         let energy_available = world.total_energy < world.energy_cap;
-        crate::world::physics::tick_physics(&mut world.terrain, &mut world.signals, energy_available);
+        crate::world::physics::tick_physics(&mut world.terrain, &mut world.tensor, energy_available);
     }
 
     // 2h. Pathogen exposure — beings on high-pathogen cells lose caloric energy (every 30 ticks)
@@ -143,15 +142,6 @@ pub fn tick(world: &mut World) {
         }
     }
 
-    // 3. Signal tick — reaction every tick, diffusion staggered: 1 channel per tick.
-    // Spreads diffusion cost across 8 ticks instead of running all channels every 2 ticks.
-    // When GPU manages signals, skip all CPU signal work.
-    if !world.signals.gpu_managed {
-        world.signals.reaction_step();
-        let ch = (world.tick as usize) % world.signals.channel_count();
-        world.signals.diffuse_single_channel(ch);
-    }
-
     // 3b-tensor. Tensor grid physics: decay, diffusion, light sync every tick.
     {
         use crate::world::tensor::TensorLayer;
@@ -190,6 +180,24 @@ pub fn tick(world: &mut World) {
     // 3b-forge. Auto-forge tick: merge items on hot cells every 60 ticks.
     if world.tick % 60 == 0 {
         world.objects.tick_forge(&world.tensor);
+    }
+
+    // V75.6: Solubility decay — items in wet conditions dissolve every 100 ticks.
+    if world.tick % 100 == 0 {
+        let w = world.terrain.width;
+        for y in 0..world.terrain.height {
+            for x in 0..w {
+                let idx = (y * w + x) as usize;
+                if world.objects.cells[idx].is_empty() { continue; }
+                let is_wet = world.terrain.water[idx]
+                    || world.terrain.moisture_dynamic[idx] > 0.5;
+                if is_wet {
+                    world.objects.cells[idx].retain(|item| {
+                        item.properties.solubility < 0.3 || item.quantity_mass > 0.5
+                    });
+                }
+            }
+        }
     }
 
     // 3b. Toxin greenhouse effect: accumulate global temperature every 60 ticks.
@@ -330,12 +338,13 @@ pub fn tick(world: &mut World) {
     // Handle death consequences
     for &dead_idx in &newly_dead {
         let pos = world.beings.hot.positions[dead_idx];
-        let cx = (pos[0] as u32).min(world.signals.width - 1);
-        let cy = (pos[1] as u32).min(world.signals.height - 1);
+        let cx = (pos[0] as u32).min(world.tensor.width - 1);
+        let cy = (pos[1] as u32).min(world.tensor.height - 1);
 
         // Grief signal burst only for humans (otherwise society shuts down mourning dead fish/deer)
+        // Grief → Acoustic × 0.5
         if world.beings.hot.dna[dead_idx].diet == DietType::Omnivore {
-            world.signals.deposit(SignalChannel::Grief, cx, cy, 1.0);
+            world.tensor.deposit(crate::world::tensor::TensorLayer::Acoustic, cx, cy, 0.5);
         }
 
         // Drop carried food
@@ -544,9 +553,9 @@ pub fn tick(world: &mut World) {
         }
 
         let pos = world.beings.hot.positions[i];
-        let x = (pos[0] as u32).min(world.signals.width - 1);
-        let y = (pos[1] as u32).min(world.signals.height - 1);
-        let danger = world.signals.read(SignalChannel::Danger, x, y);
+        let x = (pos[0] as u32).min(world.tensor.width - 1);
+        let y = (pos[1] as u32).min(world.tensor.height - 1);
+        let danger = world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, x, y);
 
         // Hero bypass: bold or devoted humans resist the initial panic trigger
         let is_hero = if world.beings.hot.dna[i].diet == DietType::Omnivore {
@@ -584,7 +593,7 @@ pub fn tick(world: &mut World) {
             }
 
             // Flee: move DOWN the danger gradient (away from highest danger)
-            let (gx, gy) = world.signals.gradient(SignalChannel::Danger, pos[0], pos[1], 6.0);
+            let (gx, gy) = world.tensor.gradient(crate::world::tensor::TensorLayer::Acoustic, pos[0], pos[1], 6.0);
             let mag = (gx * gx + gy * gy).sqrt();
             if mag > 0.01 {
                 let speed = 0.06; // full flee speed
@@ -614,7 +623,7 @@ pub fn tick(world: &mut World) {
         let warmth = world.beings.hot.needs[i][NEED_WARMTH];
         if warmth < 0.25 {
             let pos = world.beings.hot.positions[i];
-            let (gx, gy) = world.signals.gradient(SignalChannel::Comfort, pos[0], pos[1], 8.0);
+            let (gx, gy) = world.tensor.gradient(crate::world::tensor::TensorLayer::Heat, pos[0], pos[1], 8.0);
             let mag = (gx * gx + gy * gy).sqrt();
             if mag > 0.01 {
                 let speed = 0.04;
@@ -672,7 +681,6 @@ pub fn tick(world: &mut World) {
                 &world.beings,
                 &world.terrain,
                 &world.resources,
-                &world.signals,
                 &world.tensor,
                 &world.climate,
                 &world.spatial,
@@ -783,20 +791,20 @@ pub fn tick(world: &mut World) {
             {
                 let needs_after = world.beings.hot.needs[i];
                 let pos = world.beings.hot.positions[i];
-                let cx = (pos[0] as u32).min(world.signals.width - 1);
-                let cy = (pos[1] as u32).min(world.signals.height - 1);
+                let cx = (pos[0] as u32).min(world.tensor.width - 1);
+                let cy = (pos[1] as u32).min(world.tensor.height - 1);
 
                 // Reconstruct old brain input (pre-execution state) for backprop
                 let old_brain_input: [f32; 14] = [
                     needs_before[0], needs_before[1], needs_before[2],
                     needs_before[3], needs_before[4], needs_before[5],
-                    world.signals.read(crate::world::signal::SignalChannel::Danger, cx, cy),
-                    world.signals.read(crate::world::signal::SignalChannel::FoodTrail, cx, cy),
-                    world.signals.read(crate::world::signal::SignalChannel::Comfort, cx, cy),
-                    world.signals.read(crate::world::signal::SignalChannel::Grief, cx, cy),
-                    world.signals.read(crate::world::signal::SignalChannel::Celebration, cx, cy),
-                    world.signals.read(crate::world::signal::SignalChannel::Anger, cx, cy),
-                    world.signals.read(crate::world::signal::SignalChannel::Scent, cx, cy),
+                    world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy),  // Danger
+                    world.tensor.read(crate::world::tensor::TensorLayer::Odor, cx, cy),      // FoodTrail
+                    world.tensor.read(crate::world::tensor::TensorLayer::Heat, cx, cy),      // Comfort
+                    world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy) * 0.5, // Grief
+                    world.tensor.read(crate::world::tensor::TensorLayer::Heat, cx, cy) * 0.3,     // Celebration
+                    world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy) * 0.3, // Anger
+                    world.tensor.read(crate::world::tensor::TensorLayer::Odor, cx, cy) * 0.5,     // Scent
                     world.climate.light_level(),
                 ];
 
@@ -815,13 +823,13 @@ pub fn tick(world: &mut World) {
                 let new_brain_input: [f32; 14] = [
                     needs_after[0], needs_after[1], needs_after[2],
                     needs_after[3], needs_after[4], needs_after[5],
-                    world.signals.read(crate::world::signal::SignalChannel::Danger, cx, cy),
-                    world.signals.read(crate::world::signal::SignalChannel::FoodTrail, cx, cy),
-                    world.signals.read(crate::world::signal::SignalChannel::Comfort, cx, cy),
-                    world.signals.read(crate::world::signal::SignalChannel::Grief, cx, cy),
-                    world.signals.read(crate::world::signal::SignalChannel::Celebration, cx, cy),
-                    world.signals.read(crate::world::signal::SignalChannel::Anger, cx, cy),
-                    world.signals.read(crate::world::signal::SignalChannel::Scent, cx, cy),
+                    world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy),
+                    world.tensor.read(crate::world::tensor::TensorLayer::Odor, cx, cy),
+                    world.tensor.read(crate::world::tensor::TensorLayer::Heat, cx, cy),
+                    world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy) * 0.5,
+                    world.tensor.read(crate::world::tensor::TensorLayer::Heat, cx, cy) * 0.3,
+                    world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy) * 0.3,
+                    world.tensor.read(crate::world::tensor::TensorLayer::Odor, cx, cy) * 0.5,
                     world.climate.light_level(),
                 ];
                 let (new_q_values, _) = crate::being::brain::forward(
@@ -836,7 +844,8 @@ pub fn tick(world: &mut World) {
 
                 // Criminal penalty: if Crime signal is at this being's position and they just
                 // chose Hunt, they deposited it this tick (unprovoked murder). Apply massive penalty.
-                let crime_at_pos = world.signals.read(SignalChannel::Crime, cx, cy);
+                // Crime → Acoustic × 0.8; threshold scaled from 5.0 to 4.0
+                let crime_at_pos = world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy);
                 let reward = if crime_at_pos > 5.0
                     && action.action == crate::being::actions::Action::Hunt
                 {
@@ -886,16 +895,16 @@ pub fn tick(world: &mut World) {
             world.beings.hot.pending_needs[i] = world.beings.hot.needs[i];
             // Context hash
             let pos = world.beings.hot.positions[i];
-            let cx = (pos[0] as u32).min(world.signals.width - 1);
-            let cy = (pos[1] as u32).min(world.signals.height - 1);
+            let cx = (pos[0] as u32).min(world.tensor.width - 1);
+            let cy = (pos[1] as u32).min(world.tensor.height - 1);
             let signal_levels = [
-                world.signals.read(SignalChannel::Danger, cx, cy),
-                world.signals.read(SignalChannel::FoodTrail, cx, cy),
-                world.signals.read(SignalChannel::Comfort, cx, cy),
-                world.signals.read(SignalChannel::Grief, cx, cy),
-                world.signals.read(SignalChannel::Celebration, cx, cy),
-                world.signals.read(SignalChannel::Anger, cx, cy),
-                world.signals.read(SignalChannel::Scent, cx, cy),
+                world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy),
+                world.tensor.read(crate::world::tensor::TensorLayer::Odor, cx, cy),
+                world.tensor.read(crate::world::tensor::TensorLayer::Heat, cx, cy),
+                world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy) * 0.5,
+                world.tensor.read(crate::world::tensor::TensorLayer::Heat, cx, cy) * 0.3,
+                world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy) * 0.3,
+                world.tensor.read(crate::world::tensor::TensorLayer::Odor, cx, cy) * 0.5,
             ];
             let biome = world.terrain.biome_at(cx, cy);
             let nearby_count = world.spatial.count_in_radius(pos[0], pos[1], 8.0).min(255) as u8;
@@ -1103,40 +1112,42 @@ pub fn tick(world: &mut World) {
     }
 
     // 5g. Deposit emotion signals
-    deposit_emotion_signals(&world.beings, &mut world.signals, &mut world.tensor);
+    deposit_emotion_signals(&world.beings, &mut world.tensor);
 
     // 5h-1. Chemical agriculture: beings deposit Fertilization near home
+    // Fertilization → MicroBiomass × 1.0
     if world.tick % 10 == 0 {
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] != BeingState::Awake { continue; }
             if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; }
 
             let pos = world.beings.hot.positions[i];
-            let sx = (pos[0] as u32).min(world.signals.width - 1);
-            let sy = (pos[1] as u32).min(world.signals.height - 1);
+            let sx = (pos[0] as u32).min(world.tensor.width - 1);
+            let sy = (pos[1] as u32).min(world.tensor.height - 1);
 
             if let Some(home) = world.beings.cold.home_settlement_pos[i] {
                 let dist = ((pos[0] - home[0] as f32).powi(2) + (pos[1] - home[1] as f32).powi(2)).sqrt();
                 if dist < 10.0 {
-                    world.signals.deposit(SignalChannel::Fertilization, sx, sy, 0.05);
+                    world.tensor.deposit(crate::world::tensor::TensorLayer::MicroBiomass, sx, sy, 0.05);
                 }
             }
         }
     }
 
     // 5h-2. Cultural wave emission: each human radiates cultural identity
+    // CultureStrength → Odor × 0.3; CultureFreq → Odor × 0.2
     if world.tick % 5 == 0 {
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] != BeingState::Awake { continue; }
             if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; }
 
             let pos = world.beings.hot.positions[i];
-            let sx = (pos[0] as u32).min(world.signals.width - 1);
-            let sy = (pos[1] as u32).min(world.signals.height - 1);
+            let sx = (pos[0] as u32).min(world.tensor.width - 1);
+            let sy = (pos[1] as u32).min(world.tensor.height - 1);
 
-            world.signals.deposit(SignalChannel::CultureStrength, sx, sy, 0.1);
+            world.tensor.deposit(crate::world::tensor::TensorLayer::Odor, sx, sy, 0.03); // 0.1 × 0.3
             let freq = world.beings.hot.cultural_frequency[i];
-            world.signals.deposit(SignalChannel::CultureFreq, sx, sy, freq * 0.1);
+            world.tensor.deposit(crate::world::tensor::TensorLayer::Odor, sx, sy, freq * 0.02); // × 0.2
         }
     }
 
@@ -1205,8 +1216,8 @@ pub fn tick(world: &mut World) {
     // 6c. Trauma engrams: massive danger spikes permanently suppress exploration and boost defense.
     // Only runs every 100 ticks to amortize cost.
     if world.tick % 100 == 0 {
-        let grid_cells = (world.signals.width * world.signals.height) as f32;
-        let danger_sum: f32 = world.signals.channels[SignalChannel::Danger as usize].iter().sum();
+        let grid_cells = (world.tensor.width * world.tensor.height) as f32;
+        let danger_sum: f32 = world.tensor.layers[crate::world::tensor::TensorLayer::Acoustic as usize].iter().sum();
         let avg_danger = danger_sum / grid_cells;
 
         if avg_danger > 2.0 {
@@ -1215,13 +1226,9 @@ pub fn tick(world: &mut World) {
                 if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; }
 
                 let pos = world.beings.hot.positions[i];
-                let bx = (pos[0] as u32).min(world.signals.width - 1);
-                let by = (pos[1] as u32).min(world.signals.height - 1);
-                let idx = (by * world.signals.width + bx) as usize;
-                let local_danger = world.signals.channels[SignalChannel::Danger as usize]
-                    .get(idx)
-                    .copied()
-                    .unwrap_or(0.0);
+                let bx = (pos[0] as u32).min(world.tensor.width - 1);
+                let by = (pos[1] as u32).min(world.tensor.height - 1);
+                let local_danger = world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, bx, by);
 
                 if local_danger > 1.5 {
                     if let Some(geno) = world.beings.cold.genotypes.get_mut(i) {
@@ -1245,8 +1252,8 @@ pub fn tick(world: &mut World) {
         for (idx, st) in destroyed {
             let x = (idx as u32) % world.terrain.width;
             let y = (idx as u32) / world.terrain.width;
-            // Signal grief at destroyed structure
-            world.signals.deposit(SignalChannel::Grief, x.min(world.signals.width - 1), y.min(world.signals.height - 1), 0.3);
+            // Grief at destroyed structure → Acoustic × 0.5
+            world.tensor.deposit(crate::world::tensor::TensorLayer::Acoustic, x.min(world.tensor.width - 1), y.min(world.tensor.height - 1), 0.15);
             // V55 §2: Release locked energy back into local biomass field
             let released_energy = crate::sim::world_state::structure_energy_cost(st as u8);
             if released_energy > 0 {
@@ -1339,7 +1346,7 @@ pub fn tick(world: &mut World) {
 
             // MEDICINE: near flora + extreme grief signal (desperate herbal experimentation)
             if world.resources.flora_stage[idx] >= 2 {
-                let grief = world.signals.read(SignalChannel::Grief, x.min(world.signals.width - 1), y.min(world.signals.height - 1));
+                let grief = world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, x.min(world.tensor.width - 1), y.min(world.tensor.height - 1)) * 0.5;
                 if grief > 0.5 {
                     if !world.knowledge.has_tech(x, y, TECH_MEDICINE) {
                         world.knowledge.deposit_tech(x, y, TECH_MEDICINE, 6);
@@ -1394,7 +1401,7 @@ pub fn tick(world: &mut World) {
         let prev_ids: Vec<u32> = world.settlements.iter().map(|s| s.id).collect();
 
         crate::sim::settlement::detect_settlements(
-            &world.signals,
+            &world.tensor,
             &world.spatial,
             &world.beings,
             world.tick,
@@ -1413,10 +1420,11 @@ pub fn tick(world: &mut World) {
                     cause: EventCause::PopulationCount { count: s.population },
                 });
                 // Strong comfort burst at new settlement center
-                let scx = (s.center[0] as u32).min(world.signals.width - 1);
-                let scy = (s.center[1] as u32).min(world.signals.height - 1);
-                world.signals.deposit(SignalChannel::Comfort, scx, scy, 1.0);
-                world.signals.deposit(SignalChannel::Celebration, scx, scy, 0.5);
+                // Comfort → Heat × 1.0; Celebration → Heat × 0.3
+                let scx = (s.center[0] as u32).min(world.tensor.width - 1);
+                let scy = (s.center[1] as u32).min(world.tensor.height - 1);
+                world.tensor.deposit(crate::world::tensor::TensorLayer::Heat, scx, scy, 1.0);
+                world.tensor.deposit(crate::world::tensor::TensorLayer::Heat, scx, scy, 0.15); // 0.5 × 0.3
                 // Deforestation: clear flora in 5x5 area around new settlement center
                 let tw = world.terrain.width as i32;
                 let th = world.terrain.height as i32;
@@ -1445,11 +1453,11 @@ pub fn tick(world: &mut World) {
                 50,
             );
             for (stype, bx, by, settlement_id) in built {
-                // Comfort signal at new structure
-                world.signals.deposit(
-                    SignalChannel::Comfort,
-                    bx.min(world.signals.width - 1),
-                    by.min(world.signals.height - 1),
+                // Comfort signal at new structure → Heat
+                world.tensor.deposit(
+                    crate::world::tensor::TensorLayer::Heat,
+                    bx.min(world.tensor.width - 1),
+                    by.min(world.tensor.height - 1),
                     0.6,
                 );
                 world.events.push(Event {
@@ -1488,10 +1496,10 @@ pub fn tick(world: &mut World) {
                 let food = world.resources.food[idx];
                 let cap = world.resources.food_capacity[idx];
                 if cap > 2.0 && food > cap * 0.5 {
-                    // Rich food cell emits comfort, attracting beings to cluster
-                    let sx = x.min(world.signals.width - 1);
-                    let sy = y.min(world.signals.height - 1);
-                    world.signals.deposit(SignalChannel::Comfort, sx, sy, (food / cap) * 0.15);
+                    // Rich food cell emits comfort, attracting beings to cluster → Heat
+                    let sx = x.min(world.tensor.width - 1);
+                    let sy = y.min(world.tensor.height - 1);
+                    world.tensor.deposit(crate::world::tensor::TensorLayer::Heat, sx, sy, (food / cap) * 0.15);
                 }
             }
         }
@@ -1521,9 +1529,10 @@ pub fn tick(world: &mut World) {
                     _ => continue,
                 };
 
-                let sx = x.min(world.signals.width - 1);
-                let sy = y.min(world.signals.height - 1);
-                world.signals.deposit(SignalChannel::Comfort, sx, sy, comfort_amt);
+                // Comfort → Heat
+                let sx = x.min(world.tensor.width - 1);
+                let sy = y.min(world.tensor.height - 1);
+                world.tensor.deposit(crate::world::tensor::TensorLayer::Heat, sx, sy, comfort_amt);
 
                 // Tensor Heat: campfires and forges emit heat locally
                 let heat_amt = match st {
@@ -1535,7 +1544,14 @@ pub fn tick(world: &mut World) {
                 if heat_amt > 0.0 {
                     let tx = x.min(world.tensor.width - 1);
                     let ty = y.min(world.tensor.height - 1);
-                    world.tensor.deposit(crate::world::tensor::TensorLayer::Heat, tx, ty, heat_amt);
+                    // V75.6: Conductive structures amplify heat spread
+                    let structure_conductivity = if idx < world.resources.matter.len() {
+                        world.resources.matter[idx].conductivity
+                    } else {
+                        0.0
+                    };
+                    let heat_multiplier = 1.0 + structure_conductivity;
+                    world.tensor.deposit(crate::world::tensor::TensorLayer::Heat, tx, ty, heat_amt * heat_multiplier);
                 }
 
                 // V70: Tensor Light — campfires emit 1.0 locally; beings near campfires at night
@@ -1574,10 +1590,10 @@ pub fn tick(world: &mut World) {
             // Must have TECH_AGRICULTURE locally
             if !world.knowledge.has_tech(x, y, TECH_AGRICULTURE) { continue; }
 
-            // Must be near a settlement (high comfort signal = near campfire/hut)
-            let sx = x.min(world.signals.width - 1);
-            let sy = y.min(world.signals.height - 1);
-            let comfort = world.signals.read(SignalChannel::Comfort, sx, sy);
+            // Must be near a settlement (high Heat tensor = near campfire/hut)
+            let sx = x.min(world.tensor.width - 1);
+            let sy = y.min(world.tensor.height - 1);
+            let comfort = world.tensor.read(crate::world::tensor::TensorLayer::Heat, sx, sy);
             if comfort < 0.2 { continue; } // must be near settlement
 
             // Only farm on empty land cells (no existing structure, not water)
@@ -1660,7 +1676,7 @@ fn apply_weather_effects(world: &mut World) {
             // but reduced to 0.3 (was 0.8) since storm is a borderline physical threat.
             for y in ry..(ry + rh).min(world.terrain.height) {
                 for x in rx..(rx + rw).min(world.terrain.width) {
-                    world.signals.deposit(SignalChannel::Danger, x, y, 0.3);
+                    world.tensor.deposit(crate::world::tensor::TensorLayer::Acoustic, x.min(world.tensor.width - 1), y.min(world.tensor.height - 1), 0.3);
                 }
             }
             // Warmth damage + scatter for beings in region

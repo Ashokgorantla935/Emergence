@@ -343,7 +343,7 @@ impl ResourceLayer {
 
     /// Fire cellular automaton — spreads based on neighbor flora, destroys environment, emits Danger signal.
     /// Runs every tick when any fire is active.
-    pub fn tick_fire(&mut self, terrain: &mut Terrain, _signals: &mut crate::world::signal::SignalGrid, world_tick: u32) {
+    pub fn tick_fire(&mut self, terrain: &mut Terrain, world_tick: u32) {
         let w = terrain.width as usize;
         let h = terrain.height as usize;
         let len = w * h;

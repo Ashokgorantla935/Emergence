@@ -44,7 +44,7 @@ impl MatterProperties {
             malleability: (a.malleability + b.malleability) * 0.5 - 0.1,
             combustibility: (a.combustibility + b.combustibility) * 0.5,
             conductivity: (a.conductivity + b.conductivity) * 0.5,
-            caloric_yield: 0.0, // forged items are not food
+            caloric_yield: (a.caloric_yield + b.caloric_yield) * (1.0 + heat_level * 0.01),
             toxicity: (a.toxicity + b.toxicity) * 0.5,
             solubility: (a.solubility + b.solubility) * 0.5 * 0.5,
         })

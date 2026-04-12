@@ -5,7 +5,7 @@ use emergence_core::save::{self, AUTO_SAVE_INTERVAL};
 use emergence_core::scenario::{ScenarioConfig, ScenarioId};
 use emergence_core::world::map::{MapId, MapSelection};
 use emergence_core::sim::world_state::World;
-use emergence_core::world::signal::SignalChannel;
+use emergence_core::world::tensor::TensorLayer;
 use emergence_viewer::animation::AnimationManager;
 use emergence_viewer::audio::{AudioContext, BiomeAmbience, SoundEngine};
 use emergence_viewer::camera::Camera;
@@ -751,13 +751,13 @@ impl ApplicationHandler for App {
                                 // Signal heatmap toggles F1-F7
                                 if let Some(ref mut heatmap) = self.heatmap_renderer {
                                     match key {
-                                        KeyCode::F1 => heatmap.toggle_channel(SignalChannel::Danger),
-                                        KeyCode::F2 => heatmap.toggle_channel(SignalChannel::FoodTrail),
-                                        KeyCode::F3 => heatmap.toggle_channel(SignalChannel::Comfort),
-                                        KeyCode::F4 => heatmap.toggle_channel(SignalChannel::Grief),
-                                        KeyCode::F5 => heatmap.toggle_channel(SignalChannel::Celebration),
-                                        KeyCode::F6 => heatmap.toggle_channel(SignalChannel::Anger),
-                                        KeyCode::F7 => heatmap.toggle_channel(SignalChannel::Scent),
+                                        KeyCode::F1 => heatmap.toggle_channel(TensorLayer::Acoustic),
+                                        KeyCode::F2 => heatmap.toggle_channel(TensorLayer::Odor),
+                                        KeyCode::F3 => heatmap.toggle_channel(TensorLayer::Heat),
+                                        KeyCode::F4 => heatmap.toggle_channel(TensorLayer::Light),
+                                        KeyCode::F5 => heatmap.toggle_channel(TensorLayer::MicroBiomass),
+                                        KeyCode::F6 => heatmap.toggle_channel(TensorLayer::Acoustic),
+                                        KeyCode::F7 => heatmap.toggle_channel(TensorLayer::Odor),
                                         KeyCode::Escape => {
                                             self.speed.set_speed(emergence_viewer::screen_state::SimSpeed::Paused);
                                             self.save_slots = SaveSlotInfo::probe_all();
@@ -1095,7 +1095,7 @@ impl ApplicationHandler for App {
                         self.kingdom_detector.detect(
                             &self.settlement_detector,
                             &world.beings,
-                            &world.signals,
+                            &world.tensor,
                             world.tick,
                         );
                     }
@@ -1306,12 +1306,12 @@ impl ApplicationHandler for App {
                 self.sig_sample_counter = 0;
                 if let Some(ref world) = self.world {
                     if let Ok(w) = world.read() {
-                        let signals = &w.signals;
-                        let n = (signals.width * signals.height) as usize;
+                        let tensor = &w.tensor;
+                        let n = (tensor.width * tensor.height) as usize;
                         let scale = 1.0 / n.max(1) as f32;
-                        self.cached_sig_danger  = (signals.channels[0].iter().sum::<f32>() * scale * 4.0).min(1.0);
-                        self.cached_sig_comfort = (signals.channels[2].iter().sum::<f32>() * scale * 4.0).min(1.0);
-                        self.cached_sig_grief   = (signals.channels[3].iter().sum::<f32>() * scale * 4.0).min(1.0);
+                        self.cached_sig_danger  = (tensor.layers[TensorLayer::Acoustic as usize].iter().sum::<f32>() * scale * 4.0).min(1.0);
+                        self.cached_sig_comfort = (tensor.layers[TensorLayer::Heat as usize].iter().sum::<f32>() * scale * 4.0).min(1.0);
+                        self.cached_sig_grief   = (tensor.layers[TensorLayer::Acoustic as usize].iter().sum::<f32>() * scale * 2.0).min(1.0);
                         self.cached_sig_water_level = if w.climate.water_level_offset > 0.0 {
                             0.28 + w.climate.water_level_offset
                         } else {
@@ -1572,7 +1572,7 @@ impl ApplicationHandler for App {
             self.profile_accum.being_ms += being_t.elapsed().as_secs_f32() * 1000.0;
 
             if let Some(ref hm) = self.heatmap_renderer {
-                hm.update(&rs.queue, &world.signals);
+                hm.update(&rs.queue, &world.tensor);
             }
 
             // Object renderer update — viewport culled
@@ -1581,7 +1581,7 @@ impl ApplicationHandler for App {
                     &rs.queue,
                     &world.terrain,
                     &world.resources,
-                    &world.signals,
+                    &world.tensor,
                     &world.climate_grid,
                     pixels_per_unit,
                     self.camera.position[0],
@@ -2570,28 +2570,16 @@ impl ApplicationHandler for App {
                 if let Some(ref hm) = self.heatmap_renderer {
                     if let Some(channel) = hm.active_channel {
                         let (channel_name, channel_desc, channel_color) = match channel {
-                            emergence_core::world::signal::SignalChannel::Danger =>
-                                ("DANGER", "F1 — Fear/threat signals. High = fleeing beings.", egui::Color32::from_rgb(220, 50, 50)),
-                            emergence_core::world::signal::SignalChannel::FoodTrail =>
-                                ("FOOD TRAIL", "F2 — Food scent. Beings follow to find resources.", egui::Color32::from_rgb(80, 200, 80)),
-                            emergence_core::world::signal::SignalChannel::Comfort =>
-                                ("COMFORT", "F3 — Safe/home signal. Beings cluster in high areas.", egui::Color32::from_rgb(120, 180, 255)),
-                            emergence_core::world::signal::SignalChannel::Grief =>
-                                ("GRIEF", "F4 — Grief signals. Accumulates near death sites.", egui::Color32::from_rgb(70, 100, 240)),
-                            emergence_core::world::signal::SignalChannel::Celebration =>
-                                ("CELEBRATION", "F5 — Joy/celebration. Spreads during births and bonds.", egui::Color32::from_rgb(255, 220, 30)),
-                            emergence_core::world::signal::SignalChannel::Anger =>
-                                ("ANGER", "F6 — Anger/conflict. High near fights and theft.", egui::Color32::from_rgb(220, 80, 30)),
-                            emergence_core::world::signal::SignalChannel::Scent =>
-                                ("SCENT", "F7 — Cultural identity. Beings recognize group members.", egui::Color32::from_rgb(200, 120, 220)),
-                            emergence_core::world::signal::SignalChannel::Crime =>
-                                ("CRIME", "F8 — Murder beacon. Deposited by unprovoked killers. Bold beings hunt the source.", egui::Color32::from_rgb(200, 0, 200)),
-                            emergence_core::world::signal::SignalChannel::Fertilization =>
-                                ("FERTILIZATION", "Soil fertility from settlements. Boosts food regrowth.", egui::Color32::from_rgb(50, 200, 50)),
-                            emergence_core::world::signal::SignalChannel::CultureFreq =>
-                                ("CULTURE FREQ", "Tribal cultural identity wave.", egui::Color32::from_rgb(230, 150, 30)),
-                            emergence_core::world::signal::SignalChannel::CultureStrength =>
-                                ("CULTURE STRENGTH", "Tribal cultural presence intensity.", egui::Color32::from_rgb(230, 230, 70)),
+                            TensorLayer::Acoustic =>
+                                ("ACOUSTIC", "F1 — Danger/conflict/noise. High = threats, fights, storms.", egui::Color32::from_rgb(220, 50, 50)),
+                            TensorLayer::Odor =>
+                                ("ODOR", "F2 — Food scent & cultural identity. Beings follow to find resources.", egui::Color32::from_rgb(80, 200, 80)),
+                            TensorLayer::Heat =>
+                                ("HEAT", "F3 — Warmth/comfort. High near campfires, huts, settlements.", egui::Color32::from_rgb(255, 160, 40)),
+                            TensorLayer::Light =>
+                                ("LIGHT", "F4 — Light level. High = day/campfire; low = night/shadow.", egui::Color32::from_rgb(255, 255, 160)),
+                            TensorLayer::MicroBiomass =>
+                                ("MICRO BIOMASS", "F5 — Soil fertility from settlements. Boosts food regrowth.", egui::Color32::from_rgb(50, 200, 50)),
                         };
 
                         egui::Area::new(egui::Id::new("heatmap_legend"))
@@ -2768,28 +2756,14 @@ impl ApplicationHandler for App {
                 rs.device.poll(wgpu::Maintain::Poll);
 
                 if let Some(ref world) = self.world {
-                    let mut world_w = world.write().unwrap();
+                    let world_w = world.write().unwrap();
                     let expected_cells = (rs.signal_compute.width * rs.signal_compute.height) as usize;
-                    let grid_cells = (world_w.signals.width * world_w.signals.height) as usize;
+                    let grid_cells = (world_w.tensor.width * world_w.tensor.height) as usize;
 
-                    // GPU compute disabled — CPU handles signal diffusion (1ms staggered).
-                    // Skip reinit to avoid Metal 256MB buffer limit crash on large maps.
+                    // GPU signal compute disabled — TensorGrid uses CPU-side diffusion.
                     let _ = expected_cells;
                     let _ = grid_cells;
-                    // GPU signal compute disabled — CPU staggered diffusion (1 channel/tick, ~1ms)
-                    // outperforms GPU path (22ms due to PCI-e sync stall + readback latency).
-                    // world_w.signals.gpu_managed = true;
-
-                    // GPU signal dispatch disabled — skip readback and dispatch.
-                    if false {
-                        let mut encoder = rs.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Signal Diffuse Dispatch Encoder"),
-                        });
-                        rs.signal_compute.upload_all_channels(&rs.queue, &world_w.signals.channels);
-                        rs.signal_compute.dispatch(&mut encoder);
-                        rs.queue.submit(std::iter::once(encoder.finish()));
-                        rs.signal_compute.start_download(&rs.device, &rs.queue);
-                    }
+                    drop(world_w);
                 }
                 self.profile_accum.signal_ms += signal_t.elapsed().as_secs_f32() * 1000.0;
 

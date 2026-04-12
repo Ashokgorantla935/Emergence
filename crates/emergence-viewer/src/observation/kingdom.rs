@@ -2,7 +2,7 @@
 /// Runs every 600 ticks. Viewer-only; never writes engine state.
 
 use emergence_core::being::data::{Beings, TRAIT_BOLD, TRAIT_SOCIAL};
-use emergence_core::world::signal::SignalGrid;
+use emergence_core::world::tensor::{TensorGrid, TensorLayer};
 use super::settlement::{Settlement, SettlementDetector};
 
 /// A detected kingdom: one or more settlements under a common leader.
@@ -46,7 +46,7 @@ impl KingdomDetector {
         &mut self,
         detector: &SettlementDetector,
         beings: &Beings,
-        signals: &SignalGrid,
+        tensor: &TensorGrid,
         tick: u32,
     ) {
         if tick == self.last_run_tick {
@@ -194,8 +194,8 @@ impl KingdomDetector {
             // Kingdom color from leader's dominant personality trait
             let color = personality_color(beings, leader_idx);
 
-            // Territory: comfort signal cells >= 0.15 that are nearer to a settlement in this kingdom
-            let territory = compute_territory(signals, &group_indices, settlements, &new_kingdoms);
+            // Territory: Heat tensor cells >= 0.15 that are nearer to a settlement in this kingdom
+            let territory = compute_territory(tensor, &group_indices, settlements, &new_kingdoms);
 
             // Average loyalty (proxy: avg belonging + avg warmth-to-leader)
             let all_beings: Vec<usize> = group_indices
@@ -318,21 +318,20 @@ fn dist2(a: &[f32; 2], b: &[f32; 2]) -> f32 {
     dx * dx + dy * dy
 }
 
-/// Compute territory cells for a kingdom group from the comfort signal.
+/// Compute territory cells for a kingdom group from the Heat tensor (Comfort→Heat).
 fn compute_territory(
-    signals: &SignalGrid,
+    tensor: &TensorGrid,
     group_indices: &[usize],
     settlements: &[Settlement],
     existing_kingdoms: &[Kingdom],
 ) -> Vec<(u32, u32)> {
-    use emergence_core::world::signal::SignalChannel;
     let mut cells: Vec<(u32, u32)> = Vec::new();
-    let w = signals.width;
-    let h = signals.height;
+    let w = tensor.width;
+    let h = tensor.height;
 
     for cy in 0..h {
         for cx in 0..w {
-            if signals.read(SignalChannel::Comfort, cx, cy) < 0.15 {
+            if tensor.read(TensorLayer::Heat, cx, cy) < 0.15 {
                 continue;
             }
             let pos = [cx as f32, cy as f32];

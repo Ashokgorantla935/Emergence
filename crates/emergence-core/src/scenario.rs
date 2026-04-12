@@ -283,14 +283,12 @@ pub fn create_world_from_scenario(scenario: &ScenarioConfig) -> crate::sim::worl
     use crate::world::terrain::Terrain;
     use crate::world::resource::ResourceLayer;
     use crate::world::climate::Climate;
-    use crate::world::signal::SignalGrid;
 
     let config = scenario.world.clone();
     let terrain = Terrain::generate(&config);
     let resources = ResourceLayer::new(&terrain);
     let climate = Climate::new(&config);
     let (w, h) = (terrain.width, terrain.height);
-    let signals = SignalGrid::new(w, h);
     let spatial = SpatialIndex::new(w, h, 4.0);
     let events = EventLog::new(100_000);
 
@@ -405,7 +403,6 @@ pub fn create_world_from_scenario(scenario: &ScenarioConfig) -> crate::sim::worl
         resources,
         climate,
         climate_grid: crate::world::climate::ClimateGrid::new(w, h),
-        signals,
         tensor: crate::world::tensor::TensorGrid::new(w, h),
         beings,
         spatial,

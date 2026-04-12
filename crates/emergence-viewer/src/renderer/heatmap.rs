@@ -1,4 +1,4 @@
-use emergence_core::world::signal::{SignalChannel, SignalGrid};
+use emergence_core::world::tensor::{TensorGrid, TensorLayer};
 use wgpu::util::DeviceExt;
 
 pub struct HeatmapRenderer {
@@ -7,7 +7,7 @@ pub struct HeatmapRenderer {
     pub bind_group: wgpu::BindGroup,
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
-    pub active_channel: Option<SignalChannel>,
+    pub active_channel: Option<TensorLayer>,
     pub alpha: f32,
     width: u32,
     height: u32,
@@ -102,7 +102,7 @@ impl HeatmapRenderer {
         }
     }
 
-    pub fn toggle_channel(&mut self, channel: SignalChannel) {
+    pub fn toggle_channel(&mut self, channel: TensorLayer) {
         if self.active_channel == Some(channel) {
             self.active_channel = None;
         } else {
@@ -110,31 +110,24 @@ impl HeatmapRenderer {
         }
     }
 
-    pub fn update(&self, queue: &wgpu::Queue, signals: &SignalGrid) {
-        let channel = match self.active_channel {
-            Some(c) => c,
+    pub fn update(&self, queue: &wgpu::Queue, tensor: &TensorGrid) {
+        let layer = match self.active_channel {
+            Some(l) => l,
             None => return,
         };
 
-        let ch_idx = channel as usize;
-        let grid = &signals.channels[ch_idx];
+        let grid = &tensor.layers[layer as usize];
 
         // Find max value for normalization
         let max_val = grid.iter().copied().fold(0.0f32, f32::max).max(0.001);
 
-        // Channel color
-        let (cr, cg, cb) = match channel {
-            SignalChannel::Danger => (1.0, 0.0, 0.0),
-            SignalChannel::FoodTrail => (0.0, 1.0, 0.0),
-            SignalChannel::Comfort => (0.0, 0.8, 0.8),
-            SignalChannel::Grief => (0.3, 0.2, 0.8),
-            SignalChannel::Celebration => (1.0, 1.0, 0.0),
-            SignalChannel::Anger => (1.0, 0.5, 0.0),
-            SignalChannel::Scent => (0.5, 0.5, 0.5),
-            SignalChannel::Crime => (0.8, 0.0, 0.8), // purple: crime/murder beacon
-            SignalChannel::Fertilization => (0.2, 0.8, 0.2), // green: soil fertility
-            SignalChannel::CultureFreq => (0.9, 0.6, 0.1), // orange: cultural identity
-            SignalChannel::CultureStrength => (0.9, 0.9, 0.3), // yellow: cultural presence
+        // Layer color
+        let (cr, cg, cb) = match layer {
+            TensorLayer::Light =>       (1.0, 1.0, 0.8), // pale yellow: light
+            TensorLayer::Heat =>        (1.0, 0.4, 0.0), // orange: heat/comfort
+            TensorLayer::Acoustic =>    (1.0, 0.0, 0.0), // red: danger/noise
+            TensorLayer::Odor =>        (0.0, 1.0, 0.0), // green: food/scent
+            TensorLayer::MicroBiomass =>(0.2, 0.8, 0.2), // teal-green: fertility
         };
 
         let mut pixels = Vec::with_capacity((self.width * self.height * 4) as usize);

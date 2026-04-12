@@ -1,11 +1,11 @@
-use crate::world::signal::{SignalChannel, SignalGrid};
+use crate::world::tensor::{TensorGrid, TensorLayer};
 use crate::world::terrain::Terrain;
 
 /// Thermodynamic physics tick — runs every 30 ticks.
-/// Manages combustion, moisture dynamics, thermal diffusion, and signal coupling.
+/// Manages combustion, moisture dynamics, thermal diffusion, and tensor coupling.
 /// All operations are mass-conserving: matter transforms, never disappears.
 /// `energy_available`: V55 §2 gate — if false, biomass regrowth is suppressed (energy cap reached).
-pub fn tick_physics(terrain: &mut Terrain, signals: &mut SignalGrid, energy_available: bool) {
+pub fn tick_physics(terrain: &mut Terrain, tensor: &mut TensorGrid, energy_available: bool) {
     let w = terrain.width as usize;
     let h = terrain.height as usize;
     let len = w * h;
@@ -178,38 +178,34 @@ pub fn tick_physics(terrain: &mut Terrain, signals: &mut SignalGrid, energy_avai
         }
     }
 
-    // --- Phase 5: Signal Coupling ---
-    // Emit terrain physics state into SignalGrid so beings can navigate via gradients.
-    // thermal_energy → Comfort channel (beings seek warmth when cold)
-    // nutrient_density → FoodTrail channel (beings seek food-rich ground)
-    let sw = signals.width as usize;
-    let sh = signals.height as usize;
+    // --- Phase 5: Tensor Coupling ---
+    // Emit terrain physics state into TensorGrid so beings can navigate via gradients.
+    // thermal_energy → Heat tensor (Rosetta: Comfort → Heat × 1.0)
+    // nutrient_density → Odor tensor (Rosetta: FoodTrail → Odor × 1.0)
+    let tw = tensor.width as usize;
+    let th = tensor.height as usize;
 
-    // Sample terrain → signals at matching resolution
-    // Terrain and signal grid may differ in size, so map coordinates
-    let x_ratio = w as f32 / sw as f32;
-    let y_ratio = h as f32 / sh as f32;
+    // Sample terrain → tensor at matching resolution
+    let x_ratio = w as f32 / tw as f32;
+    let y_ratio = h as f32 / th as f32;
 
-    for sy in 0..sh {
-        for sx in 0..sw {
-            let tx = ((sx as f32 * x_ratio) as usize).min(w - 1);
-            let ty = ((sy as f32 * y_ratio) as usize).min(h - 1);
-            let tidx = ty * w + tx;
+    for ty in 0..th {
+        for tx in 0..tw {
+            let sx = ((tx as f32 * x_ratio) as usize).min(w - 1);
+            let sy = ((ty as f32 * y_ratio) as usize).min(h - 1);
+            let sidx = sy * w + sx;
 
-            // Emit thermal energy as comfort signal (scaled: 0.0-1.0 → 0.0-2.0 signal units)
-            let heat = terrain.thermal_energy[tidx];
+            // Thermal energy as Heat tensor
+            let heat = terrain.thermal_energy[sidx];
             if heat > 0.3 {
-                signals.deposit(SignalChannel::Comfort, sx as u32, sy as u32, (heat - 0.3) * 1.5);
+                tensor.deposit(TensorLayer::Heat, tx as u32, ty as u32, (heat - 0.3) * 1.5);
             }
 
-            // Emit nutrient density as food trail signal
-            let nutrient = terrain.nutrient_density[tidx];
+            // Nutrient density as Odor tensor (food scent trail)
+            let nutrient = terrain.nutrient_density[sidx];
             if nutrient > 0.2 {
-                signals.deposit(SignalChannel::FoodTrail, sx as u32, sy as u32, (nutrient - 0.2) * 1.0);
+                tensor.deposit(TensorLayer::Odor, tx as u32, ty as u32, (nutrient - 0.2) * 1.0);
             }
-
-            // V70: Pathogen no longer deposits Danger — physical damage from pathogens is applied
-            // directly to caloric_energy. Danger is sequestered to combat/predation only.
         }
     }
 }

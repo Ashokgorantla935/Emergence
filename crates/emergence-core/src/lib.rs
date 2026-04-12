@@ -22,7 +22,6 @@ use sim::world_state::{EventLog, World};
 use world::climate::{Climate, ClimateGrid};
 use world::config::WorldConfig;
 use world::resource::ResourceLayer;
-use world::signal::SignalGrid;
 use world::memetic::MemeticGrid;
 use world::knowledge::KnowledgeGrid;
 use world::terrain::{Biome, Terrain};
@@ -32,7 +31,6 @@ pub fn create_world(config: WorldConfig) -> World {
     let resources = ResourceLayer::new(&terrain);
     let climate = Climate::new(&config);
     let climate_grid = ClimateGrid::new(config.size.0, config.size.1);
-    let signals = SignalGrid::new(config.size.0, config.size.1);
     let tensor = TensorGrid::new(config.size.0, config.size.1);
     let memetic = MemeticGrid::new(config.size.0, config.size.1);
     let knowledge = KnowledgeGrid::new(config.size.0, config.size.1);
@@ -140,7 +138,6 @@ pub fn create_world(config: WorldConfig) -> World {
         resources,
         climate,
         climate_grid,
-        signals,
         tensor,
         memetic,
         knowledge,

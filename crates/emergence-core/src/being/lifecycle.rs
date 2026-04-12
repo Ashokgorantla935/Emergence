@@ -28,6 +28,20 @@ pub fn blend_child_genotype(
             }
             q
         },
+        predictor_baselines: {
+            let mut q = [0.0f32; 6];
+            for i in 0..6 {
+                q[i] = (geno_a.predictor_baselines[i] + geno_b.predictor_baselines[i]) * 0.5;
+            }
+            q
+        },
+        attention_init: {
+            let mut q = [1.0f32; 6];
+            for i in 0..6 {
+                q[i] = (geno_a.attention_init[i] + geno_b.attention_init[i]) * 0.5;
+            }
+            q
+        },
         speed_factor: (geno_a.speed_factor + geno_b.speed_factor) * 0.5,
         cold_resistance: (geno_a.cold_resistance + geno_b.cold_resistance) * 0.5,
         heat_tolerance: (geno_a.heat_tolerance + geno_b.heat_tolerance) * 0.5,
@@ -271,6 +285,22 @@ fn box_muller(rng: &mut fastrand::Rng) -> f32 {
     (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos()
 }
 
+/// V80 Neuro-Evolution: offspring brain = avg(parent_a, parent_b) + Gaussian mutation N(0, 0.05).
+/// Uses Box-Muller for Gaussian sampling. Works for any BRAIN_SIZE.
+pub fn crossover_brain(
+    parent_a: &[f32; BRAIN_SIZE],
+    parent_b: &[f32; BRAIN_SIZE],
+    rng: &mut fastrand::Rng,
+) -> [f32; BRAIN_SIZE] {
+    let mut child = [0.0f32; BRAIN_SIZE];
+    for i in 0..BRAIN_SIZE {
+        let avg = (parent_a[i] + parent_b[i]) * 0.5;
+        let mutation = box_muller(rng) * 0.05;
+        child[i] = avg + mutation;
+    }
+    child
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -505,8 +535,12 @@ pub fn tick_human_breeding(beings: &mut Beings, terrain: &crate::world::terrain:
         let parent_trauma = beings.cold.generational_trauma[p1];
         beings.cold.generational_trauma[child_idx] = ((parent_trauma + parent_dread) / 2.0).clamp(0.0, 1.0);
 
-        // Init brain for human
-        beings.hot.brain_weights[child_idx] = crate::being::data::init_human_brain(rng);
+        // V80 Neuro-Evolution: inherit brain from both parents with Gaussian mutation
+        beings.hot.brain_weights[child_idx] = crossover_brain(
+            &beings.hot.brain_weights[p1],
+            &beings.hot.brain_weights[p2],
+            rng,
+        );
         beings.hot.human_indices.push(child_idx);
         
         // Give base name

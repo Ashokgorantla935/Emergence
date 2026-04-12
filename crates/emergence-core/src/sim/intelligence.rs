@@ -1,5 +1,5 @@
 use bitcode::{Encode, Decode};
-use crate::being::data::BeingState;
+use crate::being::data::{BeingState, BRAIN_SIZE};
 use crate::sim::world_state::World;
 
 pub const INTELLIGENCE_FILE: &str = "evolution.swrm";
@@ -7,7 +7,10 @@ pub const DISTILL_INTERVAL: u32 = 18_000;
 pub const MIN_TICKS_FOR_WISDOM: u32 = 30_000; // Only capture civilizations that survived 30K+ ticks
 const BLEND_FACTOR: f32 = 0.3;
 const MIN_AGE_FRACTION: f32 = 0.5;
-const BRAIN_SIZE: usize = 165; // W1(8×14=112) + b1(8) + W2(5×8=40) + b2(5) = 165
+// BRAIN_SIZE imported from crate::being::data — single source of truth. Updated by Wave 6A.
+// TODO(Wave 6A): When predictor weights + attention weights are added to Genotype, also distill
+//   ancestral_predictor: [f32; PREDICTOR_SIZE] and ancestral_attention: [f32; ATTENTION_SIZE]
+//   into IntelligenceGenome and blend them in blend_and_save / seed_human_from_genome.
 const OUTPUT_SIZE: usize = 5;  // NeuralOutput: vx, vy, push, pull, thermal
 
 #[derive(Clone, Debug, Encode, Decode)]

@@ -599,6 +599,8 @@ impl SaveFile {
                 crate::being::data::Genotype {
                     generation: if i < self.genotype_generation.len() { self.genotype_generation[i] } else { 0 },
                     output_baselines: self.genotype_output_baselines[i],
+                    predictor_baselines: [0.0; 6],
+                    attention_init: [1.0; 6],
                     speed_factor: if i < self.genotype_speed_factor.len() { self.genotype_speed_factor[i] } else { 1.0 },
                     cold_resistance: if i < self.genotype_cold_resistance.len() { self.genotype_cold_resistance[i] } else { 0.5 },
                     heat_tolerance: if i < self.genotype_heat_tolerance.len() { self.genotype_heat_tolerance[i] } else { 0.5 },
@@ -611,6 +613,11 @@ impl SaveFile {
             };
             beings.cold.genotypes.push(genotype);
             beings.cold.home_settlement_pos.push(None);
+
+            // V80 predictor fields — transient, always default on load
+            beings.hot.predicted_tensors.push([0.0; 6]);
+            beings.hot.prediction_error_history.push([0.0; 500]);
+            beings.hot.prediction_error_idx.push(0u16);
 
             // V50 metaphysical fields
             beings.hot.dread_ratio.push(if i < self.being_dread_ratio.len() { self.being_dread_ratio[i] } else { 0.0 });

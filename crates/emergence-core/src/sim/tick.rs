@@ -687,6 +687,7 @@ pub fn tick(world: &mut World) {
         noise: [f32; crate::being::brain::N_OUTPUT],
         hidden: [f32; crate::being::brain::N_HIDDEN],
         input: [f32; crate::being::brain::N_INPUT],
+        raw_tensors: [f32; 6],
         is_new: bool,
     }
 
@@ -709,7 +710,7 @@ pub fn tick(world: &mut World) {
 
             if needs_eval && world.beings.hot.dna[i].is_cognitive() {
                 let mut rng = fastrand::Rng::with_seed(base_seed.wrapping_add(i as u64));
-                let (output, noise, hidden, input) = compute_neural_output(
+                let (output, noise, hidden, input, raw_tensors) = compute_neural_output(
                     i,
                     &world.beings,
                     &world.terrain,
@@ -720,7 +721,7 @@ pub fn tick(world: &mut World) {
                     &world.constraints,
                     &mut rng,
                 );
-                Some(CognitiveResult { output, noise, hidden, input, is_new: true })
+                Some(CognitiveResult { output, noise, hidden, input, raw_tensors, is_new: true })
             } else {
                 // Use cached output from last cognitive tick
                 let bo = world.beings.hot.brain_output[i];
@@ -736,6 +737,7 @@ pub fn tick(world: &mut World) {
                     noise: [0.0; crate::being::brain::N_OUTPUT],
                     hidden: [0.0; crate::being::brain::N_HIDDEN],
                     input: [0.0; crate::being::brain::N_INPUT],
+                    raw_tensors: [0.0; 6],
                     is_new: false,
                 })
             }
@@ -771,7 +773,7 @@ pub fn tick(world: &mut World) {
 
         apply_neural_output(world, i, &cr.output);
 
-        // REINFORCE learning: only on cognitive tick for cognitive beings
+        // V80 REINFORCE + Prediction Engine: only on cognitive tick for cognitive beings
         if cr.is_new
             && world.beings.hot.dna[i].is_cognitive()
             && world.beings.hot.states[i] != BeingState::Dead
@@ -781,11 +783,77 @@ pub fn tick(world: &mut World) {
             world.beings.hot.caloric_history[i][hist_idx] = caloric_before;
             world.beings.hot.caloric_history_idx[i] = ((hist_idx + 1) % 10) as u8;
 
-            // Reward: current caloric vs oldest reading in the ring
+            // Caloric reward: current energy vs oldest ring entry
             let oldest_idx = (hist_idx + 1) % 10;
             let oldest = world.beings.hot.caloric_history[i][oldest_idx];
-            let reward = world.beings.hot.caloric_energy[i] - oldest;
+            let caloric_reward = world.beings.hot.caloric_energy[i] - oldest;
 
+            // === V80 Prediction Engine ===
+            let raw_tensors = cr.raw_tensors;
+
+            // Normalize raw tensors to [0, 1] for error computation and predictor training
+            let raw_tensors_normalized: [f32; 6] = [
+                raw_tensors[0].min(1.0),
+                raw_tensors[1].min(2.0) / 2.0,
+                raw_tensors[2].min(1.0),
+                raw_tensors[3].min(1.0),
+                raw_tensors[4].min(1.0),
+                raw_tensors[5].min(100.0) / 100.0,
+            ];
+
+            // 1. Prediction error: how wrong was last tick's prediction?
+            let prev_predicted = world.beings.hot.predicted_tensors[i];
+            let mut prediction_error = [0.0f32; 6];
+            for k in 0..6 {
+                prediction_error[k] = (prev_predicted[k] - raw_tensors_normalized[k]).abs();
+            }
+
+            // 2. Run predictor forward pass with current tensors + actor output + elevation
+            let pos = world.beings.hot.positions[i];
+            let px = (pos[0] as u32).min(world.terrain.width - 1);
+            let py = (pos[1] as u32).min(world.terrain.height - 1);
+            let pidx = (py * world.terrain.width + px) as usize;
+            let terrain_elevation = world.terrain.elevation.get(pidx).copied().unwrap_or(0.5);
+
+            let p_input: [f32; crate::being::brain::N_PREDICTOR_INPUT] = [
+                raw_tensors[0], raw_tensors[1], raw_tensors[2],
+                raw_tensors[3], raw_tensors[4], raw_tensors[5],
+                cr.output.velocity_x, cr.output.velocity_y,
+                cr.output.push_force, cr.output.pull_force,
+                cr.output.thermal_friction,
+                terrain_elevation,
+            ];
+            let (predicted, p_hidden) = crate::being::brain::predictor_forward(
+                &world.beings.hot.brain_weights[i], &p_input,
+            );
+
+            // 3. Store new prediction for next tick comparison
+            world.beings.hot.predicted_tensors[i] = predicted;
+
+            // 4. Train predictor on this tick's error
+            crate::being::brain::predictor_update(
+                &mut world.beings.hot.brain_weights[i],
+                &p_hidden, &p_input, &prev_predicted,
+                &raw_tensors_normalized, 0.01,
+            );
+
+            // 5. Update attention weights based on prediction error
+            crate::being::brain::attention_update(
+                &mut world.beings.hot.brain_weights[i],
+                &raw_tensors, &prediction_error, 0.005,
+            );
+
+            // 6. Combined reward: 70% caloric + 30% prediction accuracy
+            let prediction_accuracy = 1.0 - prediction_error.iter().sum::<f32>() / 6.0;
+            let combined_reward = caloric_reward * 0.7 + prediction_accuracy * 0.3;
+
+            // 7. Store prediction error in rolling history (for Ambition Drive)
+            let pe_avg = prediction_error.iter().sum::<f32>() / 6.0;
+            let pe_idx = world.beings.hot.prediction_error_idx[i] as usize;
+            world.beings.hot.prediction_error_history[i][pe_idx % 500] = pe_avg;
+            world.beings.hot.prediction_error_idx[i] = ((pe_idx + 1) % 500) as u16;
+
+            // 8. Actor REINFORCE update with combined reward
             let raw_out = [
                 cr.output.velocity_x,
                 cr.output.velocity_y,
@@ -799,7 +867,7 @@ pub fn tick(world: &mut World) {
                 &cr.input,
                 &raw_out,
                 &cr.noise,
-                reward,
+                combined_reward,
                 0.005,
             );
         }

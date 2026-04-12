@@ -15,8 +15,8 @@ pub struct NeuralOutput {
     pub thermal_friction: f32,  // [0, 1] — self-heating / metabolic activity (rest, warmth)
 }
 
-/// Brain weight count: 14×8 + 8 + 8×5 + 5 = 165
-pub const BRAIN_SIZE: usize = 165;
+/// Brain weight count: Actor(165) + Predictor(158) + Attention(6) = 329
+pub const BRAIN_SIZE: usize = 329;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
@@ -273,6 +273,13 @@ pub struct BeingsHot {
     pub caloric_history: Vec<[f32; 10]>, // Rolling 10-tick caloric energy buffer (for reward computation)
     pub caloric_history_idx: Vec<u8>,    // Current write position in caloric_history ring
 
+    /// V80 Dual-Core brain: last predictor output (6 predicted tensor values). Used next tick for error.
+    pub predicted_tensors: Vec<[f32; 6]>,
+    /// V80 Ambition Drive: 500-tick rolling prediction error buffer. High variance → boredom spike.
+    pub prediction_error_history: Vec<[f32; 500]>,
+    /// Current write position in prediction_error_history ring buffer.
+    pub prediction_error_idx: Vec<u16>,
+
     /// Axiom 9: age/lifespan panic ratio (0.0–1.0). Rises as being approaches death.
     pub dread_ratio: Vec<f32>,
     /// Axiom 7: idle play generation entropy. Rises when needs satisfied and nothing to do.
@@ -299,6 +306,11 @@ pub struct Genotype {
     /// Inherited output baselines — added to Xavier init weights at brain initialization.
     /// Length matches NeuralOutput (5 values). Mutated ±0.05 per generation.
     pub output_baselines: [f32; 5],
+    /// V80: Inherited predictor output baselines. 6 values, one per predicted tensor.
+    pub predictor_baselines: [f32; 6],
+    /// V80: Inherited initial attention weights. 6 values, one per tensor layer.
+    /// Offspring start with parent's learned attention profile + small mutation.
+    pub attention_init: [f32; 6],
     /// Physical coefficients derived from long-term Q-weight stability.
     pub speed_factor: f32,        // 0.7 - 1.3 multiplier on base_speed()
     pub cold_resistance: f32,     // 0.0 - 1.0
@@ -315,6 +327,8 @@ impl Genotype {
     pub fn default() -> Self {
         Genotype {
             output_baselines: [0.0; 5],
+            predictor_baselines: [0.0; 6],
+            attention_init: [1.0; 6],
             speed_factor: 1.0,
             cold_resistance: 0.5,
             heat_tolerance: 0.5,
@@ -411,6 +425,9 @@ impl Beings {
                 brain_output: Vec::new(),
                 caloric_history: Vec::new(),
                 caloric_history_idx: Vec::new(),
+                predicted_tensors: Vec::new(),
+                prediction_error_history: Vec::new(),
+                prediction_error_idx: Vec::new(),
                 dread_ratio: Vec::new(),
                 boredom_entropy: Vec::new(),
                 pattern_hallucination: Vec::new(),
@@ -492,6 +509,9 @@ impl Beings {
         self.hot.brain_output.push([0.0; 5]);
         self.hot.caloric_history.push([0.0; 10]);
         self.hot.caloric_history_idx.push(0u8);
+        self.hot.predicted_tensors.push([0.0; 6]);
+        self.hot.prediction_error_history.push([0.0; 500]);
+        self.hot.prediction_error_idx.push(0u16);
         self.hot.dread_ratio.push(0.0);
         self.hot.boredom_entropy.push(0.0);
         self.hot.pattern_hallucination.push(0.02); // small baseline corruption chance

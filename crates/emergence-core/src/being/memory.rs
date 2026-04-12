@@ -1,6 +1,8 @@
 #[derive(Clone, Copy, Default)]
 #[repr(C)]
 pub struct CausalMemory {
+    /// Behavior tag encoding: 0=idle, 1=moving, 2=striking/sharing, 3=absorbing/eating, 4=resting.
+    /// Matches the 5-output NeuralOutput behavior tags from brain.rs (not the old Action discriminants).
     pub action: u8,
     pub context_hash: u16,
     pub outcome_delta: f32,

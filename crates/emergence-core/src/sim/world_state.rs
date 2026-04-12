@@ -1,14 +1,13 @@
 use bitcode::{Decode, Encode};
-use serde::{Deserialize, Serialize};
 
 use crate::being::data::Beings;
 use crate::god_action::GodActionQueue;
-use crate::world::climate::{Climate, ClimateGrid};
+use crate::world::climate::{Climate, ClimateGrid, DayPhase, Season};
 use crate::world::config::WorldConfig;
 use crate::world::object_grid::ObjectGrid;
 use crate::world::resource::ResourceLayer;
 use crate::world::memetic::MemeticGrid;
-use crate::world::tensor::TensorGrid;
+use crate::world::tensor::{TensorGrid, TensorLayer};
 use crate::world::terrain::Terrain;
 use super::chunks::ChunkGrid;
 use super::spatial::SpatialIndex;
@@ -130,80 +129,44 @@ impl EventLog {
     }
 }
 
-/// 28 named boolean world laws. Each is a branch-predicted check at the relevant engine point.
-/// Named bools (not bitfield) per Sawyer's review: easier to match on, no bit-twiddling overhead.
-#[derive(Clone, Debug, Serialize, Deserialize, Encode, Decode)]
-pub struct WorldLaws {
-    // Survival Laws
-    pub no_food_regrowth: bool,
-    pub immortal: bool,
-    pub fast_aging: bool,
-    pub no_starvation: bool,
-    pub invulnerable: bool,
-    pub no_sleep: bool,
-    pub double_metabolism: bool,
-
-    // Social Laws
-    pub no_bonding: bool,
-    pub perfect_memory: bool,
-    pub no_memory: bool,
-    pub universal_trust: bool,
-    pub no_trust: bool,
-    pub forced_generosity: bool,
-    pub forced_selfishness: bool,
-
-    // Environmental Laws
-    pub eternal_spring: bool,
-    pub eternal_winter: bool,
-    pub no_weather: bool,
-    pub permanent_night: bool,
-    pub permanent_day: bool,
-    pub infinite_food: bool,
-    pub no_predators: bool,
-
-    // Civilization Laws
-    pub no_construction: bool,
-    pub fast_construction: bool,
-    pub no_reproduction: bool,
-    pub fast_reproduction: bool,
-    pub no_kingdoms: bool,
-    pub forced_peace: bool,
-    pub total_war: bool,
+/// Sustained physical injections — god powers that physically modify tensor/terrain each tick.
+/// Toggled via god actions; applied in apply_sustained_injections() at tick start.
+#[derive(Clone, Debug, Default, Encode, Decode, serde::Serialize, serde::Deserialize)]
+pub struct ActiveInjections {
+    pub eternal_spring: bool,      // Heat tensor + season lock to Spring
+    pub eternal_winter: bool,      // Heat drain + season lock to Winter
+    pub no_weather: bool,          // Clear all weather effects
+    pub permanent_night: bool,     // Pin Light tensor to 0
+    pub permanent_day: bool,       // Pin Light tensor to 1
+    pub infinite_food: bool,       // Flood resources + MicroBiomass tensor
+    pub no_food_regrowth: bool,    // Drain nutrient_density + regrowth rates
+    pub trust_flood: bool,         // Flood Culture tensor (universal trust)
+    pub trust_drain: bool,         // Drain Culture tensor (no trust)
+    pub war_drums: bool,           // Flood Acoustic tensor (total war atmosphere)
+    pub peace_aura: bool,          // Drain Acoustic tensor (forced peace)
+    pub fertility_surge: bool,     // Flood Odor tensor (fast reproduction pheromones)
+    pub construction_boost: bool,  // 2x structural_density gain per build
 }
 
-impl Default for WorldLaws {
-    fn default() -> Self {
-        WorldLaws {
-            no_food_regrowth: false,
-            immortal: false,
-            fast_aging: false,
-            no_starvation: false,
-            invulnerable: false,
-            no_sleep: false,
-            double_metabolism: false,
-            no_bonding: false,
-            perfect_memory: false,
-            no_memory: false,
-            universal_trust: false,
-            no_trust: false,
-            forced_generosity: false,
-            forced_selfishness: false,
-            eternal_spring: false,
-            eternal_winter: false,
-            no_weather: false,
-            permanent_night: false,
-            permanent_day: false,
-            infinite_food: false,
-            no_predators: false,
-            no_construction: false,
-            fast_construction: false,
-            no_reproduction: false,
-            fast_reproduction: false,
-            no_kingdoms: false,
-            forced_peace: false,
-            total_war: false,
-        }
-    }
+/// Irreducible behavioral gates — god-level overrides of agent internal logic.
+/// These cannot be expressed as tensor/terrain physics.
+#[derive(Clone, Debug, Default, Encode, Decode, serde::Serialize, serde::Deserialize)]
+pub struct DivineConstraints {
+    pub immortal: bool,            // Suppress age-death
+    pub fast_aging: bool,          // Double age counter increment
+    pub no_starvation: bool,       // Suppress starvation death
+    pub invulnerable: bool,        // Suppress all death conditions
+    pub no_sleep: bool,            // Pin rest need to 1.0
+    pub double_metabolism: bool,   // Double need decay rate
+    pub no_bonding: bool,          // Suppress social relationship formation
+    pub perfect_memory: bool,      // Prevent memory decay
+    pub no_memory: bool,           // Wipe memories every tick
+    pub forced_generosity: bool,   // Force sharing behavior
+    pub forced_selfishness: bool,  // Force selfish behavior
+    pub no_construction: bool,     // Suppress all building
+    pub no_reproduction: bool,     // Suppress births
+    pub no_kingdoms: bool,         // Suppress kingdom detection
+    pub no_predators: bool,        // Suppress predator aggression
 }
 
 pub struct World {
@@ -221,8 +184,10 @@ pub struct World {
     pub config: WorldConfig,
     /// God-tool action queue: drained at the start of each tick.
     pub god_queue: GodActionQueue,
-    /// World Laws: 28 toggleable simulation rules.
-    pub laws: WorldLaws,
+    /// Sustained physical injections applied every tick start.
+    pub injections: ActiveInjections,
+    /// Irreducible behavioral gates overriding agent internal logic.
+    pub constraints: DivineConstraints,
     /// Detected settlements, refreshed every 600 ticks.
     pub settlements: Vec<super::settlement::Settlement>,
     /// Active kingdoms, refreshed every 600 ticks.
@@ -264,6 +229,65 @@ pub fn structure_energy_cost(structure_type: u8) -> u64 {
         17 => 180, // OilPump
         _ => 50,  // unknown: moderate cost
     }
+}
+
+/// Apply sustained physical injections at tick start.
+/// Each active injection physically modifies tensor/terrain values.
+pub fn apply_sustained_injections(world: &mut World) {
+    let inj = world.injections.clone();
+
+    if inj.eternal_spring {
+        world.climate.season = Season::Spring;
+        for v in world.tensor.layers[TensorLayer::Heat as usize].iter_mut() {
+            *v = v.max(0.45);
+        }
+    }
+    if inj.eternal_winter {
+        world.climate.season = Season::Winter;
+        for v in world.tensor.layers[TensorLayer::Heat as usize].iter_mut() {
+            *v = v.min(0.05);
+        }
+    }
+    if inj.no_weather {
+        world.climate.clear_weather();
+    }
+    if inj.permanent_day {
+        world.climate.day_phase = DayPhase::Day;
+        world.tensor.layers[TensorLayer::Light as usize].fill(1.0);
+    }
+    if inj.permanent_night {
+        world.climate.day_phase = DayPhase::Night;
+        world.tensor.layers[TensorLayer::Light as usize].fill(0.0);
+    }
+    if inj.infinite_food {
+        for i in 0..world.resources.food.len() {
+            world.resources.food[i] = world.resources.food_capacity[i];
+        }
+        world.tensor.layers[TensorLayer::MicroBiomass as usize].fill(1.0);
+    }
+    if inj.no_food_regrowth {
+        world.terrain.nutrient_density.fill(0.0);
+    }
+    if inj.trust_flood {
+        world.tensor.layers[TensorLayer::Culture as usize].fill(100.0);
+    }
+    if inj.trust_drain {
+        world.tensor.layers[TensorLayer::Culture as usize].fill(0.0);
+    }
+    if inj.war_drums {
+        for v in world.tensor.layers[TensorLayer::Acoustic as usize].iter_mut() {
+            *v = v.max(0.8);
+        }
+    }
+    if inj.peace_aura {
+        world.tensor.layers[TensorLayer::Acoustic as usize].fill(0.0);
+    }
+    if inj.fertility_surge {
+        for v in world.tensor.layers[TensorLayer::Odor as usize].iter_mut() {
+            *v = v.max(0.5);
+        }
+    }
+    // construction_boost is checked at build-time in movement.rs, not here
 }
 
 /// V55 §2: Sum all energy in the world system.

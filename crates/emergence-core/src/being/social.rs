@@ -1,6 +1,4 @@
-use super::actions::Action;
 use super::data::*;
-use super::dna::DietType;
 use crate::sim::spatial::SpatialIndex;
 use crate::world::tensor::{TensorGrid, TensorLayer};
 use smallvec::SmallVec;
@@ -43,12 +41,16 @@ pub fn capped_witnesses(
 /// Process witnessing: observers update their relationship maps based on observed action.
 /// Uses capped_witnesses to prevent O(n^2) in dense clusters.
 /// Also: observers form causal memories at 0.3x confidence (observational learning atom).
+/// Behavior tag constants matching infer_behavior_tag() output.
+pub const BEHAVIOR_ABSORBING: u8 = 3; // pull/take/eat
+pub const BEHAVIOR_STRIKING: u8 = 2;  // push/share/attack
+
 pub fn process_witnessing(
     beings: &mut Beings,
     spatial: &SpatialIndex,
     actor: usize,
     target: usize,
-    action: Action,
+    action: u8,
     perception_radius: f32,
     current_tick: u32,
 ) {
@@ -86,70 +88,63 @@ pub fn process_witnessing(
             memetic_trust = 1.0;
         }
 
-        match action {
-            Action::TakeFood => {
-                // Harmful action witnessed — scaled by cultural alignment
-                let imp = beings.cold.relationships[observer].get_or_create(actor as u32, current_tick);
-                imp.warmth -= 0.1 * (generous_trait + 1.0) / 2.0 * memetic_trust;
-                imp.warmth = imp.warmth.clamp(-1.0, 1.0);
-                imp.trust -= 0.05 * memetic_trust;
-                imp.trust = imp.trust.clamp(-1.0, 1.0);
-                imp.last_interaction = current_tick;
-                imp.memory_count = imp.memory_count.saturating_add(1);
+        if action == BEHAVIOR_ABSORBING {
+            // Harmful absorb witnessed — scaled by cultural alignment
+            let imp = beings.cold.relationships[observer].get_or_create(actor as u32, current_tick);
+            imp.warmth -= 0.1 * (generous_trait + 1.0) / 2.0 * memetic_trust;
+            imp.warmth = imp.warmth.clamp(-1.0, 1.0);
+            imp.trust -= 0.05 * memetic_trust;
+            imp.trust = imp.trust.clamp(-1.0, 1.0);
+            imp.last_interaction = current_tick;
+            imp.memory_count = imp.memory_count.saturating_add(1);
 
-                // Sympathy for target
-                let imp_target =
-                    beings.cold.relationships[observer].get_or_create(target as u32, current_tick);
-                imp_target.warmth += 0.03;
-                imp_target.warmth = imp_target.warmth.clamp(-1.0, 1.0);
-                imp_target.last_interaction = current_tick;
+            // Sympathy for target
+            let imp_target =
+                beings.cold.relationships[observer].get_or_create(target as u32, current_tick);
+            imp_target.warmth += 0.03;
+            imp_target.warmth = imp_target.warmth.clamp(-1.0, 1.0);
+            imp_target.last_interaction = current_tick;
 
-                // Observational memory: negative outcome from witnessed theft
-                // Frequency cap: only record if last interaction gap > 100 ticks
-                let last = beings.cold.relationships[observer].find(actor as u32)
-                    .map(|imp| imp.last_interaction)
-                    .unwrap_or(0);
-                if current_tick.saturating_sub(last) >= 100 {
-                    beings.cold.causal_memories[observer].record(
-                        action as u8,
-                        actor_pending_context,
-                        -0.2, // negative outcome observed
-                        false,
-                    );
-                    // Reduce confidence to 0.3x by scaling (record() adds 1.0 confidence)
-                    // We set confidence in last-written entry directly
-                    let head = beings.cold.causal_memories[observer].head as usize;
-                    let last_written = (head + 32 - 1) % 32;
-                    beings.cold.causal_memories[observer].entries[last_written].confidence *= 0.3;
-                }
+            // Observational memory: negative outcome from witnessed taking
+            let last = beings.cold.relationships[observer].find(actor as u32)
+                .map(|imp| imp.last_interaction)
+                .unwrap_or(0);
+            if current_tick.saturating_sub(last) >= 100 {
+                beings.cold.causal_memories[observer].record(
+                    action,
+                    actor_pending_context,
+                    -0.2,
+                    false,
+                );
+                let head = beings.cold.causal_memories[observer].head as usize;
+                let last_written = (head + 32 - 1) % 32;
+                beings.cold.causal_memories[observer].entries[last_written].confidence *= 0.3;
             }
-            Action::ShareFood => {
-                // Kind action witnessed — scaled by cultural alignment
-                let imp = beings.cold.relationships[observer].get_or_create(actor as u32, current_tick);
-                imp.warmth += 0.05 * memetic_trust;
-                imp.warmth = imp.warmth.clamp(-1.0, 1.0);
-                imp.trust += 0.03 * memetic_trust;
-                imp.trust = imp.trust.clamp(-1.0, 1.0);
-                imp.last_interaction = current_tick;
-                imp.memory_count = imp.memory_count.saturating_add(1);
+        } else if action == BEHAVIOR_STRIKING {
+            // Sharing/push witnessed — scaled by cultural alignment
+            let imp = beings.cold.relationships[observer].get_or_create(actor as u32, current_tick);
+            imp.warmth += 0.05 * memetic_trust;
+            imp.warmth = imp.warmth.clamp(-1.0, 1.0);
+            imp.trust += 0.03 * memetic_trust;
+            imp.trust = imp.trust.clamp(-1.0, 1.0);
+            imp.last_interaction = current_tick;
+            imp.memory_count = imp.memory_count.saturating_add(1);
 
-                // Observational memory: positive outcome from witnessed sharing
-                let last = beings.cold.relationships[observer].find(actor as u32)
-                    .map(|imp| imp.last_interaction)
-                    .unwrap_or(0);
-                if current_tick.saturating_sub(last) >= 100 {
-                    beings.cold.causal_memories[observer].record(
-                        action as u8,
-                        actor_pending_context,
-                        0.2,
-                        false,
-                    );
-                    let head = beings.cold.causal_memories[observer].head as usize;
-                    let last_written = (head + 32 - 1) % 32;
-                    beings.cold.causal_memories[observer].entries[last_written].confidence *= 0.3;
-                }
+            // Observational memory: positive outcome from witnessed sharing
+            let last = beings.cold.relationships[observer].find(actor as u32)
+                .map(|imp| imp.last_interaction)
+                .unwrap_or(0);
+            if current_tick.saturating_sub(last) >= 100 {
+                beings.cold.causal_memories[observer].record(
+                    action,
+                    actor_pending_context,
+                    0.2,
+                    false,
+                );
+                let head = beings.cold.causal_memories[observer].head as usize;
+                let last_written = (head + 32 - 1) % 32;
+                beings.cold.causal_memories[observer].entries[last_written].confidence *= 0.3;
             }
-            _ => {}
         }
     }
 }
@@ -207,7 +202,7 @@ pub fn deposit_emotion_signals(beings: &Beings, tensor: &mut TensorGrid) {
         let tcy = (pos[1] as u32).min(tensor.height - 1);
 
         let dna = beings.hot.dna[i];
-        let is_omnivore = dna.diet == DietType::Omnivore;
+        let is_omnivore = dna.is_cognitive();
 
         if is_omnivore {
             // Rosetta: emotions map to tensor layers with scale factors.
@@ -248,8 +243,8 @@ pub fn deposit_emotion_signals(beings: &Beings, tensor: &mut TensorGrid) {
                 };
                 tensor.deposit(TensorLayer::Acoustic, tcx, tcy, intensity);
             }
-            // Herbivores deposit Odor tensor (grazing trails for scent tracking).
-            if dna.diet == DietType::Herbivore {
+            // Low-aggression beings deposit Odor tensor (grazing trails for scent tracking).
+            if dna.base_aggression() < 0.1 {
                 tensor.deposit(TensorLayer::Odor, tcx, tcy, 0.15);
             }
         }
@@ -279,7 +274,7 @@ mod tests {
         spatial.rebuild(&beings.hot.positions, &beings.hot.states);
 
         // A steals from B, C observes
-        process_witnessing(&mut beings, &spatial, 0, 1, Action::TakeFood, 8.0, 100);
+        process_witnessing(&mut beings, &spatial, 0, 1, BEHAVIOR_ABSORBING, 8.0, 100);
 
         // C's warmth toward A should decrease
         let c_to_a = beings.cold.relationships[2].find(0);

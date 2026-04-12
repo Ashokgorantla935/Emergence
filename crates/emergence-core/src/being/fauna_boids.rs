@@ -1,8 +1,34 @@
-use crate::being::data::{BeingState, Beings};
-use crate::being::dna::DietType;
+use crate::being::data::{BeingState, Beings, NeuralOutput};
+use crate::being::dna::BiologicalDNA;
 use crate::world::resource::ResourceLayer;
 use crate::world::tensor::{TensorGrid, TensorLayer};
 use crate::world::terrain::Terrain;
+
+const BASE_SPEED: f32 = 0.12;
+
+/// Convert boid steering velocity into NeuralOutput for unified physics execution.
+pub fn fauna_to_neural_output(
+    desired_vx: f32,
+    desired_vy: f32,
+    dna: &BiologicalDNA,
+    caloric_energy: f32,
+    is_hunting: bool,
+) -> NeuralOutput {
+    let speed = (desired_vx * desired_vx + desired_vy * desired_vy).sqrt();
+    let (nvx, nvy) = if speed > 0.001 {
+        (desired_vx / speed.max(0.001), desired_vy / speed.max(0.001))
+    } else {
+        (0.0, 0.0)
+    };
+
+    NeuralOutput {
+        velocity_x: nvx.clamp(-1.0, 1.0),
+        velocity_y: nvy.clamp(-1.0, 1.0),
+        push_force: if is_hunting { dna.jaw_strength * 0.6 } else { 0.0 },
+        pull_force: if caloric_energy < 0.3 { 0.6 } else { 0.2 },
+        thermal_friction: if speed < 0.01 { 0.3 } else { 0.0 },
+    }
+}
 
 /// Enhanced fauna boids tick — staggered cognitive + kinetic update.
 /// Cognitive (desire vectors): recomputed every 10 ticks per fauna (staggered).
@@ -39,7 +65,7 @@ pub fn tick_fauna_boids(
         let cur_idx = (hot.positions[i][1] as usize).min(h - 1) * w
             + (hot.positions[i][0] as usize).min(w - 1);
         let is_aquatic = hot.dna[i].mass < 10.0
-            && hot.dna[i].diet == DietType::Herbivore
+            && hot.dna[i].jaw_strength < 0.2
             && terrain.water[cur_idx];
 
         // V75 §3.2: Cliff check — block movement across impassable elevation jumps
@@ -74,9 +100,8 @@ pub fn tick_fauna_boids(
                 hot.caloric_energy[i] = (hot.caloric_energy[i] - climb_drain).max(0.0);
             }
 
-            // Biomass consumption: carnivores/omnivores with high hunger consume micro-biomass.
-            let diet = hot.dna[i].diet;
-            let is_predator = diet == DietType::Carnivore || diet == DietType::Omnivore;
+            // Biomass consumption: high-aggression fauna with hunger consume micro-biomass.
+            let is_predator = hot.dna[i].base_aggression() > 0.3;
             if is_predator && hot.caloric_energy[i] < 0.5 {
                 let nx = uphill_new_x as u32;
                 let ny = uphill_new_y as u32;
@@ -154,7 +179,8 @@ pub fn tick_fauna_boids(
                 .iter()
                 .filter(|&&(j, jpos)| {
                     if j == i { return false; }
-                    if hot.dna[j].diet != dna.diet { return false; }
+                    // Kinship: same aggression tier (both predator or both herbivore)
+            if (hot.dna[j].base_aggression() > 0.3) != (dna.base_aggression() > 0.3) { return false; }
                     let dx = jpos[0] - pos[0];
                     let dy = jpos[1] - pos[1];
                     dx * dx + dy * dy < 100.0
@@ -189,8 +215,8 @@ pub fn tick_fauna_boids(
             }
         }
 
-        // ── Seek vector (herbivores/omnivores): nearest flora cell stage > 1 ──
-        if dna.diet != DietType::Carnivore {
+        // ── Seek vector (non-predators): nearest flora cell stage > 1 ──
+        if dna.jaw_strength < 0.5 {
             let cx = pos[0] as usize;
             let cy = pos[1] as usize;
             let search_r: usize = 5;
@@ -328,8 +354,8 @@ pub fn tick_fauna_breeding(beings: &mut Beings, terrain: &Terrain, rng: &mut fas
             let (ib, pos_b) = candidates[b];
             if already_bred.contains(&ib) { continue; }
             let dna_b = beings.hot.dna[ib];
-            // Same diet — DNA-driven matching (not same creature_type)
-            if dna_a.diet != dna_b.diet { continue; }
+            // Same aggression tier — DNA-driven matching (not same creature_type)
+            if (dna_a.base_aggression() > 0.3) != (dna_b.base_aggression() > 0.3) { continue; }
             let dx = pos_a[0] - pos_b[0];
             let dy = pos_a[1] - pos_b[1];
             if dx * dx + dy * dy < 4.0 {

@@ -1,7 +1,22 @@
 use super::memory::{CausalMemoryRing, RelationshipSlots};
 use super::memes::MemeSlots;
-use crate::being::dna::{BiologicalDNA, DietType};
+use crate::being::dna::BiologicalDNA;
 use crate::trace::DecisionTraceRing;
+
+/// Universal physics output from any brain-like system (human MLP, fauna boids, god override).
+/// Replaces discrete Action selection. All behavior emerges from these 5 continuous values.
+#[derive(Clone, Copy, Debug, Default)]
+#[repr(C)]
+pub struct NeuralOutput {
+    pub velocity_x: f32,        // [-1, 1] — desired X movement direction/magnitude
+    pub velocity_y: f32,        // [-1, 1] — desired Y movement direction/magnitude
+    pub push_force: f32,        // [0, 1] — repulsive/expelling force (build, attack, share)
+    pub pull_force: f32,        // [0, 1] — attractive/absorbing force (eat, mine, hunt)
+    pub thermal_friction: f32,  // [0, 1] — self-heating / metabolic activity (rest, warmth)
+}
+
+/// Brain weight count: 14×8 + 8 + 8×5 + 5 = 165
+pub const BRAIN_SIZE: usize = 165;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
@@ -56,19 +71,21 @@ pub fn dna_from_creature_type(ct: u8) -> BiologicalDNA {
 
 /// Derive creature_type u8 from DNA for backward-compat with the renderer.
 /// TEMPORARY bridge — will be removed in Wave 4+ when renderer reads DNA directly.
+/// Uses continuous jaw_strength and neural_density to infer legacy discrete type.
 fn creature_type_from_dna(dna: &BiologicalDNA) -> u8 {
-    match dna.diet {
-        DietType::Omnivore => CreatureType::Human as u8,
-        DietType::Carnivore => {
-            if dna.mass >= 30.0 { CreatureType::Bear as u8 }
-            else if dna.mass >= 14.0 { CreatureType::Wolf as u8 }
-            else if dna.mass >= 8.0 { CreatureType::Hawk as u8 }
-            else { CreatureType::Snake as u8 }
-        }
-        DietType::Herbivore => {
-            if dna.mass >= 14.0 { CreatureType::Deer as u8 }
-            else { CreatureType::Rabbit as u8 } // Fish and Rabbit share identical DNA presets
-        }
+    if dna.neural_density > 0.5 && dna.manipulation_paws > 0.5 {
+        // High neural + dexterous paws = Human (omnivore equivalent)
+        CreatureType::Human as u8
+    } else if dna.jaw_strength > 0.5 {
+        // Predator — mass determines species
+        if dna.mass >= 30.0 { CreatureType::Bear as u8 }
+        else if dna.mass >= 14.0 { CreatureType::Wolf as u8 }
+        else if dna.mass >= 8.0 { CreatureType::Hawk as u8 }
+        else { CreatureType::Snake as u8 }
+    } else {
+        // Prey — mass determines species
+        if dna.mass >= 14.0 { CreatureType::Deer as u8 }
+        else { CreatureType::Rabbit as u8 } // Fish and Rabbit share similar DNA
     }
 }
 
@@ -76,18 +93,12 @@ fn creature_type_from_dna(dna: &BiologicalDNA) -> u8 {
 /// [0] separation, [1] cohesion, [2] flee, [3] hunt, [4] cluster, [5] wander
 pub fn derive_fauna_params(dna: &BiologicalDNA) -> [f32; 6] {
     let separation = (1.0 / dna.mass.sqrt()).clamp(0.1, 2.0);
-    let cohesion = match dna.diet {
-        DietType::Herbivore => 2.0,
-        DietType::Omnivore  => 1.5,
-        DietType::Carnivore => 1.0,
-    };
+    // Cohesion: prey herd tightly (low jaw), predators are solitary (high jaw)
+    let cohesion = 1.0 + (1.0 - dna.jaw_strength);
     let flee  = dna.acoustic_receptor();
     let hunt  = dna.base_aggression().min(2.5);
-    let cluster = match dna.diet {
-        DietType::Herbivore => 2.0,
-        DietType::Omnivore  => 1.5,
-        DietType::Carnivore => 0.5,
-    };
+    // Cluster: prey cluster densely, predators spread out
+    let cluster = 0.5 + (1.0 - dna.jaw_strength) * 1.5;
     let wander = (1.0 / dna.mass).clamp(0.1, 2.0);
     [separation, cohesion, flee, hunt, cluster, wander]
 }
@@ -252,11 +263,15 @@ pub struct BeingsHot {
     /// Cached chosen action from last cognitive loop.
     pub current_action: Vec<u8>,
 
-    /// Per-human MLP brain weights for Q-value action scoring.
-    /// Architecture: 14 input → 8 hidden (tanh) → 22 output (Q-values)
-    /// W1(14×8=112) + b1(8) + W2(8×22=176) + b2(22) = 318 floats = 1.27KB per human
+    /// Per-being MLP brain weights for NeuralOutput scoring.
+    /// Architecture: 14 input → 8 hidden (tanh) → 5 output (NeuralOutput)
+    /// W1(14×8=112) + b1(8) + W2(8×5=40) + b2(5) = 165 floats = 660B per human
     /// Fauna beings get zeroed weights (unused — they use fauna_params instead).
-    pub brain_weights: Vec<[f32; 318]>,
+    pub brain_weights: Vec<[f32; BRAIN_SIZE]>,
+    pub brain_noise: Vec<[f32; 5]>,      // Last exploration noise per being (for learning)
+    pub brain_output: Vec<[f32; 5]>,     // Last raw brain output per being (for learning)
+    pub caloric_history: Vec<[f32; 10]>, // Rolling 10-tick caloric energy buffer (for reward computation)
+    pub caloric_history_idx: Vec<u8>,    // Current write position in caloric_history ring
 
     /// Axiom 9: age/lifespan panic ratio (0.0–1.0). Rises as being approaches death.
     pub dread_ratio: Vec<f32>,
@@ -281,9 +296,9 @@ pub struct BeingsHot {
 /// Stored in cold data — only read at brain init, movement, and render update.
 #[derive(Clone, Debug)]
 pub struct Genotype {
-    /// Inherited Q-weight baselines — added to Xavier init weights at brain initialization.
-    /// Length matches Action::ALL (23 actions). Mutated ±0.05 per generation.
-    pub q_baselines: [f32; 23],
+    /// Inherited output baselines — added to Xavier init weights at brain initialization.
+    /// Length matches NeuralOutput (5 values). Mutated ±0.05 per generation.
+    pub output_baselines: [f32; 5],
     /// Physical coefficients derived from long-term Q-weight stability.
     pub speed_factor: f32,        // 0.7 - 1.3 multiplier on base_speed()
     pub cold_resistance: f32,     // 0.0 - 1.0
@@ -299,7 +314,7 @@ pub struct Genotype {
 impl Genotype {
     pub fn default() -> Self {
         Genotype {
-            q_baselines: [0.0; 23],
+            output_baselines: [0.0; 5],
             speed_factor: 1.0,
             cold_resistance: 0.5,
             heat_tolerance: 0.5,
@@ -392,6 +407,10 @@ impl Beings {
                 last_cognitive_tick: Vec::new(),
                 current_action: Vec::new(),
                 brain_weights: Vec::new(),
+                brain_noise: Vec::new(),
+                brain_output: Vec::new(),
+                caloric_history: Vec::new(),
+                caloric_history_idx: Vec::new(),
                 dread_ratio: Vec::new(),
                 boredom_entropy: Vec::new(),
                 pattern_hallucination: Vec::new(),
@@ -468,7 +487,11 @@ impl Beings {
         self.hot.target_pos.push(position);
         self.hot.last_cognitive_tick.push(0u32);
         self.hot.current_action.push(0u8);
-        self.hot.brain_weights.push([0.0; 318]); // zeroed by default; init_human_brain called for humans after spawn
+        self.hot.brain_weights.push([0.0; BRAIN_SIZE]); // zeroed by default; init_human_brain called for humans after spawn
+        self.hot.brain_noise.push([0.0; 5]);
+        self.hot.brain_output.push([0.0; 5]);
+        self.hot.caloric_history.push([0.0; 10]);
+        self.hot.caloric_history_idx.push(0u8);
         self.hot.dread_ratio.push(0.0);
         self.hot.boredom_entropy.push(0.0);
         self.hot.pattern_hallucination.push(0.02); // small baseline corruption chance
@@ -665,32 +688,32 @@ impl Beings {
 }
 
 /// Xavier-initialized MLP brain weights for a human being.
-/// Architecture: 14 input → 8 hidden (tanh) → 22 output (Q-values)
-/// W1 indices 0..112, b1 indices 112..120, W2 indices 120..296, b2 indices 296..318
-pub fn init_human_brain(rng: &mut fastrand::Rng) -> [f32; 318] {
+/// Architecture: 14 input → 8 hidden (tanh) → 5 output (NeuralOutput)
+/// W1 indices 0..112, b1 indices 112..120, W2 indices 120..160, b2 indices 160..165
+pub fn init_human_brain(rng: &mut fastrand::Rng) -> [f32; BRAIN_SIZE] {
     init_human_brain_with_genotype(rng, None)
 }
 
-/// Xavier-initialized brain with genotype Q-baselines seeded into b2 (output biases).
-/// The first 22 entries of `genotype.q_baselines` are added to b2, giving inherited
-/// behavioral tendencies that are refined by TD learning during the being's lifetime.
-pub fn init_human_brain_with_genotype(rng: &mut fastrand::Rng, genotype: Option<&Genotype>) -> [f32; 318] {
-    let mut w = [0.0f32; 318];
+/// Xavier-initialized brain with genotype output_baselines seeded into b2 (output biases).
+/// The 5 entries of `genotype.output_baselines` are added to b2, giving inherited
+/// behavioral tendencies that are refined by gradient descent during the being's lifetime.
+pub fn init_human_brain_with_genotype(rng: &mut fastrand::Rng, genotype: Option<&Genotype>) -> [f32; BRAIN_SIZE] {
+    let mut w = [0.0f32; BRAIN_SIZE];
     // W1: Xavier scale = sqrt(6 / (14+8)) = sqrt(6/22)
     let w1_scale = (6.0f32 / 22.0).sqrt();
     for v in w[0..112].iter_mut() {
         *v = (rng.f32() * 2.0 - 1.0) * w1_scale;
     }
     // b1: indices 112..120 stay 0.0
-    // W2: Xavier scale = sqrt(6 / (8+22)) = sqrt(6/30)
-    let w2_scale = (6.0f32 / 30.0).sqrt();
-    for v in w[120..296].iter_mut() {
+    // W2: Xavier scale = sqrt(6 / (8+5)) = sqrt(6/13)
+    let w2_scale = (6.0f32 / 13.0).sqrt();
+    for v in w[120..160].iter_mut() {
         *v = (rng.f32() * 2.0 - 1.0) * w2_scale;
     }
-    // b2: indices 296..318 — seed from genotype q_baselines (first 22 of 23 actions)
+    // b2: indices 160..165 — seed from genotype output_baselines (5 NeuralOutput values)
     if let Some(geno) = genotype {
-        for k in 0..22 {
-            w[296 + k] = geno.q_baselines[k];
+        for k in 0..5 {
+            w[160 + k] = geno.output_baselines[k];
         }
     }
     w

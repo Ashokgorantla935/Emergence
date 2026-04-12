@@ -1,5 +1,4 @@
 use super::data::*;
-use crate::being::dna::DietType;
 use crate::world::climate::Season;
 
 /// Blend genotypes from two parents, apply mutation, and return the child genotype.
@@ -22,10 +21,10 @@ pub fn blend_child_genotype(
     };
 
     let mut child = Genotype {
-        q_baselines: {
-            let mut q = [0.0f32; 23];
-            for i in 0..23 {
-                q[i] = (geno_a.q_baselines[i] + geno_b.q_baselines[i]) * 0.5;
+        output_baselines: {
+            let mut q = [0.0f32; 5];
+            for i in 0..5 {
+                q[i] = (geno_a.output_baselines[i] + geno_b.output_baselines[i]) * 0.5;
             }
             q
         },
@@ -38,8 +37,8 @@ pub fn blend_child_genotype(
         generation: geno_a.generation.max(geno_b.generation) + 1,
     };
 
-    // Mutation: ±0.05 on each q_baseline
-    for q in &mut child.q_baselines {
+    // Mutation: ±0.05 on each output_baseline
+    for q in &mut child.output_baselines {
         *q += (rng.f32() - 0.5) * 0.1;
         *q = q.clamp(-2.0, 2.0);
     }
@@ -433,7 +432,7 @@ pub fn tick_human_breeding(beings: &mut Beings, terrain: &crate::world::terrain:
         for j in nearby {
             if j == i { continue; }
             if beings.hot.states[j] == BeingState::Dead { continue; }
-            if beings.hot.dna[j].diet != DietType::Omnivore { continue; }
+            if !beings.hot.dna[j].is_cognitive() { continue; }
             if beings.life_phase(j) != LifePhase::Adult { continue; }
             if world_tick.saturating_sub(beings.cold.last_birth_tick[j]) < 4000 { continue; }
             // Must have trust relationship

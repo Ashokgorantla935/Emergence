@@ -7,14 +7,14 @@ use crate::being::data::{BeingState, Beings};
 use crate::being::memory::{CausalMemory, Impression};
 use crate::sim::chunks::ChunkGrid;
 use crate::sim::spatial::SpatialIndex;
-use crate::sim::world_state::{World, WorldLaws};
+use crate::sim::world_state::{ActiveInjections, DivineConstraints, World};
 use crate::world::climate::{Climate, ClimateGrid, DayPhase, Season};
 use crate::world::config::WorldConfig;
 use crate::world::map::MapSelection;
 use crate::world::resource::{FoodType, ResourceLayer};
 use crate::world::terrain::{Biome, Terrain};
 
-pub const CURRENT_VERSION: u32 = 2;
+pub const CURRENT_VERSION: u32 = 3;
 pub const AUTOSAVE_SLOT: u8 = 8; // slots 0-7 are manual, 8 is autosave
 pub const AUTO_SAVE_INTERVAL: u32 = 18_000; // ~5 minutes at 60fps
 
@@ -166,14 +166,14 @@ pub struct SaveFile {
     pub last_birth_tick: Vec<u32>,
     pub names: Vec<String>,
 
-    // Brain weights (V72: persisted for ancestral intelligence)
-    // serde only handles arrays ≤32; bitcode handles 318-element arrays directly.
+    // Brain weights (V78: 165-weight brain — W1(112)+b1(8)+W2(40)+b2(5))
+    // serde only handles arrays ≤32; bitcode handles large arrays directly.
     #[serde(skip)]
-    pub brain_weights: Vec<[f32; 318]>,
+    pub brain_weights: Vec<[f32; crate::being::brain::BRAIN_SIZE]>,
 
     // Genotype (evolution) — parallel to being index
     pub genotype_generation: Vec<u32>,
-    pub genotype_q_baselines: Vec<[f32; 23]>,
+    pub genotype_output_baselines: Vec<[f32; 5]>,
     pub genotype_speed_factor: Vec<f32>,
     pub genotype_cold_resistance: Vec<f32>,
     pub genotype_heat_tolerance: Vec<f32>,
@@ -230,8 +230,9 @@ pub struct SaveFile {
     pub being_generational_trauma: Vec<f32>,
     pub being_metaphysical_flags: Vec<u32>,
 
-    // World Laws (Phase 6)
-    pub laws: WorldLaws,
+    // God power state
+    pub injections: ActiveInjections,
+    pub constraints: DivineConstraints,
 
     // RNG state
     pub rng_state: u64,
@@ -370,7 +371,7 @@ impl SaveFile {
             brain_weights: beings.hot.brain_weights.clone(),
 
             genotype_generation: beings.cold.genotypes.iter().map(|g| g.generation).collect(),
-            genotype_q_baselines: beings.cold.genotypes.iter().map(|g| g.q_baselines).collect(),
+            genotype_output_baselines: beings.cold.genotypes.iter().map(|g| g.output_baselines).collect(),
             genotype_speed_factor: beings.cold.genotypes.iter().map(|g| g.speed_factor).collect(),
             genotype_cold_resistance: beings.cold.genotypes.iter().map(|g| g.cold_resistance).collect(),
             genotype_heat_tolerance: beings.cold.genotypes.iter().map(|g| g.heat_tolerance).collect(),
@@ -420,8 +421,8 @@ impl SaveFile {
             being_generational_trauma: world.beings.cold.generational_trauma.clone(),
             being_metaphysical_flags: world.beings.cold.metaphysical_flags.clone(),
 
-            // World Laws
-            laws: world.laws.clone(),
+            injections: world.injections.clone(),
+            constraints: world.constraints.clone(),
 
             rng_state: world.rng.get_seed(),
 
@@ -583,7 +584,7 @@ impl SaveFile {
             beings.hot.last_cognitive_tick.push(0u32);
             beings.hot.current_action.push(0u8);
             beings.hot.brain_weights.push(
-                if i < self.brain_weights.len() { self.brain_weights[i] } else { [0.0f32; 318] }
+                if i < self.brain_weights.len() { self.brain_weights[i] } else { [0.0f32; crate::being::brain::BRAIN_SIZE] }
             );
             beings.cold.parent_ids.push(self.parent_ids[i]);
             beings.cold.traits.push(if i < self.traits.len() { self.traits[i] } else { 0 });
@@ -594,10 +595,10 @@ impl SaveFile {
             beings.cold.meme_slots.push([crate::being::memes::MemeSlotState::default(); 4]);
 
             // Genotype
-            let genotype = if i < self.genotype_q_baselines.len() {
+            let genotype = if i < self.genotype_output_baselines.len() {
                 crate::being::data::Genotype {
                     generation: if i < self.genotype_generation.len() { self.genotype_generation[i] } else { 0 },
-                    q_baselines: self.genotype_q_baselines[i],
+                    output_baselines: self.genotype_output_baselines[i],
                     speed_factor: if i < self.genotype_speed_factor.len() { self.genotype_speed_factor[i] } else { 1.0 },
                     cold_resistance: if i < self.genotype_cold_resistance.len() { self.genotype_cold_resistance[i] } else { 0.5 },
                     heat_tolerance: if i < self.genotype_heat_tolerance.len() { self.genotype_heat_tolerance[i] } else { 0.5 },
@@ -685,7 +686,8 @@ impl SaveFile {
             rng,
             config,
             god_queue: crate::god_action::GodActionQueue::new(),
-            laws: self.laws.clone(),
+            injections: self.injections.clone(),
+            constraints: self.constraints.clone(),
             settlements: Vec::new(),   // rebuilt at next 600-tick cycle
             kingdoms: Vec::new(),
             wars: Vec::new(),

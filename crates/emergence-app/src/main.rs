@@ -1388,7 +1388,7 @@ impl ApplicationHandler for App {
                 let mut w = world.write().unwrap();
                 // Sync viewer WorldLaws UI into engine WorldLaws
                 // (viewer tracks its own copy; this was the design in world_laws.rs)
-                let _ = &mut w.laws; // laws are already written directly by god actions
+                // injections/constraints are already written directly by god actions via god_queue
             }
         }
 
@@ -1867,8 +1867,9 @@ impl ApplicationHandler for App {
                     }
 
                     // Floating world panels (togglable via hotkeys L / K)
-                    let mut viewer_laws = engine_laws_to_viewer(&world.laws);
-                    self.world_laws_panel.ui(&self.egui_ctx, &mut viewer_laws);
+                    let mut viewer_inj = engine_injections_to_viewer(&world.injections);
+                    let mut viewer_con = engine_constraints_to_viewer(&world.constraints);
+                    self.world_laws_panel.ui(&self.egui_ctx, &mut viewer_inj, &mut viewer_con);
                     self.kingdom_panel.ui(
                         &self.egui_ctx,
                         &self.kingdom_detector,
@@ -1885,7 +1886,8 @@ impl ApplicationHandler for App {
                     // Write back world laws
                     if let Some(ref world) = self.world {
                         let mut w = world.write().unwrap();
-                        apply_viewer_laws_to_engine(&viewer_laws, &mut w.laws);
+                        apply_viewer_injections_to_engine(&viewer_inj, &mut w);
+                        apply_viewer_constraints_to_engine(&viewer_con, &mut w);
                     }
 
                     // News feed overlay (floating Area — LEFT_BOTTOM)
@@ -3224,73 +3226,86 @@ fn build_kingdom_frame(
 // WorldLaws bridge: convert between viewer and engine representations
 // ---------------------------------------------------------------------------
 
-fn engine_laws_to_viewer(
-    e: &emergence_core::sim::world_state::WorldLaws,
-) -> emergence_viewer::ui::world_laws::WorldLaws {
-    emergence_viewer::ui::world_laws::WorldLaws {
-        no_food_regrowth:   e.no_food_regrowth,
-        immortal:           e.immortal,
-        fast_aging:         e.fast_aging,
-        no_starvation:      e.no_starvation,
-        invulnerable:       e.invulnerable,
-        no_sleep:           e.no_sleep,
-        double_metabolism:  e.double_metabolism,
-        no_bonding:         e.no_bonding,
-        perfect_memory:     e.perfect_memory,
-        no_memory:          e.no_memory,
-        universal_trust:    e.universal_trust,
-        no_trust:           e.no_trust,
-        forced_generosity:  e.forced_generosity,
-        forced_selfishness: e.forced_selfishness,
-        eternal_spring:     e.eternal_spring,
-        eternal_winter:     e.eternal_winter,
-        no_weather:         e.no_weather,
-        permanent_night:    e.permanent_night,
-        permanent_day:      e.permanent_day,
-        infinite_food:      e.infinite_food,
-        no_predators:       e.no_predators,
-        no_construction:    e.no_construction,
-        fast_construction:  e.fast_construction,
-        no_reproduction:    e.no_reproduction,
-        fast_reproduction:  e.fast_reproduction,
-        no_kingdoms:        e.no_kingdoms,
-        forced_peace:       e.forced_peace,
-        total_war:          e.total_war,
+fn engine_injections_to_viewer(
+    inj: &emergence_core::sim::world_state::ActiveInjections,
+) -> emergence_viewer::ui::world_laws::ViewerInjections {
+    emergence_viewer::ui::world_laws::ViewerInjections {
+        eternal_spring:     inj.eternal_spring,
+        eternal_winter:     inj.eternal_winter,
+        no_weather:         inj.no_weather,
+        permanent_night:    inj.permanent_night,
+        permanent_day:      inj.permanent_day,
+        infinite_food:      inj.infinite_food,
+        no_food_regrowth:   inj.no_food_regrowth,
+        trust_flood:        inj.trust_flood,
+        trust_drain:        inj.trust_drain,
+        war_drums:          inj.war_drums,
+        peace_aura:         inj.peace_aura,
+        fertility_surge:    inj.fertility_surge,
+        construction_boost: inj.construction_boost,
     }
 }
 
-fn apply_viewer_laws_to_engine(
-    v: &emergence_viewer::ui::world_laws::WorldLaws,
-    e: &mut emergence_core::sim::world_state::WorldLaws,
+fn engine_constraints_to_viewer(
+    con: &emergence_core::sim::world_state::DivineConstraints,
+) -> emergence_viewer::ui::world_laws::ViewerConstraints {
+    emergence_viewer::ui::world_laws::ViewerConstraints {
+        immortal:           con.immortal,
+        fast_aging:         con.fast_aging,
+        no_starvation:      con.no_starvation,
+        invulnerable:       con.invulnerable,
+        no_sleep:           con.no_sleep,
+        double_metabolism:  con.double_metabolism,
+        no_bonding:         con.no_bonding,
+        perfect_memory:     con.perfect_memory,
+        no_memory:          con.no_memory,
+        forced_generosity:  con.forced_generosity,
+        forced_selfishness: con.forced_selfishness,
+        no_construction:    con.no_construction,
+        no_reproduction:    con.no_reproduction,
+        no_kingdoms:        con.no_kingdoms,
+        no_predators:       con.no_predators,
+    }
+}
+
+fn apply_viewer_injections_to_engine(
+    v: &emergence_viewer::ui::world_laws::ViewerInjections,
+    w: &mut emergence_core::sim::world_state::World,
 ) {
-    e.no_food_regrowth   = v.no_food_regrowth;
-    e.immortal           = v.immortal;
-    e.fast_aging         = v.fast_aging;
-    e.no_starvation      = v.no_starvation;
-    e.invulnerable       = v.invulnerable;
-    e.no_sleep           = v.no_sleep;
-    e.double_metabolism  = v.double_metabolism;
-    e.no_bonding         = v.no_bonding;
-    e.perfect_memory     = v.perfect_memory;
-    e.no_memory          = v.no_memory;
-    e.universal_trust    = v.universal_trust;
-    e.no_trust           = v.no_trust;
-    e.forced_generosity  = v.forced_generosity;
-    e.forced_selfishness = v.forced_selfishness;
-    e.eternal_spring     = v.eternal_spring;
-    e.eternal_winter     = v.eternal_winter;
-    e.no_weather         = v.no_weather;
-    e.permanent_night    = v.permanent_night;
-    e.permanent_day      = v.permanent_day;
-    e.infinite_food      = v.infinite_food;
-    e.no_predators       = v.no_predators;
-    e.no_construction    = v.no_construction;
-    e.fast_construction  = v.fast_construction;
-    e.no_reproduction    = v.no_reproduction;
-    e.fast_reproduction  = v.fast_reproduction;
-    e.no_kingdoms        = v.no_kingdoms;
-    e.forced_peace       = v.forced_peace;
-    e.total_war          = v.total_war;
+    w.injections.eternal_spring     = v.eternal_spring;
+    w.injections.eternal_winter     = v.eternal_winter;
+    w.injections.no_weather         = v.no_weather;
+    w.injections.permanent_night    = v.permanent_night;
+    w.injections.permanent_day      = v.permanent_day;
+    w.injections.infinite_food      = v.infinite_food;
+    w.injections.no_food_regrowth   = v.no_food_regrowth;
+    w.injections.trust_flood        = v.trust_flood;
+    w.injections.trust_drain        = v.trust_drain;
+    w.injections.war_drums          = v.war_drums;
+    w.injections.peace_aura         = v.peace_aura;
+    w.injections.fertility_surge    = v.fertility_surge;
+    w.injections.construction_boost = v.construction_boost;
+}
+
+fn apply_viewer_constraints_to_engine(
+    v: &emergence_viewer::ui::world_laws::ViewerConstraints,
+    w: &mut emergence_core::sim::world_state::World,
+) {
+    w.constraints.immortal           = v.immortal;
+    w.constraints.fast_aging         = v.fast_aging;
+    w.constraints.no_starvation      = v.no_starvation;
+    w.constraints.invulnerable       = v.invulnerable;
+    w.constraints.no_sleep           = v.no_sleep;
+    w.constraints.double_metabolism  = v.double_metabolism;
+    w.constraints.no_bonding         = v.no_bonding;
+    w.constraints.perfect_memory     = v.perfect_memory;
+    w.constraints.no_memory          = v.no_memory;
+    w.constraints.forced_generosity  = v.forced_generosity;
+    w.constraints.forced_selfishness = v.forced_selfishness;
+    w.constraints.no_construction    = v.no_construction;
+    w.constraints.no_reproduction    = v.no_reproduction;
+    w.constraints.no_kingdoms        = v.no_kingdoms;
+    w.constraints.no_predators       = v.no_predators;
 }
 
 // ---------------------------------------------------------------------------

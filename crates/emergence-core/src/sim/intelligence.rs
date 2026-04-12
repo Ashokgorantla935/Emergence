@@ -7,8 +7,8 @@ pub const DISTILL_INTERVAL: u32 = 18_000;
 pub const MIN_TICKS_FOR_WISDOM: u32 = 30_000; // Only capture civilizations that survived 30K+ ticks
 const BLEND_FACTOR: f32 = 0.3;
 const MIN_AGE_FRACTION: f32 = 0.5;
-const BRAIN_SIZE: usize = 318;
-const Q_SIZE: usize = 23;
+const BRAIN_SIZE: usize = 165; // W1(8×14=112) + b1(8) + W2(5×8=40) + b2(5) = 165
+const OUTPUT_SIZE: usize = 5;  // NeuralOutput: vx, vy, push, pull, thermal
 
 #[derive(Clone, Debug, Encode, Decode)]
 pub struct IntelligenceGenome {
@@ -17,7 +17,7 @@ pub struct IntelligenceGenome {
     pub runs_accumulated: u32,
     pub total_ticks_lived: u64,
     pub ancestral_brain: [f32; BRAIN_SIZE],
-    pub ancestral_q_baselines: [f32; Q_SIZE],
+    pub ancestral_output_baselines: [f32; OUTPUT_SIZE],
     pub ancestral_personality: [f32; 5],
     pub ancestral_fauna_params: [f32; 6],
     pub generation_depth: u32,
@@ -30,11 +30,11 @@ impl Default for IntelligenceGenome {
     fn default() -> Self {
         Self {
             magic: *b"EVOL",
-            version: 1,
+            version: 2,
             runs_accumulated: 0,
             total_ticks_lived: 0,
             ancestral_brain: [0.0; BRAIN_SIZE],
-            ancestral_q_baselines: [0.0; Q_SIZE],
+            ancestral_output_baselines: [0.0; OUTPUT_SIZE],
             ancestral_personality: [0.0; 5],
             ancestral_fauna_params: [1.0; 6],
             generation_depth: 0,
@@ -53,7 +53,7 @@ pub struct DistillationResult {
 
 pub struct SeedResult {
     pub brain_weights: [f32; BRAIN_SIZE],
-    pub q_baselines: [f32; Q_SIZE],
+    pub output_baselines: [f32; OUTPUT_SIZE],
     pub personality: [f32; 5],
 }
 
@@ -64,7 +64,7 @@ pub fn distill_from_world(world: &World) -> (IntelligenceGenome, DistillationRes
     let n = world.beings.hot.count;
 
     let mut brain_sum = [0.0f32; BRAIN_SIZE];
-    let mut q_sum = [0.0f32; Q_SIZE];
+    let mut out_sum = [0.0f32; OUTPUT_SIZE];
     let mut personality_sum = [0.0f32; 5];
     let mut total_weight = 0.0f32;
     let mut fitness_sum = 0.0f32;
@@ -90,8 +90,8 @@ pub fn distill_from_world(world: &World) -> (IntelligenceGenome, DistillationRes
         for j in 0..BRAIN_SIZE {
             brain_sum[j] += world.beings.hot.brain_weights[i][j] * fitness;
         }
-        for j in 0..Q_SIZE {
-            q_sum[j] += world.beings.cold.genotypes[i].q_baselines[j] * fitness;
+        for j in 0..OUTPUT_SIZE {
+            out_sum[j] += world.beings.cold.genotypes[i].output_baselines[j] * fitness;
         }
         for j in 0..5 {
             personality_sum[j] += world.beings.hot.personalities[i][j] * fitness;
@@ -141,8 +141,8 @@ pub fn distill_from_world(world: &World) -> (IntelligenceGenome, DistillationRes
         for j in 0..BRAIN_SIZE {
             genome.ancestral_brain[j] = brain_sum[j] / total_weight;
         }
-        for j in 0..Q_SIZE {
-            genome.ancestral_q_baselines[j] = q_sum[j] / total_weight;
+        for j in 0..OUTPUT_SIZE {
+            genome.ancestral_output_baselines[j] = out_sum[j] / total_weight;
         }
         for j in 0..5 {
             genome.ancestral_personality[j] = personality_sum[j] / total_weight;
@@ -173,9 +173,9 @@ pub fn blend_and_save(new_genome: &IntelligenceGenome, _world_tick: u32) -> Resu
                 old.ancestral_brain[j] = old.ancestral_brain[j] * (1.0 - BLEND_FACTOR)
                     + new_genome.ancestral_brain[j] * BLEND_FACTOR;
             }
-            for j in 0..Q_SIZE {
-                old.ancestral_q_baselines[j] = old.ancestral_q_baselines[j] * (1.0 - BLEND_FACTOR)
-                    + new_genome.ancestral_q_baselines[j] * BLEND_FACTOR;
+            for j in 0..OUTPUT_SIZE {
+                old.ancestral_output_baselines[j] = old.ancestral_output_baselines[j] * (1.0 - BLEND_FACTOR)
+                    + new_genome.ancestral_output_baselines[j] * BLEND_FACTOR;
             }
             for j in 0..5 {
                 old.ancestral_personality[j] = old.ancestral_personality[j] * (1.0 - BLEND_FACTOR)
@@ -219,15 +219,15 @@ pub fn load_genome() -> Option<IntelligenceGenome> {
 }
 
 /// Seed a new human being's weights from the ancestral genome, with noise.
-/// Brain weights ±0.02, q_baselines ±0.05 clamped ±2.0, personality ±0.2 clamped ±1.0.
+/// Brain weights ±0.02, output_baselines ±0.05 clamped ±2.0, personality ±0.2 clamped ±1.0.
 pub fn seed_human_from_genome(genome: &IntelligenceGenome, rng: &mut fastrand::Rng) -> SeedResult {
     let mut brain = genome.ancestral_brain;
     for v in brain.iter_mut() {
         *v += (rng.f32() * 2.0 - 1.0) * 0.02;
     }
 
-    let mut q = genome.ancestral_q_baselines;
-    for v in q.iter_mut() {
+    let mut out = genome.ancestral_output_baselines;
+    for v in out.iter_mut() {
         *v = (*v + (rng.f32() * 2.0 - 1.0) * 0.05).clamp(-2.0, 2.0);
     }
 
@@ -238,7 +238,7 @@ pub fn seed_human_from_genome(genome: &IntelligenceGenome, rng: &mut fastrand::R
 
     SeedResult {
         brain_weights: brain,
-        q_baselines: q,
+        output_baselines: out,
         personality,
     }
 }

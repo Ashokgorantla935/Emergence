@@ -1,7 +1,6 @@
 //! Animation state machine for beings.
 //! Drives atlas UV selection from engine state without touching core.
 
-use emergence_core::being::actions::Action;
 use emergence_core::being::data::{BeingState, Beings, CreatureType};
 
 /// Cell size in the entity spritesheet (1 / 4)
@@ -159,64 +158,23 @@ impl AnimationManager {
             BeingState::Dead     => AnimState::Die,
             BeingState::Sleeping => AnimState::Sleep,
             BeingState::Awake    => {
-                // Map pending_action (u8) to anim state; 255 = no pending action.
-                let action_u8 = beings.hot.pending_action[i];
-                if action_u8 != 255 {
-                    // Safe: Action is repr(u8) with values 0-21; anything outside falls through.
-                    let action = match action_u8 {
-                        0  => Some(Action::Wander),
-                        1  => Some(Action::SeekFood),
-                        2  => Some(Action::SeekShelter),
-                        3  => Some(Action::Flee),
-                        4  => Some(Action::ApproachBeing),
-                        5  => Some(Action::Bond),
-                        6  => Some(Action::ShareFood),
-                        7  => Some(Action::TakeFood),
-                        8  => Some(Action::Explore),
-                        9  => Some(Action::Sleep),
-                        10 => Some(Action::Cluster),
-                        11 => Some(Action::Mourn),
-                        12 => Some(Action::AvoidBeing),
-                        13 => Some(Action::PickUpFood),
-                        14 => Some(Action::Hunt),
-                        15 => Some(Action::Teach),
-                        16 => Some(Action::Build),
-                        17 => Some(Action::Craft),
-                        18 => Some(Action::Memorialize),
-                        19 => Some(Action::CreateMark),
-                        20 => Some(Action::ShareResource),
-                        21 => Some(Action::PickUpStone),
-                        _  => None,
-                    };
-                    if let Some(action) = action {
-                        let mapped = match action {
-                            Action::Hunt | Action::TakeFood               => Some(AnimState::Fight),
-                            Action::ShareFood | Action::ShareResource      => Some(AnimState::Share),
-                            Action::Teach | Action::Bond                   => Some(AnimState::Share),
-                            Action::Mourn | Action::Memorialize             => Some(AnimState::Mourn),
-                            Action::Explore                                 => Some(AnimState::Explore),
-                            Action::Sleep                                   => Some(AnimState::Sleep),
-                            Action::SeekFood | Action::PickUpFood
-                            | Action::PickUpStone | Action::Build
-                            | Action::Craft | Action::CreateMark            => {
-                                // Active tasks: use velocity to pick Walk or Idle
-                                None
-                            }
-                            _ => None,
-                        };
-                        if let Some(state) = mapped {
-                            return state;
-                        }
-                    }
-                }
+                // Derive animation from NeuralOutput physics:
+                // [0]=velocity_x, [1]=velocity_y, [2]=push_force, [3]=pull_force, [4]=thermal_friction
+                let out = beings.hot.brain_output[i];
+                let velocity_x      = out[0];
+                let velocity_y      = out[1];
+                let push_force      = out[2];
+                let pull_force      = out[3];
+                let thermal_friction = out[4];
+                let speed = (velocity_x * velocity_x + velocity_y * velocity_y).sqrt();
 
-                // Fallback: derive from velocity magnitude
-                let prev = self.prev_positions[i];
-                let curr = beings.hot.positions[i];
-                let dx = curr[0] - prev[0];
-                let dy = curr[1] - prev[1];
-                let speed = (dx * dx + dy * dy).sqrt();
-                if speed > 0.15 {
+                if thermal_friction > 0.5 && speed < 0.1 {
+                    AnimState::Sleep
+                } else if push_force > 0.5 {
+                    AnimState::Fight
+                } else if pull_force > 0.5 {
+                    AnimState::Share
+                } else if speed > 0.3 {
                     AnimState::Walk
                 } else {
                     AnimState::Idle

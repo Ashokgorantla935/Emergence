@@ -6,7 +6,9 @@ pub mod save;
 pub mod scenario;
 pub mod god_action;
 
-pub use being::dna::{BiologicalDNA, DietType};
+pub use being::dna::BiologicalDNA;
+pub use being::data::{NeuralOutput, BRAIN_SIZE};
+pub use sim::world_state::{ActiveInjections, DivineConstraints};
 pub use world::matter::MatterProperties;
 pub use world::object_grid::{ObjectGrid, WorldItem};
 pub use world::tensor::{TensorGrid, TensorLayer, TENSOR_LAYER_COUNT};
@@ -101,7 +103,10 @@ pub fn create_world(config: WorldConfig) -> World {
         let idx = beings.spawn([x, y], personality, lifespan, [u32::MAX, u32::MAX]);
         if let Some(ref s) = human_seed {
             beings.hot.brain_weights[idx] = s.brain_weights;
-            beings.cold.genotypes[idx].q_baselines = s.q_baselines;
+            beings.cold.genotypes[idx].output_baselines = s.output_baselines;
+        } else if !is_predator {
+            // Xavier-init human brains so pull_force isn't stuck at sigmoid(0)=0.5
+            beings.hot.brain_weights[idx] = crate::being::data::init_human_brain(&mut rng);
         }
         beings.cold.names[idx] = generate_name(&mut rng);
         // Starting ages: mix of children, young adults, adults (0..~50% of lifespan).
@@ -145,7 +150,8 @@ pub fn create_world(config: WorldConfig) -> World {
         rng,
         config,
         god_queue: crate::god_action::GodActionQueue::new(),
-        laws: crate::sim::world_state::WorldLaws::default(),
+        injections: crate::sim::world_state::ActiveInjections::default(),
+        constraints: crate::sim::world_state::DivineConstraints::default(),
         settlements: Vec::new(),
         kingdoms: Vec::new(),
         wars: Vec::new(),

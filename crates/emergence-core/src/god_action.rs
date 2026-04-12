@@ -1,4 +1,4 @@
-use crate::being::dna::{BiologicalDNA, DietType};
+use crate::being::dna::BiologicalDNA;
 use crate::being::names::generate_name;
 use crate::world::climate::{Season, WeatherKind};
 use crate::world::terrain::Biome;
@@ -360,12 +360,13 @@ pub enum GodAction {
     RemoveAll {
         region: Rect,
     },
-    SetLaw {
-        law_id: u8,
-        value: bool,
+    /// Toggle an ActiveInjections field by ID (0-12).
+    ToggleInjection {
+        id: u8,
     },
-    ToggleLaw {
-        law_id: u8,
+    /// Toggle a DivineConstraints field by ID (0-14).
+    ToggleConstraint {
+        id: u8,
     },
 }
 
@@ -1349,12 +1350,11 @@ fn apply_god_action(world: &mut World, action: GodAction) {
             }
         }
 
-        GodAction::SetLaw { law_id, value } => {
-            apply_law(&mut world.laws, law_id, value);
+        GodAction::ToggleInjection { id } => {
+            toggle_injection(world, id);
         }
-        GodAction::ToggleLaw { law_id } => {
-            let current = get_law(&world.laws, law_id);
-            apply_law(&mut world.laws, law_id, !current);
+        GodAction::ToggleConstraint { id } => {
+            toggle_constraint(world, id);
         }
 
         GodAction::PlaceCanal { x, y } => {
@@ -1376,73 +1376,47 @@ fn apply_god_action(world: &mut World, action: GodAction) {
     }
 }
 
-/// Apply a law value by law_id (0-27 mapping matches WorldLaws field order).
-fn apply_law(laws: &mut crate::sim::world_state::WorldLaws, law_id: u8, value: bool) {
-    match law_id {
-        0  => laws.no_food_regrowth = value,
-        1  => laws.immortal = value,
-        2  => laws.fast_aging = value,
-        3  => laws.no_starvation = value,
-        4  => laws.invulnerable = value,
-        5  => laws.no_sleep = value,
-        6  => laws.double_metabolism = value,
-        7  => laws.no_bonding = value,
-        8  => laws.perfect_memory = value,
-        9  => laws.no_memory = value,
-        10 => laws.universal_trust = value,
-        11 => laws.no_trust = value,
-        12 => laws.forced_generosity = value,
-        13 => laws.forced_selfishness = value,
-        14 => laws.eternal_spring = value,
-        15 => laws.eternal_winter = value,
-        16 => laws.no_weather = value,
-        17 => laws.permanent_night = value,
-        18 => laws.permanent_day = value,
-        19 => laws.infinite_food = value,
-        20 => laws.no_predators = value,
-        21 => laws.no_construction = value,
-        22 => laws.fast_construction = value,
-        23 => laws.no_reproduction = value,
-        24 => laws.fast_reproduction = value,
-        25 => laws.no_kingdoms = value,
-        26 => laws.forced_peace = value,
-        27 => laws.total_war = value,
-        _  => {} // unknown law id, ignore
+/// Toggle an ActiveInjections field by ID.
+/// IDs 0-12 map to the 13 injection fields.
+fn toggle_injection(world: &mut crate::sim::world_state::World, id: u8) {
+    match id {
+        0  => world.injections.no_food_regrowth = !world.injections.no_food_regrowth,
+        1  => world.injections.trust_flood = !world.injections.trust_flood,
+        2  => world.injections.trust_drain = !world.injections.trust_drain,
+        3  => world.injections.eternal_spring = !world.injections.eternal_spring,
+        4  => world.injections.eternal_winter = !world.injections.eternal_winter,
+        5  => world.injections.no_weather = !world.injections.no_weather,
+        6  => world.injections.permanent_night = !world.injections.permanent_night,
+        7  => world.injections.permanent_day = !world.injections.permanent_day,
+        8  => world.injections.infinite_food = !world.injections.infinite_food,
+        9  => world.injections.construction_boost = !world.injections.construction_boost,
+        10 => world.injections.fertility_surge = !world.injections.fertility_surge,
+        11 => world.injections.peace_aura = !world.injections.peace_aura,
+        12 => world.injections.war_drums = !world.injections.war_drums,
+        _  => {}
     }
 }
 
-/// Get a law value by law_id.
-fn get_law(laws: &crate::sim::world_state::WorldLaws, law_id: u8) -> bool {
-    match law_id {
-        0  => laws.no_food_regrowth,
-        1  => laws.immortal,
-        2  => laws.fast_aging,
-        3  => laws.no_starvation,
-        4  => laws.invulnerable,
-        5  => laws.no_sleep,
-        6  => laws.double_metabolism,
-        7  => laws.no_bonding,
-        8  => laws.perfect_memory,
-        9  => laws.no_memory,
-        10 => laws.universal_trust,
-        11 => laws.no_trust,
-        12 => laws.forced_generosity,
-        13 => laws.forced_selfishness,
-        14 => laws.eternal_spring,
-        15 => laws.eternal_winter,
-        16 => laws.no_weather,
-        17 => laws.permanent_night,
-        18 => laws.permanent_day,
-        19 => laws.infinite_food,
-        20 => laws.no_predators,
-        21 => laws.no_construction,
-        22 => laws.fast_construction,
-        23 => laws.no_reproduction,
-        24 => laws.fast_reproduction,
-        25 => laws.no_kingdoms,
-        26 => laws.forced_peace,
-        27 => laws.total_war,
-        _  => false,
+/// Toggle a DivineConstraints field by ID.
+/// IDs 0-14 map to the 15 constraint fields.
+fn toggle_constraint(world: &mut crate::sim::world_state::World, id: u8) {
+    match id {
+        0  => world.constraints.immortal = !world.constraints.immortal,
+        1  => world.constraints.fast_aging = !world.constraints.fast_aging,
+        2  => world.constraints.no_starvation = !world.constraints.no_starvation,
+        3  => world.constraints.invulnerable = !world.constraints.invulnerable,
+        4  => world.constraints.no_sleep = !world.constraints.no_sleep,
+        5  => world.constraints.double_metabolism = !world.constraints.double_metabolism,
+        6  => world.constraints.no_bonding = !world.constraints.no_bonding,
+        7  => world.constraints.perfect_memory = !world.constraints.perfect_memory,
+        8  => world.constraints.no_memory = !world.constraints.no_memory,
+        9  => world.constraints.forced_generosity = !world.constraints.forced_generosity,
+        10 => world.constraints.forced_selfishness = !world.constraints.forced_selfishness,
+        11 => world.constraints.no_predators = !world.constraints.no_predators,
+        12 => world.constraints.no_construction = !world.constraints.no_construction,
+        13 => world.constraints.no_reproduction = !world.constraints.no_reproduction,
+        14 => world.constraints.no_kingdoms = !world.constraints.no_kingdoms,
+        _  => {}
     }
 }
 
@@ -1469,11 +1443,11 @@ fn modify_relationship(
 /// V70 Neural Calculus: DNA-derived personality instead of hardcoded per-species vectors.
 /// [bold, social, curious, generous, diurnal]
 fn fauna_personality_from_dna(dna: &BiologicalDNA, rng: &mut fastrand::Rng) -> [f32; 5] {
-    if dna.diet == DietType::Omnivore {
+    if dna.is_cognitive() {
         return crate::being::lifecycle::generate_initial_personality(rng);
     }
     let bold = dna.risk_tolerance() * 2.0 - 1.0; // carnivores bold, herbivores timid
-    let social = if dna.diet == DietType::Herbivore { 0.5 } else { -0.3 }; // herds vs solo
+    let social = if dna.base_aggression() < 0.1 { 0.5 } else { -0.3 }; // low-aggression herds vs solo
     let curious = dna.speed_scalar().min(1.0) * 0.5; // small fast creatures more curious
     let generous = -dna.base_aggression(); // predators less generous
     let diurnal = 0.5 + rng.f32() * 0.5; // slight random variation

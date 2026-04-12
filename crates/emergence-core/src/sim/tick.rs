@@ -7,7 +7,7 @@ use rayon::prelude::*;
 /// At 100x speed: 1000 ticks/frame, render every 100th (~15-25fps, documented and accepted).
 pub const FIXED_DT: f32 = 1.0;
 
-use crate::being::actions::{score_actions, Action, ScoredAction};
+use crate::being::actions::{compute_neural_output, infer_behavior_tag, read_local_signals};
 use crate::being::data::*;
 use crate::world::terrain::Biome;
 use crate::being::emotions::{decay_emotions, trigger_emotion, update_emotions_from_needs};
@@ -15,9 +15,8 @@ use crate::being::lifecycle::{age_beings, age_beings_no_death, blend_child_genot
 use crate::being::names::generate_name;
 use crate::being::needs::decay_needs;
 use crate::being::social::{deposit_emotion_signals, init_kinship_warmth};
-use crate::sim::movement::execute_action;
-use crate::sim::world_state::{Event, EventCause, EventType, World};
-use crate::being::dna::DietType;
+use crate::sim::movement::apply_neural_output;
+use crate::sim::world_state::{apply_sustained_injections, Event, EventCause, EventType, World};
 
 pub fn tick(world: &mut World) {
     let world_size = (world.config.size.0, world.config.size.1);
@@ -27,6 +26,9 @@ pub fn tick(world: &mut World) {
         let actions = world.god_queue.drain();
         crate::god_action::process_god_actions(world, actions);
     }
+
+    // 0b. Apply sustained injections (tensor/terrain physics from active god powers).
+    apply_sustained_injections(world);
 
     // 1. Climate tick
     world.climate.tick(&mut world.rng, world_size);
@@ -39,27 +41,12 @@ pub fn tick(world: &mut World) {
     // 1b. Weather effects
     apply_weather_effects(world);
 
-    // Apply climate law overrides (Phase 6)
-    if world.laws.eternal_spring {
-        world.climate.season = crate::world::climate::Season::Spring;
-    } else if world.laws.eternal_winter {
-        world.climate.season = crate::world::climate::Season::Winter;
-    }
-    if world.laws.no_weather {
-        world.climate.clear_weather();
-    }
-    if world.laws.permanent_day {
-        world.climate.day_phase = crate::world::climate::DayPhase::Day;
-    } else if world.laws.permanent_night {
-        world.climate.day_phase = crate::world::climate::DayPhase::Night;
-    }
-
-    // 2. Resource tick (with law overrides for food regrowth)
+    // 2. Resource tick (injections handle eternal_spring / infinite_food physics)
     world.resources.tick_with_laws(
         &world.terrain,
         world.climate.season(),
-        world.laws.no_food_regrowth,
-        world.laws.infinite_food,
+        world.injections.no_food_regrowth,
+        world.injections.infinite_food,
         world.tick,
     );
 
@@ -308,8 +295,8 @@ pub fn tick(world: &mut World) {
     // 5a-c. Decay needs, emotions (sequential for now, operates on mutable beings)
     decay_needs(&mut world.beings, &world.climate);
 
-    // Double metabolism law (Phase 6): extra need decay
-    if world.laws.double_metabolism {
+    // Double metabolism constraint: extra need decay
+    if world.constraints.double_metabolism {
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] == BeingState::Dead { continue; }
             for need in &mut world.beings.hot.needs[i] {
@@ -317,8 +304,8 @@ pub fn tick(world: &mut World) {
             }
         }
     }
-    // No sleep law: pin rest to 1.0
-    if world.laws.no_sleep {
+    // No sleep constraint: pin rest to 1.0
+    if world.constraints.no_sleep {
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] != BeingState::Dead {
                 world.beings.hot.needs[i][NEED_REST] = 1.0;
@@ -330,7 +317,7 @@ pub fn tick(world: &mut World) {
     update_emotions_from_needs(&mut world.beings);
 
     // 5d. Age + death checks
-    if world.laws.fast_aging {
+    if world.constraints.fast_aging {
         // Age 2x per tick
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] != BeingState::Dead {
@@ -339,13 +326,13 @@ pub fn tick(world: &mut World) {
         }
     }
     // age_beings returns old-age deaths so they receive grief/events like other deaths
-    let age_dead = if world.laws.immortal || world.laws.invulnerable {
+    let age_dead = if world.constraints.immortal || world.constraints.invulnerable {
         age_beings_no_death(&mut world.beings)
     } else {
         age_beings(&mut world.beings)
     };
-    // V61: no_starvation — reset caloric energy and hunger counters before death check
-    if world.laws.no_starvation {
+    // no_starvation — reset caloric energy and hunger counters before death check
+    if world.constraints.no_starvation {
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] == BeingState::Dead { continue; }
             if world.beings.hot.caloric_energy[i] <= 0.0 {
@@ -354,7 +341,7 @@ pub fn tick(world: &mut World) {
             world.beings.hot.hunger_zero_ticks[i] = 0;
         }
     }
-    let condition_dead = if world.laws.immortal || world.laws.invulnerable {
+    let condition_dead = if world.constraints.immortal || world.constraints.invulnerable {
         // Skip natural death checks (beings still die from combat/explicit kill)
         Vec::new()
     } else {
@@ -388,9 +375,9 @@ pub fn tick(world: &mut World) {
         let cx = (pos[0] as u32).min(world.tensor.width - 1);
         let cy = (pos[1] as u32).min(world.tensor.height - 1);
 
-        // Grief signal burst only for humans (otherwise society shuts down mourning dead fish/deer)
+        // Grief signal burst only for cognitive beings (otherwise society shuts down mourning dead fish/deer)
         // Grief → Acoustic × 0.5
-        if world.beings.hot.dna[dead_idx].diet == DietType::Omnivore {
+        if world.beings.hot.dna[dead_idx].is_cognitive() {
             world.tensor.deposit(crate::world::tensor::TensorLayer::Acoustic, cx, cy, 0.5);
         }
 
@@ -428,8 +415,8 @@ pub fn tick(world: &mut World) {
                     trigger_emotion(&mut world.beings, i, EMO_GRIEF, 0.9);
 
                     // Axiom 12: grief erodes brain weights when culturally similar being dies
-                    if world.beings.hot.dna[i].diet == DietType::Omnivore
-                        && world.beings.hot.dna[dead_idx].diet == DietType::Omnivore
+                    if world.beings.hot.dna[i].is_cognitive()
+                        && world.beings.hot.dna[dead_idx].is_cognitive()
                     {
                         let hash_i = &world.beings.cold.true_memetic_hash[i];
                         let hash_d = &world.beings.cold.true_memetic_hash[dead_idx];
@@ -489,9 +476,8 @@ pub fn tick(world: &mut World) {
         });
     }
 
-    // 5e-pre. Enhanced fauna boids — update velocities and positions before action scoring
-    // V61: no_predators — temporarily suspend predator fauna during boids tick
-    if world.laws.no_predators {
+    // 5e-pre. Enhanced fauna boids — update velocities and positions before cognitive loop
+    if world.constraints.no_predators {
         // Save original states, mark predators dead so boids skips them, then restore
         let predator_states: Vec<(usize, BeingState)> = world.beings.hot.fauna_indices.iter().copied()
             .filter(|&i| {
@@ -529,8 +515,8 @@ pub fn tick(world: &mut World) {
         );
     }
     
-    // Human breeding check (every 300 ticks, or every 50 when fast_reproduction is active)
-    let breed_interval = if world.laws.fast_reproduction { 50u32 } else { 300u32 };
+    // Human breeding check (every 300 ticks, or every 50 when fertility_surge injection is active)
+    let breed_interval = if world.injections.fertility_surge { 50u32 } else { 300u32 };
     if world.tick % breed_interval == 0 {
         // V55 §2: Conservation — no reproduction if energy cap is reached
         let energy_available = world.total_energy < world.energy_cap;
@@ -558,8 +544,8 @@ pub fn tick(world: &mut World) {
             // Axiom 8: Hallucination chance rises with age/dread
             world.beings.hot.pattern_hallucination[i] = 0.02 + world.beings.hot.dread_ratio[i] * 0.1;
 
-            // Axiom 7: Boredom entropy — humans with satisfied needs and no threat accumulate entropy
-            if world.beings.hot.dna[i].diet == DietType::Omnivore {
+            // Axiom 7: Boredom entropy — cognitive beings with satisfied needs accumulate entropy
+            if world.beings.hot.dna[i].is_cognitive() {
                 let hunger = world.beings.hot.needs[i][NEED_HUNGER];
                 let fear = world.beings.hot.emotions[i][EMO_FEAR];
                 if hunger > 0.7 && fear < 0.2 {
@@ -604,8 +590,8 @@ pub fn tick(world: &mut World) {
         let y = (pos[1] as u32).min(world.tensor.height - 1);
         let danger = world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, x, y);
 
-        // Hero bypass: bold or devoted humans resist the initial panic trigger
-        let is_hero = if world.beings.hot.dna[i].diet == DietType::Omnivore {
+        // Hero bypass: bold or devoted cognitive beings resist the initial panic trigger
+        let is_hero = if world.beings.hot.dna[i].is_cognitive() {
             let boldness = world.beings.hot.personalities[i][TRAIT_BOLD];
             let belonging = world.beings.hot.needs[i][NEED_BELONGING];
             boldness > 0.8 || (boldness > 0.5 && belonging > 0.7)
@@ -665,7 +651,7 @@ pub fn tick(world: &mut World) {
     // 5e-pre2. Comfort gradient climbing: critically cold humans seek shelter
     for i in 0..world.beings.hot.count {
         if world.beings.hot.states[i] != BeingState::Awake { continue; }
-        if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; } // humans only
+        if !world.beings.hot.dna[i].is_cognitive() { continue; } // cognitive beings only
 
         let warmth = world.beings.hot.needs[i][NEED_WARMTH];
         if warmth < 0.25 {
@@ -690,19 +676,21 @@ pub fn tick(world: &mut World) {
     let base_seed = world.rng.u64(..);
     let being_count = world.beings.hot.count;
 
-    // Pre-pass: break action lock for beings that are actively fleeing.
-    for i in 0..being_count {
-        if world.beings.hot.flee_ticks[i] > 0 {
-            world.beings.hot.action_lock_ticks[i] = 0;
-            world.beings.hot.last_cognitive_tick[i] = 0; // V55 §5: force cognitive re-eval on flee
-        }
-    }
-
-    // V55 §5: Cognitive interval — stagger AI across beings (each runs every ~60 ticks).
+    // 5e. NeuralOutput pipeline — cognitive stagger (each being re-evaluates every ~60 ticks).
+    // Parallel: compute new outputs for beings on their cognitive tick.
+    // Sequential: apply all outputs every tick (continuous movement, no action locking).
     const COGNITIVE_INTERVAL: u32 = 60;
     let current_tick = world.tick;
 
-    let decisions: Vec<Option<ScoredAction>> = (0..being_count)
+    struct CognitiveResult {
+        output: NeuralOutput,
+        noise: [f32; crate::being::brain::N_OUTPUT],
+        hidden: [f32; crate::being::brain::N_HIDDEN],
+        input: [f32; crate::being::brain::N_INPUT],
+        is_new: bool,
+    }
+
+    let outputs: Vec<Option<CognitiveResult>> = (0..being_count)
         .into_par_iter()
         .map(|i| {
             if world.beings.hot.states[i] != BeingState::Awake {
@@ -712,40 +700,53 @@ pub fn tick(world: &mut World) {
             if !world.chunks.is_active_pos(&world.beings.hot.positions[i]) {
                 return None;
             }
-            // Inner gate: action lock still active
-            if world.beings.hot.action_lock_ticks[i] > 0 {
-                return None; // use locked action (handled in execute phase)
-            }
-            // V55 §5: Outer gate — cognitive stagger
+
             let ticks_since = current_tick.saturating_sub(world.beings.hot.last_cognitive_tick[i]);
             let slot = (current_tick.wrapping_add(i as u32)) % COGNITIVE_INTERVAL;
-            if world.beings.hot.last_cognitive_tick[i] != 0 && slot != 0 && ticks_since < COGNITIVE_INTERVAL {
-                return None; // not this being's cognitive tick
+            let needs_eval = world.beings.hot.last_cognitive_tick[i] == 0
+                || slot == 0
+                || ticks_since >= COGNITIVE_INTERVAL;
+
+            if needs_eval && world.beings.hot.dna[i].is_cognitive() {
+                let mut rng = fastrand::Rng::with_seed(base_seed.wrapping_add(i as u64));
+                let (output, noise, hidden, input) = compute_neural_output(
+                    i,
+                    &world.beings,
+                    &world.terrain,
+                    &world.resources,
+                    &world.tensor,
+                    &world.climate,
+                    &world.spatial,
+                    &world.constraints,
+                    &mut rng,
+                );
+                Some(CognitiveResult { output, noise, hidden, input, is_new: true })
+            } else {
+                // Use cached output from last cognitive tick
+                let bo = world.beings.hot.brain_output[i];
+                let output = NeuralOutput {
+                    velocity_x: bo[0],
+                    velocity_y: bo[1],
+                    push_force: bo[2],
+                    pull_force: bo[3],
+                    thermal_friction: bo[4],
+                };
+                Some(CognitiveResult {
+                    output,
+                    noise: [0.0; crate::being::brain::N_OUTPUT],
+                    hidden: [0.0; crate::being::brain::N_HIDDEN],
+                    input: [0.0; crate::being::brain::N_INPUT],
+                    is_new: false,
+                })
             }
-            let mut rng = fastrand::Rng::with_seed(base_seed.wrapping_add(i as u64));
-            Some(score_actions(
-                i,
-                &world.beings,
-                &world.terrain,
-                &world.resources,
-                &world.tensor,
-                &world.climate,
-                &world.spatial,
-                &world.laws,
-                &mut rng,
-            ))
         })
         .collect();
 
-    // 5f. Execute actions (sequential)
-    for (i, decision) in decisions.iter().enumerate() {
-        if world.beings.hot.states[i] != BeingState::Awake {
-            continue;
-        }
-        // V71 §3: Skip beings in dormant chunks
-        if !world.chunks.is_active_pos(&world.beings.hot.positions[i]) {
-            continue;
-        }
+    // 5f. Execute neural outputs (sequential — apply_neural_output mutates world)
+    for (i, cr_opt) in outputs.iter().enumerate() {
+        let Some(cr) = cr_opt else { continue; };
+        if world.beings.hot.states[i] != BeingState::Awake { continue; }
+        if !world.chunks.is_active_pos(&world.beings.hot.positions[i]) { continue; }
 
         // Axiom 28/29/30: Buddha state — transcendence, no physical activity needed
         if world.beings.cold.metaphysical_flags[i] & BUDDHA_STATE != 0 {
@@ -753,282 +754,114 @@ pub fn tick(world: &mut World) {
             continue;
         }
 
-        // Build the action to execute: either newly scored or locked from previous tick.
-        let action_to_execute: ScoredAction = if let Some(ref new_action) = decision {
-            // V55 §5: Cache cognitive result for kinetic loop
-            world.beings.hot.last_cognitive_tick[i] = world.tick;
-            world.beings.hot.current_action[i] = new_action.action as u8;
-            if let Some(tgt) = new_action.target_pos {
-                world.beings.hot.target_pos[i] = tgt;
-            }
-            // New decision: store it and set the lock duration.
-            world.beings.hot.pending_action[i] = new_action.action as u8;
-            world.beings.hot.action_target_pos[i] = new_action.target_pos;
-            let lock = match new_action.action {
-                Action::Wander => 40,
-                Action::Build | Action::Craft => 120,
-                Action::Farm => 60,
-                Action::Assault => 100, // committed to war march
-                Action::Flee => 5,
-                Action::SeekFood => 60,
-                Action::SeekShelter => 80,
-                Action::Explore => 50,
-                _ => 30,
-            };
-            world.beings.hot.action_lock_ticks[i] = lock;
-            ScoredAction {
-                action: new_action.action,
-                score: new_action.score,
-                target_being: new_action.target_being,
-                target_pos: new_action.target_pos,
-                runner_up_action: new_action.runner_up_action,
-                runner_up_score: new_action.runner_up_score,
-                causal_contrib: new_action.causal_contrib,
-                relationship_contrib: new_action.relationship_contrib,
-                signal_contrib: new_action.signal_contrib,
-            }
-        } else {
-            // Locked action: decrement counter and re-use stored action/target.
-            if world.beings.hot.action_lock_ticks[i] > 0 {
-                world.beings.hot.action_lock_ticks[i] -= 1;
-            }
-            ScoredAction {
-                action: Action::from_u8(world.beings.hot.pending_action[i]),
-                score: 0.0,
-                target_being: None,
-                target_pos: world.beings.hot.action_target_pos[i],
-                runner_up_action: 0,
-                runner_up_score: 0.0,
-                causal_contrib: 0.0,
-                relationship_contrib: 0.0,
-                signal_contrib: 0.0,
-            }
-        };
-
-        let action = &action_to_execute;
-        if true {
-            // Snapshot needs before execution for Hebbian update
-            let needs_before = world.beings.hot.needs[i];
-
-            execute_action(world, i, action);
-
-            // Record fire/build activity for memetic decay tracking
-            if action.action == Action::Build {
-                world.beings.hot.last_fire_tick[i] = world.tick;
-            }
-
-            // Hebbian update: fauna only, after action execution
-            if world.beings.hot.dna[i].diet != DietType::Omnivore
-                && world.beings.hot.states[i] != BeingState::Dead
-            {
-                let needs_after = world.beings.hot.needs[i];
-                crate::being::hebbian::hebbian_update(
-                    &mut world.beings.hot.fauna_params[i],
-                    action.action as u8,
-                    &needs_before,
-                    &needs_after,
-                    &world.beings.hot.dna[i],
-                );
-            }
-
-            // TD(0) brain update: humans only, after action execution
-            if world.beings.hot.dna[i].diet == DietType::Omnivore
-                && world.beings.hot.states[i] != BeingState::Dead
-            {
-                let needs_after = world.beings.hot.needs[i];
-                let pos = world.beings.hot.positions[i];
-                let cx = (pos[0] as u32).min(world.tensor.width - 1);
-                let cy = (pos[1] as u32).min(world.tensor.height - 1);
-
-                // Reconstruct old brain input (pre-execution state) for backprop
-                let old_brain_input: [f32; 14] = [
-                    needs_before[0], needs_before[1], needs_before[2],
-                    needs_before[3], needs_before[4], needs_before[5],
-                    world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy),  // Danger
-                    world.tensor.read(crate::world::tensor::TensorLayer::Odor, cx, cy),      // FoodTrail
-                    world.tensor.read(crate::world::tensor::TensorLayer::Heat, cx, cy),      // Comfort
-                    world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy) * 0.5, // Grief
-                    world.tensor.read(crate::world::tensor::TensorLayer::Heat, cx, cy) * 0.3,     // Celebration
-                    world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy) * 0.3, // Anger
-                    world.tensor.read(crate::world::tensor::TensorLayer::Odor, cx, cy) * 0.5,     // Scent
-                    world.climate.light_level(),
-                ];
-
-                // Recompute old forward pass to get hidden activations for backprop
-                let (old_q_values, old_hidden) = crate::being::brain::forward(
-                    &world.beings.hot.brain_weights[i],
-                    &old_brain_input,
-                );
-                let chosen_action_idx = action.action as usize;
-                if chosen_action_idx >= old_q_values.len() {
-                    continue;
-                }
-                let old_q_chosen = old_q_values[chosen_action_idx];
-
-                // New state input for next-state Q-values
-                let new_brain_input: [f32; 14] = [
-                    needs_after[0], needs_after[1], needs_after[2],
-                    needs_after[3], needs_after[4], needs_after[5],
-                    world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy),
-                    world.tensor.read(crate::world::tensor::TensorLayer::Odor, cx, cy),
-                    world.tensor.read(crate::world::tensor::TensorLayer::Heat, cx, cy),
-                    world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy) * 0.5,
-                    world.tensor.read(crate::world::tensor::TensorLayer::Heat, cx, cy) * 0.3,
-                    world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy) * 0.3,
-                    world.tensor.read(crate::world::tensor::TensorLayer::Odor, cx, cy) * 0.5,
-                    world.climate.light_level(),
-                ];
-                let (new_q_values, _) = crate::being::brain::forward(
-                    &world.beings.hot.brain_weights[i],
-                    &new_brain_input,
-                );
-
-                // Reward: improvement in lowest ACTIVE need for this species
-                let (_, min_before) = crate::being::data::lowest_active_need(&needs_before, &world.beings.hot.dna[i]);
-                let (_, min_after) = crate::being::data::lowest_active_need(&needs_after, &world.beings.hot.dna[i]);
-                let base_reward = min_after - min_before;
-
-                // Criminal penalty: if Crime signal is at this being's position and they just
-                // chose Hunt, they deposited it this tick (unprovoked murder). Apply massive penalty.
-                // Crime → Acoustic × 0.8; threshold scaled from 5.0 to 4.0
-                let crime_at_pos = world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy);
-                let reward = if crime_at_pos > 5.0
-                    && action.action == crate::being::actions::Action::Hunt
-                {
-                    -10000.0
-                } else {
-                    base_reward
-                };
-
-                // TD error: δ = reward + γ * max(new_q) - old_q[chosen]
-                let max_new_q = new_q_values.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                let td_error = reward + 0.95 * max_new_q - old_q_chosen;
-
-                crate::being::brain::td_update(
-                    &mut world.beings.hot.brain_weights[i],
-                    &old_hidden,
-                    &old_brain_input,
-                    chosen_action_idx,
-                    td_error,
-                    0.01,
-                );
-            }
-
-            // 5h. Record decision trace
-            let mut trigger_flags: u8 = 0;
-            if action.causal_contrib > 0.1 { trigger_flags |= 1; }
-            if action.relationship_contrib > 0.1 { trigger_flags |= 2; }
-            if action.signal_contrib > 0.1 { trigger_flags |= 4; }
-
-            let trace = crate::trace::DecisionTrace {
-                tick: world.tick,
-                being_id: i as u32,
-                lowest_need: find_lowest_need_idx(&world.beings.hot.needs[i]),
-                chosen_action: action.action as u8,
-                chosen_score: half::f16::from_f32(action.score),
-                runner_up_action: action.runner_up_action,
-                runner_up_score: half::f16::from_f32(action.runner_up_score),
-                dominant_emotion: find_dominant_emotion(&world.beings.hot.emotions[i]),
-                trigger_flags,
-            };
-            if let Some(ref mut ring) = world.beings.cold.traces[i] {
-                ring.push(trace);
-            }
-
-            // Set new pending action
-            world.beings.hot.pending_action[i] = action.action as u8;
-            world.beings.hot.pending_tick[i] = world.tick;
-            world.beings.hot.pending_needs[i] = world.beings.hot.needs[i];
-            // Context hash
-            let pos = world.beings.hot.positions[i];
-            let cx = (pos[0] as u32).min(world.tensor.width - 1);
-            let cy = (pos[1] as u32).min(world.tensor.height - 1);
-            let signal_levels = [
-                world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy),
-                world.tensor.read(crate::world::tensor::TensorLayer::Odor, cx, cy),
-                world.tensor.read(crate::world::tensor::TensorLayer::Heat, cx, cy),
-                world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy) * 0.5,
-                world.tensor.read(crate::world::tensor::TensorLayer::Heat, cx, cy) * 0.3,
-                world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy) * 0.3,
-                world.tensor.read(crate::world::tensor::TensorLayer::Odor, cx, cy) * 0.5,
+        // Cache new cognitive result
+        if cr.is_new {
+            world.beings.hot.last_cognitive_tick[i] = current_tick;
+            world.beings.hot.brain_output[i] = [
+                cr.output.velocity_x,
+                cr.output.velocity_y,
+                cr.output.push_force,
+                cr.output.pull_force,
+                cr.output.thermal_friction,
             ];
-            let biome = world.terrain.biome_at(cx, cy);
-            let nearby_count = world.spatial.count_in_radius(pos[0], pos[1], 8.0).min(255) as u8;
-            world.beings.hot.pending_context[i] = crate::being::context::compute_context_hash(
-                biome,
-                signal_levels,
-                nearby_count,
-                world.climate.day_phase(),
+            world.beings.hot.brain_noise[i] = cr.noise;
+        }
+
+        let caloric_before = world.beings.hot.caloric_energy[i];
+
+        apply_neural_output(world, i, &cr.output);
+
+        // REINFORCE learning: only on cognitive tick for cognitive beings
+        if cr.is_new
+            && world.beings.hot.dna[i].is_cognitive()
+            && world.beings.hot.states[i] != BeingState::Dead
+        {
+            // Update caloric history ring
+            let hist_idx = world.beings.hot.caloric_history_idx[i] as usize;
+            world.beings.hot.caloric_history[i][hist_idx] = caloric_before;
+            world.beings.hot.caloric_history_idx[i] = ((hist_idx + 1) % 10) as u8;
+
+            // Reward: current caloric vs oldest reading in the ring
+            let oldest_idx = (hist_idx + 1) % 10;
+            let oldest = world.beings.hot.caloric_history[i][oldest_idx];
+            let reward = world.beings.hot.caloric_energy[i] - oldest;
+
+            let raw_out = [
+                cr.output.velocity_x,
+                cr.output.velocity_y,
+                cr.output.push_force,
+                cr.output.pull_force,
+                cr.output.thermal_friction,
+            ];
+            crate::being::brain::continuous_update(
+                &mut world.beings.hot.brain_weights[i],
+                &cr.hidden,
+                &cr.input,
+                &raw_out,
+                &cr.noise,
+                reward,
+                0.005,
             );
         }
+
+        // Decision trace
+        let behavior_tag = infer_behavior_tag(&cr.output);
+        let trace = crate::trace::DecisionTrace {
+            tick: world.tick,
+            being_id: i as u32,
+            lowest_need: find_lowest_need_idx(&world.beings.hot.needs[i]),
+            behavior_tag,
+            chosen_score: half::f16::from_f32(0.0),
+            dominant_emotion: find_dominant_emotion(&world.beings.hot.emotions[i]),
+            trigger_flags: 0,
+        };
+        if let Some(ref mut ring) = world.beings.cold.traces[i] {
+            ring.push(trace);
+        }
+
+        // Update pending state for causal memory system
+        world.beings.hot.pending_action[i] = behavior_tag;
+        world.beings.hot.pending_tick[i] = world.tick;
+        world.beings.hot.pending_needs[i] = world.beings.hot.needs[i];
+        world.beings.hot.current_action[i] = behavior_tag;
+
+        // Context hash (for causal memory association)
+        let pos = world.beings.hot.positions[i];
+        let cx = (pos[0] as u32).min(world.tensor.width - 1);
+        let cy = (pos[1] as u32).min(world.tensor.height - 1);
+        let signal_levels = [
+            world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy),
+            world.tensor.read(crate::world::tensor::TensorLayer::Odor, cx, cy),
+            world.tensor.read(crate::world::tensor::TensorLayer::Heat, cx, cy),
+            world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy) * 0.5,
+            world.tensor.read(crate::world::tensor::TensorLayer::Heat, cx, cy) * 0.3,
+            world.tensor.read(crate::world::tensor::TensorLayer::Acoustic, cx, cy) * 0.3,
+            world.tensor.read(crate::world::tensor::TensorLayer::Odor, cx, cy) * 0.5,
+        ];
+        let biome = world.terrain.biome_at(cx, cy);
+        let nearby_count = world.spatial.count_in_radius(pos[0], pos[1], 8.0).min(255) as u8;
+        world.beings.hot.pending_context[i] = crate::being::context::compute_context_hash(
+            biome,
+            signal_levels,
+            nearby_count,
+            world.climate.day_phase(),
+        );
     }
 
-    // V61: Relationship law overrides — applied after action execution each tick
+    // Relationship constraint overrides — applied after action execution each tick
 
     // no_memory: wipe all relationship slots (blocked by perfect_memory)
-    if world.laws.no_memory && !world.laws.perfect_memory {
+    if world.constraints.no_memory && !world.constraints.perfect_memory {
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] == BeingState::Dead { continue; }
             world.beings.cold.relationships[i].count = 0;
         }
     }
 
-    // universal_trust: force all relationship trust to 1.0
-    if world.laws.universal_trust {
-        for i in 0..world.beings.hot.count {
-            if world.beings.hot.states[i] == BeingState::Dead { continue; }
-            let count = world.beings.cold.relationships[i].count as usize;
-            for slot in world.beings.cold.relationships[i].slots[..count].iter_mut() {
-                slot.trust = 1.0;
-            }
-        }
-    }
+    // trust_flood and trust_drain are handled by apply_sustained_injections via Culture tensor
 
-    // no_trust: force all relationship trust to 0.0
-    if world.laws.no_trust {
-        for i in 0..world.beings.hot.count {
-            if world.beings.hot.states[i] == BeingState::Dead { continue; }
-            let count = world.beings.cold.relationships[i].count as usize;
-            for slot in world.beings.cold.relationships[i].slots[..count].iter_mut() {
-                slot.trust = 0.0;
-            }
-        }
-    }
-
-    // V55 §5: Kinetic loop — lightweight every-tick push toward cached target
-    {
-        let tw = world.terrain.width as f32;
-        let th = world.terrain.height as f32;
-        for i in 0..being_count {
-            if world.beings.hot.states[i] != BeingState::Awake { continue; }
-            if world.beings.hot.flee_ticks[i] > 0 { continue; }
-            if world.beings.hot.last_cognitive_tick[i] == world.tick { continue; }
-            let target = world.beings.hot.target_pos[i];
-            let pos = world.beings.hot.positions[i];
-            let dx = target[0] - pos[0];
-            let dy = target[1] - pos[1];
-            let dist_sq = dx * dx + dy * dy;
-            if dist_sq > 0.25 {
-                let dist = dist_sq.sqrt();
-                let speed = 0.05;
-                let vx = (dx / dist) * speed;
-                let vy = (dy / dist) * speed;
-                let new_x = (pos[0] + vx).clamp(0.0, tw - 1.0);
-                let new_y = (pos[1] + vy).clamp(0.0, th - 1.0);
-                if !world.terrain.is_water_f(new_x, new_y) {
-                    world.beings.hot.positions[i] = [new_x, new_y];
-                    world.beings.hot.velocities[i] = [vx, vy];
-                } else {
-                    world.beings.hot.velocities[i] = [0.0, 0.0];
-                }
-            } else {
-                world.beings.hot.velocities[i] = [0.0, 0.0];
-            }
-        }
-    }
-
-    // 5f-1b. Spatial separation: gentle anti-piling for humans only
-    // V55: O(N) via SpatialIndex queries (replaces O(N²) brute force)
+    // 5f-1b. Spatial separation: gentle anti-piling for cognitive beings only
+    // O(N) via SpatialIndex queries
     {
         let separation_radius = 0.4f32;
         let tw = world.terrain.width as f32;
@@ -1036,7 +869,7 @@ pub fn tick(world: &mut World) {
 
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] != BeingState::Awake { continue; }
-            if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; } // humans only
+            if !world.beings.hot.dna[i].is_cognitive() { continue; } // cognitive beings only
 
             let pos_i = world.beings.hot.positions[i];
             let nearby = world.spatial.query_radius(pos_i[0], pos_i[1], separation_radius);
@@ -1046,7 +879,7 @@ pub fn tick(world: &mut World) {
 
             for j in nearby {
                 if j == i { continue; }
-                if world.beings.hot.dna[j].diet != DietType::Omnivore { continue; } // humans only
+                if !world.beings.hot.dna[j].is_cognitive() { continue; } // cognitive beings only
 
                 let pos_j = world.beings.hot.positions[j];
                 let mut dx = pos_i[0] - pos_j[0];
@@ -1099,7 +932,7 @@ pub fn tick(world: &mut World) {
             continue;
         }
         // Fauna don't form causal memories (no purpose/belonging reasoning)
-        if world.beings.hot.dna[i].diet != DietType::Omnivore {
+        if !world.beings.hot.dna[i].is_cognitive() {
             continue;
         }
         let prev_pending_action = world.beings.hot.pending_action[i];
@@ -1151,7 +984,7 @@ pub fn tick(world: &mut World) {
         if world.beings.hot.states[i] == BeingState::Dead {
             continue;
         }
-        if world.beings.hot.dna[i].diet != DietType::Omnivore {
+        if !world.beings.hot.dna[i].is_cognitive() {
             continue;
         }
         crate::being::memes::tick_memes(&mut world.beings.cold.meme_slots[i]);
@@ -1167,7 +1000,7 @@ pub fn tick(world: &mut World) {
         const MASSIVE_DROP_THRESHOLD: f32 = 0.3;
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] == BeingState::Dead { continue; }
-            if world.beings.hot.dna[i].diet != crate::being::dna::DietType::Omnivore { continue; }
+            if !world.beings.hot.dna[i].is_cognitive() { continue; }
             let prev_hunger = world.beings.hot.needs_prev[i][NEED_HUNGER];
             let cur_hunger = world.beings.hot.needs[i][NEED_HUNGER];
             let improvement = cur_hunger - prev_hunger; // positive = hunger improved
@@ -1185,7 +1018,7 @@ pub fn tick(world: &mut World) {
     if world.tick % 10 == 0 {
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] != BeingState::Awake { continue; }
-            if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; }
+            if !world.beings.hot.dna[i].is_cognitive() { continue; }
 
             let pos = world.beings.hot.positions[i];
             let sx = (pos[0] as u32).min(world.tensor.width - 1);
@@ -1205,7 +1038,7 @@ pub fn tick(world: &mut World) {
     if world.tick % 5 == 0 {
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] != BeingState::Awake { continue; }
-            if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; }
+            if !world.beings.hot.dna[i].is_cognitive() { continue; }
 
             let pos = world.beings.hot.positions[i];
             let sx = (pos[0] as u32).min(world.tensor.width - 1);
@@ -1220,8 +1053,8 @@ pub fn tick(world: &mut World) {
     // 5h-3. Wave interference warfare: cultural dissonance at borders
     // V70: Danger sequestered to physical damage/predation only — dissonance no longer deposits Danger.
 
-    // 6. Birth checks (Phase 6: no_reproduction law)
-    if !world.laws.no_reproduction {
+    // 6. Birth checks (Phase 6: no_reproduction constraint)
+    if !world.constraints.no_reproduction {
         process_births(world);
     }
 
@@ -1230,7 +1063,7 @@ pub fn tick(world: &mut World) {
         if world.beings.hot.states[i] == BeingState::Dead {
             continue;
         }
-        if world.beings.hot.dna[i].diet != DietType::Omnivore {
+        if !world.beings.hot.dna[i].is_cognitive() {
             continue;
         }
         let all_satisfied = world.beings.hot.needs[i].iter().all(|&n| n > 0.7);
@@ -1289,7 +1122,7 @@ pub fn tick(world: &mut World) {
         if avg_danger > 2.0 {
             for i in 0..world.beings.hot.count {
                 if world.beings.hot.states[i] == BeingState::Dead { continue; }
-                if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; }
+                if !world.beings.hot.dna[i].is_cognitive() { continue; }
 
                 let pos = world.beings.hot.positions[i];
                 let bx = (pos[0] as u32).min(world.tensor.width - 1);
@@ -1298,12 +1131,10 @@ pub fn tick(world: &mut World) {
 
                 if local_danger > 1.5 {
                     if let Some(geno) = world.beings.cold.genotypes.get_mut(i) {
-                        geno.q_baselines[crate::being::actions::Action::Explore as usize] =
-                            (geno.q_baselines[crate::being::actions::Action::Explore as usize] - 0.3)
-                                .max(-5.0);
-                        geno.q_baselines[crate::being::actions::Action::Build as usize] =
-                            (geno.q_baselines[crate::being::actions::Action::Build as usize] + 0.2)
-                                .min(5.0);
+                        // Trauma suppresses exploration (velocity outputs) and boosts building (push)
+                        geno.output_baselines[0] = (geno.output_baselines[0] - 0.3).max(-5.0); // suppress vx
+                        geno.output_baselines[1] = (geno.output_baselines[1] - 0.3).max(-5.0); // suppress vy
+                        geno.output_baselines[2] = (geno.output_baselines[2] + 0.2).min(5.0);  // boost push/build
                     }
                 }
             }
@@ -1346,23 +1177,23 @@ pub fn tick(world: &mut World) {
         }
 
         // Memetic decay: beings who haven't built/used fire in 50 years lose the ability
-        // V61: perfect_memory prevents this decay
-        if !world.laws.perfect_memory {
+        // perfect_memory constraint prevents this decay
+        if !world.constraints.perfect_memory {
         let decay_threshold = 1_440_000u32; // 50 years in ticks (28800 * 50)
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] == BeingState::Dead { continue; }
-            if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; } // humans only
+            if !world.beings.hot.dna[i].is_cognitive() { continue; } // cognitive beings only
 
             let last_fire = world.beings.hot.last_fire_tick[i];
             if last_fire > 0 && world.tick.saturating_sub(last_fire) > decay_threshold {
-                // Dark Age: zero the Build action Q-weight in the brain
-                // Brain layout: W1(112) + b1(8) + W2(176) + b2(22) = 318 total
-                // b2 starts at index 296, Build = Action index 16, so b2[16] = index 312
-                world.beings.hot.brain_weights[i][312] = -5.0; // Strong negative bias = effectively disabled
+                // Dark Age: suppress push_force output bias (b2[2] = index 162 in 165-weight brain)
+                // Brain layout: W1(8×14=112) + b1(8) + W2(5×8=40) + b2(5) = 165 total
+                // b2 starts at index 160, push_force = output index 2, so b2[2] = index 162
+                world.beings.hot.brain_weights[i][162] = -5.0; // Strong negative push bias = won't build
                 world.beings.hot.last_fire_tick[i] = 0; // Reset so we don't keep decaying
             }
         }
-        } // end if !world.laws.perfect_memory
+        } // end if !world.constraints.perfect_memory
     }
 
     // V55 §2: Recalculate total energy every 100 ticks to keep conservation gate accurate.
@@ -1420,7 +1251,7 @@ pub fn tick(world: &mut World) {
         }
 
         // Construction update: place structures based on settlement age
-        if !world.laws.no_construction {
+        if !world.constraints.no_construction {
             let built = crate::sim::settlement::update_settlement_construction(
                 &mut world.settlements,
                 &mut world.terrain,
@@ -1445,7 +1276,7 @@ pub fn tick(world: &mut World) {
             }
         }
 
-        if !world.laws.no_kingdoms {
+        if !world.constraints.no_kingdoms {
             let settlements = world.settlements.clone();
             crate::sim::kingdom::update_kingdoms(
                 &settlements,
@@ -1455,7 +1286,7 @@ pub fn tick(world: &mut World) {
                 &mut world.events,
                 world.tick,
                 &mut world.rng,
-                world.laws.no_kingdoms,
+                world.constraints.no_kingdoms,
             );
         }
     }
@@ -1553,7 +1384,7 @@ pub fn tick(world: &mut World) {
 
         for i in 0..world.beings.hot.count {
             if world.beings.hot.states[i] != BeingState::Awake { continue; }
-            if world.beings.hot.dna[i].diet != DietType::Omnivore { continue; } // humans only
+            if !world.beings.hot.dna[i].is_cognitive() { continue; } // cognitive beings only
 
             let pos = world.beings.hot.positions[i];
             let x = (pos[0] as u32).min(tw - 1);
@@ -1693,8 +1524,8 @@ fn process_births(world: &mut World) {
         if world.beings.hot.states[i] != BeingState::Awake {
             continue;
         }
-        // Only humans reproduce through this system
-        if world.beings.hot.dna[i].diet != DietType::Omnivore {
+        // Only cognitive beings reproduce through this system
+        if !world.beings.hot.dna[i].is_cognitive() {
             continue;
         }
         if world.beings.life_phase(i) != LifePhase::Adult {
@@ -1719,7 +1550,7 @@ fn process_births(world: &mut World) {
             }
             if partner >= world.beings.hot.count
                 || world.beings.hot.states[partner] != BeingState::Awake
-                || world.beings.hot.dna[partner].diet != DietType::Omnivore
+                || !world.beings.hot.dna[partner].is_cognitive()
                 || world.beings.life_phase(partner) != LifePhase::Adult
             {
                 continue;

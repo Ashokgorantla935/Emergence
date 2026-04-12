@@ -2,7 +2,6 @@
 /// Run every 600 ticks. Sample-based O(1) leader detection (Sawyer constraint 8).
 
 use crate::being::data::{Beings, BeingState, LifePhase, TRAIT_BOLD, TRAIT_SOCIAL};
-use crate::being::dna::DietType;
 use crate::sim::settlement::Settlement;
 use crate::sim::world_state::{Event, EventLog, EventType};
 
@@ -67,7 +66,7 @@ pub fn find_leader(
 
     for &candidate in &settlement.beings {
         if beings.hot.states[candidate] == BeingState::Dead { continue; }
-        if beings.hot.dna[candidate].diet != DietType::Omnivore { continue; }
+        if !beings.hot.dna[candidate].is_cognitive() { continue; }
         if beings.life_phase(candidate) == LifePhase::Youth { continue; }
 
         let mut trust_sum = 0.0f32;

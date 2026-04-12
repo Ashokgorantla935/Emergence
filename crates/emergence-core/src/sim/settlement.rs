@@ -76,7 +76,6 @@ pub fn detect_settlements(
     existing: &mut Vec<Settlement>,
 ) {
     use crate::being::data::BeingState;
-    use crate::being::dna::DietType;
 
     const CLUSTER_RADIUS: f32 = 8.0;
     const COMFORT_THRESHOLD: f32 = 0.15; // V70: structural stigmergy lowers bar — presence of structure implies commitment
@@ -87,7 +86,7 @@ pub fn detect_settlements(
     let candidates: Vec<usize> = (0..beings.hot.count)
         .filter(|&i| {
             if beings.hot.states[i] == BeingState::Dead { return false; }
-            if beings.hot.dna[i].diet != DietType::Omnivore { return false; }
+            if !beings.hot.dna[i].is_cognitive() { return false; }
             let [px, py] = beings.hot.positions[i];
             if px <= 0.0 || py <= 0.0 || px >= w || py >= h { return false; }
             // V70: structural stigmergy — only beings bonded to a built structure qualify
@@ -207,7 +206,7 @@ pub fn detect_settlements(
         );
         let full_pop: Vec<usize> = all_in_range.into_iter()
             .filter(|&i| beings.hot.states[i] != BeingState::Dead
-                && beings.hot.dna[i].diet == DietType::Omnivore)
+                && beings.hot.dna[i].is_cognitive())
             .collect();
         if full_pop.len() > settlement.beings.len() {
             settlement.beings = full_pop;

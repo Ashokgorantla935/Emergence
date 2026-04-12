@@ -1,5 +1,4 @@
 use super::data::*;
-use crate::being::dna::DietType;
 use crate::world::climate::Climate;
 
 pub fn decay_needs(beings: &mut Beings, climate: &Climate) {
@@ -19,7 +18,7 @@ pub fn decay_needs(beings: &mut Beings, climate: &Climate) {
         }
 
         let dna = beings.hot.dna[i];
-        let is_omnivore = dna.diet == DietType::Omnivore;
+        let is_omnivore = dna.is_cognitive();
 
         if beings.hot.states[i] == BeingState::Sleeping {
             // Sleeping: rest increases, other needs still decay

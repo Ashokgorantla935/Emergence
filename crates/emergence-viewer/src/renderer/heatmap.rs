@@ -128,6 +128,8 @@ impl HeatmapRenderer {
             TensorLayer::Acoustic =>    (1.0, 0.0, 0.0), // red: danger/noise
             TensorLayer::Odor =>        (0.0, 1.0, 0.0), // green: food/scent
             TensorLayer::MicroBiomass =>(0.2, 0.8, 0.2), // teal-green: fertility
+            TensorLayer::Moisture =>    (0.0, 0.5, 1.0), // blue: water/moisture
+            TensorLayer::Culture =>     (0.8, 0.2, 1.0), // purple: culture/meme stigmergy
         };
 
         let mut pixels = Vec::with_capacity((self.width * self.height * 4) as usize);

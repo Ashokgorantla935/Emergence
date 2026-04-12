@@ -158,7 +158,46 @@ pub fn tick(world: &mut World) {
         world.tensor.set_global_light(raw_light.max(0.6));
     }
 
+    // 3b-moisture. V76 §5: Weather equilibrium — precipitation, evaporation, and gravity flow.
+    {
+        use crate::world::tensor::TensorLayer;
+        use crate::world::climate::WeatherKind;
+
+        // Phase 1: Precipitation — rain adds moisture uniformly each tick
+        let is_raining = world.climate.active_weather.as_ref()
+            .map(|w| matches!(w.kind, WeatherKind::Rain | WeatherKind::Storm))
+            .unwrap_or(false)
+            || world.tick % 3600 < 600; // periodic fallback: 600-tick rain window per day cycle
+        if is_raining {
+            let tw = world.terrain.width;
+            for y in 0..world.terrain.height {
+                for x in 0..tw {
+                    world.tensor.deposit(TensorLayer::Moisture, x, y, 0.1);
+                }
+            }
+        }
+
+        // Phase 2: Evaporation — heat aggressively dries moisture
+        {
+            let size = (world.tensor.width * world.tensor.height) as usize;
+            let heat_li = TensorLayer::Heat as usize;
+            let moist_li = TensorLayer::Moisture as usize;
+            // Split borrow: snapshot heat values then apply to moisture
+            let heat_vals: Vec<f32> = world.tensor.layers[heat_li].clone();
+            for i in 0..size {
+                let heat = heat_vals[i];
+                let evap_rate = (0.01 * (1.0 + heat)).min(1.0);
+                world.tensor.layers[moist_li][i] *= 1.0 - evap_rate;
+            }
+        }
+
+        // Phase 3: Gravity flow — moisture flows downhill
+        let elevation = world.terrain.elevation.clone();
+        world.tensor.flow_moisture_downhill(&elevation);
+    }
+
     // 3b-biomass. Micro-biomass fluid: forests and grasslands grow biomass every 30 ticks.
+    // V76 §3: Growth is moisture × biome_fertility — valleys with water → lush, dry mountains → barren.
     if world.tick % 30 == 0 {
         use crate::world::tensor::TensorLayer;
         use crate::world::terrain::Biome;
@@ -167,10 +206,18 @@ pub fn tick(world: &mut World) {
             for x in 0..tw {
                 let idx = (y * tw + x) as usize;
                 let biome = world.terrain.biome[idx];
-                if biome == Biome::Forest || biome == Biome::Grassland {
-                    let current = world.tensor.read(TensorLayer::MicroBiomass, x, y);
-                    if current < 1.0 {
-                        world.tensor.deposit(TensorLayer::MicroBiomass, x, y, 0.001);
+                let biome_fertility = match biome {
+                    Biome::Forest => 1.0f32,
+                    Biome::Grassland => 0.7,
+                    Biome::Wetland => 1.2,
+                    _ => 0.1,
+                };
+                let moisture = world.tensor.read(TensorLayer::Moisture, x, y);
+                let current = world.tensor.read(TensorLayer::MicroBiomass, x, y);
+                if current < 1.0 {
+                    let growth = moisture * biome_fertility * 0.0001;
+                    if growth > 0.0 {
+                        world.tensor.deposit(TensorLayer::MicroBiomass, x, y, growth);
                     }
                 }
             }
@@ -1113,6 +1160,26 @@ pub fn tick(world: &mut World) {
 
     // 5g. Deposit emotion signals
     deposit_emotion_signals(&world.beings, &mut world.tensor);
+
+    // 5g-1. V76 §4: Memetic stigmergy — starvation recovery spikes Culture tensor.
+    // When a being's hunger improves massively in one tick (ate after near-starvation), deposit culture.
+    {
+        use crate::world::tensor::TensorLayer;
+        const MASSIVE_DROP_THRESHOLD: f32 = 0.3;
+        for i in 0..world.beings.hot.count {
+            if world.beings.hot.states[i] == BeingState::Dead { continue; }
+            if world.beings.hot.dna[i].diet != crate::being::dna::DietType::Omnivore { continue; }
+            let prev_hunger = world.beings.hot.needs_prev[i][NEED_HUNGER];
+            let cur_hunger = world.beings.hot.needs[i][NEED_HUNGER];
+            let improvement = cur_hunger - prev_hunger; // positive = hunger improved
+            if improvement > MASSIVE_DROP_THRESHOLD {
+                let pos = world.beings.hot.positions[i];
+                let gx = (pos[0] as u32).min(world.tensor.width - 1);
+                let gy = (pos[1] as u32).min(world.tensor.height - 1);
+                world.tensor.deposit(TensorLayer::Culture, gx, gy, 50.0);
+            }
+        }
+    }
 
     // 5h-1. Chemical agriculture: beings deposit Fertilization near home
     // Fertilization → MicroBiomass × 1.0

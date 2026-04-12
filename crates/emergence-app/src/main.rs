@@ -2580,6 +2580,10 @@ impl ApplicationHandler for App {
                                 ("LIGHT", "F4 — Light level. High = day/campfire; low = night/shadow.", egui::Color32::from_rgb(255, 255, 160)),
                             TensorLayer::MicroBiomass =>
                                 ("MICRO BIOMASS", "F5 — Soil fertility from settlements. Boosts food regrowth.", egui::Color32::from_rgb(50, 200, 50)),
+                            TensorLayer::Moisture =>
+                                ("MOISTURE", "F6 — Water/fluid. Flows downhill, accumulates in valleys. Drives flora growth.", egui::Color32::from_rgb(0, 130, 255)),
+                            TensorLayer::Culture =>
+                                ("CULTURE", "F7 — Memetic stigmergy. Spikes on starvation recovery. Boosts farming.", egui::Color32::from_rgb(180, 50, 230)),
                         };
 
                         egui::Area::new(egui::Id::new("heatmap_legend"))

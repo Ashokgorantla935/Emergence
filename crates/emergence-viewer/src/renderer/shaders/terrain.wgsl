@@ -79,7 +79,9 @@ fn vs_main(vertex: VertexInput, inst: InstanceInput) -> VertexOutput {
     );
 
     // V75 §1.3: Terrain extrusion — Y for visual height, Z for depth sorting.
-    let z_displacement = inst.elevation * MAX_MOUNTAIN_HEIGHT * camera.zoom_factor;
+    // V76: Exponential extrusion — pow(elevation, 4.0) makes plains flat, mountains tower
+    let exponential_scale = pow(inst.elevation, 4.0);
+    let z_displacement = exponential_scale * MAX_MOUNTAIN_HEIGHT * camera.zoom_factor;
     out.clip_position = camera.view_proj * vec4<f32>(world.x, world.y + z_displacement, z_displacement, 1.0);
 
     // Tile-local UV interpolates perfectly [0,1] across the quad — no seam artifacts

@@ -474,6 +474,16 @@ pub fn score_actions(
             }
         }
 
+        // V76 §4: High culture tiles boost learned food-production and cooperation behaviors.
+        // Farm is a post-Boltzmann override (index 24 > q_values len 22) — boosted in Farm override block below.
+        {
+            let culture = tensor.read(TensorLayer::Culture, cx, cy);
+            if culture > 10.0 {
+                q_values[Action::Build as usize] *= 3.0;
+                q_values[Action::SeekFood as usize] *= 2.0;
+            }
+        }
+
         // ── Migration pressure: flooding forces inland migration ─────────────────────────────
         let cell_idx_usize = (cy as usize) * (terrain.width as usize) + (cx as usize);
         let is_on_water = terrain.biome[cell_idx_usize] == Biome::Water;
@@ -832,7 +842,10 @@ pub fn score_actions(
                             && terrain.structure[cell_idx] == 0;
                         if on_grassland && no_structure {
                             let food_sec = needs[NEED_FOOD_SECURITY];
-                            let farm_score = (1.0 - food_sec) * 2.0 + 1.0;
+                            // V76 §4: High culture tiles multiply Farm drive 10x
+                            let culture = tensor.read(TensorLayer::Culture, cx, cy);
+                            let culture_mult = if culture > 10.0 { 10.0 } else { 1.0 };
+                            let farm_score = ((1.0 - food_sec) * 2.0 + 1.0) * culture_mult;
                             if farm_score > chosen_q {
                                 let signal_levels = local.values;
                                 let biome = terrain.biome_at(cx, cy);
@@ -2485,6 +2498,8 @@ mod tests {
 
     #[test]
     fn test_scared_being_flees() {
+        use crate::being::dna::BiologicalDNA;
+
         let config = test_config();
         let terrain = Terrain::generate(&config);
         let resources = ResourceLayer::new(&terrain);
@@ -2494,26 +2509,38 @@ mod tests {
         let mut beings = Beings::new();
         let mut rng = fastrand::Rng::with_seed(42);
 
+        // Find a land position NOT adjacent to water by biome (near-water triggers Cluster+200).
+        // The migration override checks terrain.biome == Biome::Water, not terrain.water[].
         let mut spawn_pos = [32.0, 32.0];
-        for y in 0..64u32 {
-            for x in 0..64u32 {
-                if !terrain.is_water(x, y) {
+        'outer: for y in 2..62u32 {
+            for x in 2..62u32 {
+                let w = terrain.width as usize;
+                let not_water = |bx: usize, by: usize| terrain.biome[by * w + bx] != crate::world::terrain::Biome::Water;
+                if not_water(x as usize, y as usize)
+                    && not_water(x as usize - 1, y as usize)
+                    && not_water(x as usize + 1, y as usize)
+                    && not_water(x as usize, y as usize - 1)
+                    && not_water(x as usize, y as usize + 1)
+                {
                     spawn_pos = [x as f32, y as f32];
-                    break;
+                    break 'outer;
                 }
             }
         }
 
+        // Use a large herbivore (Deer) — goes through the heuristic path which explicitly
+        // scores Flee from danger. Omnivores use the MLP path where low safety triggers
+        // Build (+50 Maslow override) instead, overriding Flee.
         let personality = [-0.8, 0.0, 0.0, 0.0, 0.5]; // timid
-        beings.spawn(spawn_pos, personality, 100000, [u32::MAX, u32::MAX]);
+        beings.spawn_with_dna(spawn_pos, personality, 100000, [u32::MAX, u32::MAX], BiologicalDNA::DEER);
 
         // Set fear high, safety low
         beings.hot.emotions[0][EMO_FEAR] = 0.9;
         beings.hot.needs[0][NEED_SAFETY] = 0.1;
 
-        // Deposit danger signal into tensor Acoustic channel
+        // Deposit danger signal at being's exact position (heuristic path reads at exact cell).
         let mut tensor = crate::world::tensor::TensorGrid::new(64, 64);
-        tensor.deposit(TensorLayer::Acoustic, spawn_pos[0] as u32 + 2, spawn_pos[1] as u32, 5.0);
+        tensor.deposit(TensorLayer::Acoustic, spawn_pos[0] as u32, spawn_pos[1] as u32, 5.0);
 
         let knowledge = crate::world::knowledge::KnowledgeGrid::new(64, 64);
         let laws = crate::sim::world_state::WorldLaws::default();

@@ -1267,6 +1267,30 @@ impl ApplicationHandler for App {
         }
         self.profile_accum.camera_ms += camera_t.elapsed().as_secs_f32() * 1000.0;
 
+        // Push camera frustum into core for chunk dormancy (one-way data flow).
+        if let Some(ref world) = self.world {
+            if let Ok(mut w) = world.write() {
+                let half_h = self.camera.zoom / 2.0;
+                let half_w = half_h * self.camera.aspect;
+                let world_min_x = self.camera.position[0] - half_w;
+                let world_max_x = self.camera.position[0] + half_w;
+                let world_min_y = self.camera.position[1] - half_h;
+                let world_max_y = self.camera.position[1] + half_h;
+                let chunk_size = emergence_core::CHUNK_SIZE as f32;
+                let padding = 2usize;
+                let min_cx = ((world_min_x / chunk_size).floor() as usize).saturating_sub(padding);
+                let max_cx = ((world_max_x / chunk_size).ceil() as usize).saturating_add(padding);
+                let min_cy = ((world_min_y / chunk_size).floor() as usize).saturating_sub(padding);
+                let max_cy = ((world_max_y / chunk_size).ceil() as usize).saturating_add(padding);
+                w.chunks.set_viewport(emergence_core::ActiveViewport {
+                    min_chunk_x: min_cx,
+                    max_chunk_x: max_cx,
+                    min_chunk_y: min_cy,
+                    max_chunk_y: max_cy,
+                });
+            }
+        }
+
         // Decay flash alpha (~10 ticks at 60fps ≈ 160ms)
         if self.flash_alpha > 0.0 {
             self.flash_alpha = (self.flash_alpha - dt * 6.0).max(0.0);

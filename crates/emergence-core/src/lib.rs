@@ -10,7 +10,7 @@ pub use being::dna::{BiologicalDNA, DietType};
 pub use world::matter::MatterProperties;
 pub use world::object_grid::{ObjectGrid, WorldItem};
 pub use world::tensor::{TensorGrid, TensorLayer, TENSOR_LAYER_COUNT};
-pub use sim::chunks::{ChunkGrid, ChunkState, CHUNK_SIZE};
+pub use sim::chunks::{ActiveViewport, ChunkGrid, ChunkState, CHUNK_SIZE};
 
 use being::data::Beings;
 use being::lifecycle::generate_initial_personality;

@@ -245,6 +245,9 @@ pub fn tick(world: &mut World) {
         world.beings.hot.count,
     );
 
+    // 4c. Apply frustum-based chunk dormancy (viewport pushed each frame by viewer).
+    world.chunks.update_dormancy();
+
     // 5. Being updates
 
     // 5a-c. Decay needs, emotions (sequential for now, operates on mutable beings)
